@@ -20,9 +20,10 @@ BUILD: dict[str, Callable[[Path], Path]] = {
     "coco": synth.build_coco,
     "yolo": synth.build_yolo,
     "voc": synth.build_voc,
+    "cvat_xml": synth.build_cvat_xml,
     "imagefolder": synth.build_imagefolder,
 }
-DETECTION = ("coco", "yolo", "voc")
+DETECTION = ("coco", "yolo", "voc", "cvat_xml")
 
 _COCO_LOSS = {
     "annotations.is_crowd": 1,
@@ -43,17 +44,34 @@ _VOC_LOSS = {
     "images.source.folder": 4,
     "images.source.segmented": 4,
 }
+_CVAT_LOSS = {
+    "annotations.attributes": 1,
+    "annotations.source.z_order": 4,
+    "categories.attributes": 3,
+    "images.source.id": 4,
+}
 # (source format, target format) -> dropped column counts for the synthetic fixtures
 MATRIX: dict[tuple[str, str], dict[str, int]] = {
     ("coco", "coco"): {},
     ("coco", "yolo"): _COCO_LOSS,
     ("coco", "voc"): _COCO_LOSS,
+    ("coco", "cvat_xml"): _COCO_LOSS,
     ("yolo", "coco"): {},
     ("yolo", "yolo"): {},
     ("yolo", "voc"): {},
+    ("yolo", "cvat_xml"): {},
     ("voc", "coco"): _VOC_LOSS,
     ("voc", "yolo"): _VOC_LOSS,
     ("voc", "voc"): {},
+    # VOC attributes are carried (as text); the other columns are lost as for COCO and YOLO
+    ("voc", "cvat_xml"): {
+        **{k: v for k, v in _VOC_LOSS.items() if k != "annotations.attributes"},
+        "annotations.attributes_stringified": 4,
+    },
+    ("cvat_xml", "coco"): {**_CVAT_LOSS, "annotations.occluded": 4},
+    ("cvat_xml", "yolo"): {**_CVAT_LOSS, "annotations.occluded": 4},
+    ("cvat_xml", "voc"): _CVAT_LOSS,
+    ("cvat_xml", "cvat_xml"): {},
 }
 
 

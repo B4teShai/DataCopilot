@@ -22,6 +22,10 @@ from datacopilot.core.errors import FormatError
 MAX_JSON_BYTES = 256 * 1024 * 1024
 MAX_XML_BYTES = 8 * 1024 * 1024
 MAX_TEXT_BYTES = 8 * 1024 * 1024
+MAX_CVAT_BYTES = 64 * 1024 * 1024
+"""One CVAT export document (a dataset's boxes in one file); the parser also caps its elements."""
+MAX_LABEL_STUDIO_BYTES = 64 * 1024 * 1024
+"""One Label Studio JSON export; deeper structure limits are applied after parsing."""
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".gif"})
 _CHUNK = 1024 * 1024
 _BMP_INFO_HEADERS = frozenset({40, 52, 56, 64, 108, 124})

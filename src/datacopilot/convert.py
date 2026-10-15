@@ -80,11 +80,16 @@ def ingest(
     group_by: str | None = None,
     name: str | None = None,
     limits: StoreLimits | None = None,
+    strict: bool = False,
 ) -> IngestResult:
     """Read ``source`` with the named reader, validate, and write a new ``dataset.dcp``.
 
+    With ``strict`` any value or row the reader could not carry into the data model (an
+    unsupported shape, a skipped file) fails the ingest before anything is written.
+
     Raises:
         FormatError, ValidationError, StoreError: nothing is written when any of them occurs.
+        ConversionLossError: ``strict`` and the reader dropped or skipped anything.
         ValueError: for an invalid ``group_by`` expression.
     """
     started = time.perf_counter()
@@ -113,15 +118,6 @@ def ingest(
             )
         seen[image.image_id] = label
     validate_tables(images, result.annotations, result.categories, task=result.task)
-    store = DatasetStore.create(
-        out,
-        images,
-        result.annotations,
-        result.categories,
-        name=name or result.name,
-        task=result.task,
-        limits=limits,
-    )
     rows = len(images) + len(result.annotations)
     report = ConversionReport(
         source_format=format,
@@ -130,6 +126,18 @@ def ingest(
         rows_written=rows,
         dropped=result.dropped,
         skipped=result.skipped,
+    )
+    if strict and not report.is_lossless():
+        _log_loss(report)
+    enforce_strict(report, strict=strict)
+    store = DatasetStore.create(
+        out,
+        images,
+        result.annotations,
+        result.categories,
+        name=name or result.name,
+        task=result.task,
+        limits=limits,
     )
     manifest = store.manifest()
     _log_loss(report)

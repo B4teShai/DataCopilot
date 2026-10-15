@@ -79,11 +79,17 @@ def ingest(
         ),
     ] = None,
     name: Annotated[str | None, typer.Option(help="Dataset name (default: input name).")] = None,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict", help="Fail (nothing is written) if the reader skipped or dropped anything."
+        ),
+    ] = False,
 ) -> None:
     """Convert a dataset into a versioned dataset.dcp directory and print its version.
 
-    Exit codes: 0 success; 1 unreadable or invalid input, unknown format, output exists;
-    2 bad option or configuration.
+    Exit codes: 0 success; 1 unreadable or invalid input, unknown format, output exists, or
+    --strict with skipped or dropped input (nothing is written); 2 bad option or configuration.
     """
     from datacopilot import convert
     from datacopilot.store import StoreLimits
@@ -99,7 +105,9 @@ def ingest(
     limits = StoreLimits(
         max_rows=settings.max_table_rows, max_uncompressed_bytes=settings.max_table_bytes
     )
-    result = convert.ingest(path, format, output, group_by=group_by, name=name, limits=limits)
+    result = convert.ingest(
+        path, format, output, group_by=group_by, name=name, limits=limits, strict=strict
+    )
     typer.echo(result.manifest.version)
 
 

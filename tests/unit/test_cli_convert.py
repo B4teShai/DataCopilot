@@ -359,7 +359,7 @@ def test_formats_lists_every_builtin_format_with_capabilities(
     assert run(monkeypatch, "formats") == 0
     out, err = capsys.readouterr()
     rows = [line.split("\t") for line in out.splitlines()]
-    assert [r[0] for r in rows] == ["coco", "imagefolder", "voc", "yolo"]
+    assert [r[0] for r in rows] == ["coco", "cvat_xml", "imagefolder", "voc", "yolo"]
     assert all(r[1] == "read,write" and r[2] == "Apache-2.0" for r in rows)
     assert logs(err) == []
 
@@ -370,3 +370,22 @@ def test_formats_help_documents_exit_codes(
     for cmd in ("ingest", "export"):
         assert run(monkeypatch, cmd, "--help") == 0
         assert "Exit codes" in capsys.readouterr().out
+
+
+def test_ingest_strict_fails_on_skipped_input_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = synth.build_cvat_xml(tmp_path / "src")
+    first = src / "annotations" / "train.xml"
+    first.write_text(
+        first.read_text().replace(
+            "</image>", '<polygon label="cat" points="1,1;5,5;9,1"/></image>', 1
+        )
+    )
+    capsys.readouterr()
+    assert run(monkeypatch, "ingest", src, "-f", "cvat_xml", "-o", tmp_path / "ok.dcp") == 0
+    capsys.readouterr()
+    code = run(monkeypatch, "ingest", src, "-f", "cvat_xml", "-o", tmp_path / "s.dcp", "--strict")
+    assert code == 1
+    assert "annotations.unsupported.polygon=1" in capsys.readouterr().err
+    assert not (tmp_path / "s.dcp").exists()

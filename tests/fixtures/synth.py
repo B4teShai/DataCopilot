@@ -138,6 +138,41 @@ def build_voc(root: Path) -> Path:
     return root
 
 
+def build_cvat_xml(root: Path) -> Path:
+    """CVAT for images 1.1: annotations/<split>.xml with meta labels (name and colour) and
+    ``images/<name>``. Boxes carry ``z_order`` and ``occluded``; the first box has an attribute."""
+    by_split: dict[str, list[int]] = {}
+    for n, (_, _, _, split, _) in enumerate(IMAGES):
+        by_split.setdefault(split, []).append(n)
+    colours = ("#ff0000", "#00ff00", "#0000ff")
+    labels = "".join(
+        f"<label><name>{name}</name><color>{colours[i]}</color><type>any</type><attributes/></label>"
+        for i, name in enumerate(CATEGORIES)
+    )
+    for split, members in by_split.items():
+        body = ""
+        for frame, n in enumerate(members):
+            name, w, h, _, boxes = IMAGES[n]
+            write_png(root / "images" / name, w, h, n)
+            shapes = "".join(
+                f'<box label="{CATEGORIES[cat]}" source="manual" occluded="{int(i == 1)}" '
+                f'xtl="{x1:.2f}" ytl="{y1:.2f}" xbr="{x2:.2f}" ybr="{y2:.2f}" z_order="0">'
+                + ('<attribute name="colour">red</attribute>' if (n == 0 and i == 0) else "")
+                + "</box>"
+                for i, (cat, x1, y1, x2, y2) in enumerate(boxes)
+            )
+            body += f'<image id="{frame}" name="{name}" width="{w}" height="{h}">{shapes}</image>'
+        xml = (
+            '<?xml version="1.0" encoding="utf-8"?><annotations><version>1.1</version><meta><task>'
+            f"<name>demo</name><size>{len(members)}</size><mode>annotation</mode>"
+            f"<subset>{split}</subset><labels>{labels}</labels></task></meta>{body}</annotations>"
+        )
+        out = root / "annotations" / f"{split}.xml"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(xml)
+    return root
+
+
 # ImageFolder fixture: split -> class -> image names
 FOLDER_IMAGES = [
     ("train", "cat", "c1.png", 40, 30),
