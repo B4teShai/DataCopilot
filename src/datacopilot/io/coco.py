@@ -26,12 +26,14 @@ from datacopilot.io import files
 from datacopilot.io.common import (
     NATIVE_KEY,
     build_row,
+    count,
     foreign_source_drops,
     is_native,
     make_image,
     parse_json,
     require_empty_dir,
     require_task,
+    safe_key,
 )
 from datacopilot.io.registry import ReadResult
 from datacopilot.io.report import ConversionReport
@@ -115,7 +117,7 @@ class CocoFormat:
                 raise FormatError(f"{file.name}: top level must be a JSON object")
             for key in doc:
                 if key not in _TOP_LEVEL:
-                    dropped[f"dataset.{key}"] += 1
+                    count(dropped, f"dataset.{safe_key(key)}")
             self._categories(doc, file, categories, dropped)
             self._rows(
                 doc,
@@ -159,7 +161,7 @@ class CocoFormat:
                 dropped["categories.supercategory"] += 1
             for key in item:
                 if key not in _CATEGORY_KEYS:
-                    dropped[f"categories.{key}"] += 1
+                    count(dropped, f"categories.{safe_key(key)}")
             cat = build_row(Category, f"category {cid}", id=cid, name=name, attributes=attributes)
             if cid in out and out[cid] != cat:
                 raise FormatError(f"category id {cid} is defined differently in {file.name}")
@@ -197,8 +199,10 @@ class CocoFormat:
             group = item.get("group_id")
             if group is not None and not isinstance(group, str):
                 raise FormatError(f"image {iid}: 'group_id' must be a string")
+            if NATIVE_KEY in item:  # would replace the marker that names the producing format
+                count(dropped, "images.source.format")
             source = {NATIVE_KEY: NAME} | {
-                k: v for k, v in item.items() if k not in _IMAGE_RESERVED
+                k: v for k, v in item.items() if k not in _IMAGE_RESERVED and k != NATIVE_KEY
             }
             image = make_image(located, split=split, source=source, ref=f"image {iid}")
             declared = (item.get("width"), item.get("height"))
@@ -221,7 +225,11 @@ class CocoFormat:
                 continue
             box = _bbox(item, what)
             score = item.get("score")
-            source = {NATIVE_KEY: NAME} | {k: v for k, v in item.items() if k not in _ANN_RESERVED}
+            if NATIVE_KEY in item:
+                count(dropped, "annotations.source.format")
+            source = {NATIVE_KEY: NAME} | {
+                k: v for k, v in item.items() if k not in _ANN_RESERVED and k != NATIVE_KEY
+            }
             annotations.append(
                 build_row(
                     Annotation,

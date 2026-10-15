@@ -9,6 +9,16 @@ attributes of one element to :data:`MAX_ATTRIBUTES` while parsing, so a hostile 
 structure that later recursive code would overflow on or that exhausts memory. Callers read the
 bytes through :func:`datacopilot.io.files.read_bounded`, which bounds the file size first.
 
+Memory bound for a single construct. expat holds an incomplete start tag (or comment) in its own
+buffer and the Python wrapper builds the attribute list only when the tag is complete, so one
+start tag made of millions of tiny attributes would cost about a hundred bytes per attribute before
+any count could be checked. The document is therefore fed in :data:`CHUNK_BYTES` pieces and parsing
+stops as soon as :data:`MAX_PENDING_BYTES` bytes were fed without a completed event (a tag, text, a
+comment, a processing instruction or a CDATA section): the worst case is the pending bytes plus one
+chunk, about 1.1 MiB, times that per-attribute factor (measured under 48 MiB for a 64 MiB tag by
+``tests/unit/test_xmlsafe.py``). Text is delivered in pieces and is not affected; a comment or a tag
+larger than the cap is not valid dataset XML and is refused.
+
 The tree is built from expat events directly because the C-accelerated ``ElementTree`` parser
 does not expose its expat handlers.
 """
@@ -29,6 +39,12 @@ MAX_ELEMENTS = 1_000_000
 MAX_ATTRIBUTES = 256
 """Most attributes accepted on one element."""
 
+CHUNK_BYTES = 64 * 1024
+"""Size of the pieces the document is fed to the parser in."""
+
+MAX_PENDING_BYTES = 1024 * 1024
+"""Bytes fed without a completed event before the document is refused (see the module docstring)."""
+
 
 class _Forbidden(Exception):
     pass
@@ -39,6 +55,10 @@ class _TooDeep(Exception):
 
 
 class _TooMany(Exception):
+    pass
+
+
+class _TooBig(Exception):
     pass
 
 
@@ -66,32 +86,57 @@ def parse_xml(
     builder = ET.TreeBuilder()
     depth = 0
     elements = 0
+    events = 0
 
-    def start(tag: str, attrs: dict[str, str]) -> None:
-        nonlocal depth, elements
+    def start(tag: str, attrs: list[str]) -> None:
+        nonlocal depth, elements, events
         depth += 1
         elements += 1
+        events += 1
         if depth > max_depth:
             raise _TooDeep
-        if elements > max_elements or len(attrs) > MAX_ATTRIBUTES:
+        if elements > max_elements or len(attrs) // 2 > MAX_ATTRIBUTES:
             raise _TooMany
-        builder.start(tag, attrs)
+        builder.start(tag, dict(zip(attrs[::2], attrs[1::2], strict=True)))
 
     def end(tag: str) -> None:
-        nonlocal depth
+        nonlocal depth, events
         depth -= 1
+        events += 1
         builder.end(tag)
 
+    def text(chunk: str) -> None:
+        nonlocal events
+        events += 1
+        builder.data(chunk)
+
+    def other(*_args: object) -> None:
+        nonlocal events
+        events += 1
+
     parser = expat.ParserCreate()
-    parser.buffer_text = True
+    parser.ordered_attributes = True  # a flat list: no dict is built before the count is checked
     parser.StartElementHandler = start
     parser.EndElementHandler = end
-    parser.CharacterDataHandler = builder.data
+    parser.CharacterDataHandler = text
+    parser.CommentHandler = other
+    parser.ProcessingInstructionHandler = other
+    parser.StartCdataSectionHandler = other
     parser.StartDoctypeDeclHandler = _reject
     parser.EntityDeclHandler = _reject
     parser.ExternalEntityRefHandler = _reject_ref
     try:
-        parser.Parse(data, True)
+        pending = 0
+        seen = 0
+        for offset in range(0, len(data), CHUNK_BYTES):
+            parser.Parse(data[offset : offset + CHUNK_BYTES], False)
+            if events == seen:
+                pending += CHUNK_BYTES
+                if pending > MAX_PENDING_BYTES:
+                    raise _TooBig
+            else:
+                pending, seen = 0, events
+        parser.Parse(b"", True)
         return builder.close()
     except _Forbidden:
         raise FormatError(
@@ -100,6 +145,10 @@ def parse_xml(
     except _TooDeep:
         raise FormatError(
             f"{name}: elements are nested more than {max_depth} levels deep"
+        ) from None
+    except _TooBig:
+        raise FormatError(
+            f"{name}: a single tag or comment is larger than {MAX_PENDING_BYTES} bytes"
         ) from None
     except _TooMany:
         raise FormatError(

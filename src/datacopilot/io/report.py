@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
-from pydantic import BaseModel, Field, PositiveInt
+from pydantic import BaseModel, Field, PositiveInt, field_validator
 
 from datacopilot.core.errors import ConversionLossError
+
+MAX_COLUMNS = 512
+MAX_COLUMN_CHARS = 160
+_COLUMN = re.compile(r"[A-Za-z0-9_.-]+")
 
 
 class ConversionReport(BaseModel, frozen=True):
@@ -25,6 +30,25 @@ class ConversionReport(BaseModel, frozen=True):
     rows_written: int = Field(ge=0)
     dropped: dict[str, PositiveInt] = Field(default_factory=dict)
     skipped: dict[str, PositiveInt] = Field(default_factory=dict)
+
+    @field_validator("dropped", "skipped", mode="before")
+    @classmethod
+    def _without_zeros(cls, value: object) -> object:
+        """A count of zero is nothing happening: it is not a column (a negative one is an error)."""
+        if isinstance(value, dict):
+            return {k: v for k, v in value.items() if not (isinstance(v, int) and v == 0)}
+        return value
+
+    @field_validator("dropped", "skipped")
+    @classmethod
+    def _plain_columns(cls, value: dict[str, int]) -> dict[str, int]:
+        """Columns are names, never data: a hostile file must not reach logs or error lines."""
+        if len(value) > MAX_COLUMNS:
+            raise ValueError("too many distinct columns")
+        for key in value:
+            if len(key) > MAX_COLUMN_CHARS or not _COLUMN.fullmatch(key):
+                raise ValueError("a column is not a plain name")
+        return value
 
     @property
     def total_dropped(self) -> int:

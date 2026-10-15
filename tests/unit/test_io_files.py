@@ -123,3 +123,61 @@ def test_copy_image_copies_bytes(tmp_path: Path) -> None:
     assert (tmp_path / "out" / "deep" / "d.png").read_bytes() == src.read_bytes()
     with pytest.raises(FormatError, match="missing"):
         files.copy_file(tmp_path / "nope.png", tmp_path / "o.png")
+
+
+# ------------------------------------------------ one descriptor for the identity of an image
+def test_identify_returns_header_and_id_from_one_open(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from fixtures import synth
+
+    path = tmp_path / "a.png"
+    synth.write_png(path, 40, 30, 7)
+    opened: list[Path] = []
+    real = files.open_regular
+
+    def spy(p: Path, *, nofollow: bool = False):  # type: ignore[no-untyped-def]
+        opened.append(p)
+        assert nofollow is True
+        return real(p, nofollow=nofollow)
+
+    monkeypatch.setattr(files, "open_regular", spy)
+    header, digest = files.identify(path, nofollow=True)
+    assert (header.width, header.height) == (40, 30) and len(opened) == 1
+    monkeypatch.undo()
+    assert digest == files.image_id(path) and header == files.image_header(path)
+
+
+def test_identify_refuses_a_symlink_and_a_special_file(tmp_path: Path) -> None:
+    import os
+
+    from fixtures import synth
+
+    real = tmp_path / "a.png"
+    synth.write_png(real, 8, 8, 1)
+    link = tmp_path / "link.png"
+    link.symlink_to(real)
+    with pytest.raises(FormatError):
+        files.identify(link, nofollow=True)
+    assert files.identify(link, nofollow=False)[1] == files.image_id(real)
+    fifo = tmp_path / "f.png"
+    os.mkfifo(fifo)
+    with pytest.raises(FormatError):
+        files.identify(fifo, nofollow=True)
+
+
+def test_make_image_opens_the_resolved_file_without_following_a_late_symlink(
+    tmp_path: Path,
+) -> None:
+    from fixtures import synth
+
+    from datacopilot.io.common import make_image
+
+    real = tmp_path / "a.png"
+    synth.write_png(real, 8, 8, 1)
+    link = tmp_path / "swapped.png"
+    link.symlink_to(real)
+    with pytest.raises(FormatError):
+        make_image(
+            link, split="unassigned", source={}, ref="x"
+        )  # a link swapped in after safe_join
+    image = make_image(real, split="unassigned", source={}, ref="x")
+    assert (image.width, image.height) == (8, 8)

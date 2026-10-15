@@ -60,3 +60,51 @@ def test_entity_bomb_and_external_entity_are_rejected_without_expansion() -> Non
         with pytest.raises(FormatError, match="DOCTYPE"):
             parse_xml(doc, "x.xml")
         assert time.perf_counter() - start < 0.5
+
+
+# --------------------------------------------- one huge start tag must not be built in memory
+def test_a_64_mib_start_tag_of_short_attributes_is_refused_within_a_small_memory_bound() -> None:
+    import tracemalloc
+
+    from datacopilot.io.xmlsafe import MAX_PENDING_BYTES
+
+    doc = b"<a " + b'a="" ' * (64 * 1024 * 1024 // 5) + b"/>"
+    assert len(doc) >= 64 * 1024 * 1024
+    tracemalloc.start()
+    started = time.perf_counter()
+    try:
+        with pytest.raises(FormatError, match="single tag|attributes"):
+            parse_xml(doc, "x.xml")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # documented bound: the pending construct (MAX_PENDING_BYTES plus one chunk) times a small
+    # per-attribute factor, nowhere near the size of the tag
+    assert peak < 48 * 1024 * 1024, peak
+    assert MAX_PENDING_BYTES <= 1024 * 1024
+    assert time.perf_counter() - started < 5.0
+
+
+def test_a_large_but_legitimate_document_still_parses() -> None:
+    body = b"".join(b'<b id="%d" name="n%d">text</b>' % (n, n) for n in range(60_000))
+    assert len(body) > 1_000_000
+    root = parse_xml(b"<a>" + body + b"</a>", "x.xml")
+    assert len(root) == 60_000
+
+
+def test_a_long_text_node_is_not_mistaken_for_a_tag_but_a_huge_comment_is_refused() -> None:
+    text = b"x" * (3 * 1024 * 1024)
+    assert parse_xml(b"<a>" + text + b"</a>", "x.xml").tag == "a"
+    assert parse_xml(b"<a><!--" + b"c" * 10_000 + b"--><b/></a>", "x.xml")[0].tag == "b"
+    with pytest.raises(FormatError, match="single tag or comment"):
+        parse_xml(b"<a><!--" + text + b"--><b/></a>", "x.xml")
+
+
+def test_a_tag_with_many_attributes_below_the_pending_cap_is_still_counted() -> None:
+    attrs = " ".join(f"k{i}='v'" for i in range(MAX_ATTRIBUTES))
+    assert len(parse_xml(f"<a {attrs}/>".encode(), "x.xml").attrib) == MAX_ATTRIBUTES
+
+
+def test_attributes_keep_their_order_and_values_with_ordered_parsing() -> None:
+    root = parse_xml(b'<a z="1" b="2&amp;3" c=""/>', "x.xml")
+    assert list(root.attrib.items()) == [("z", "1"), ("b", "2&3"), ("c", "")]

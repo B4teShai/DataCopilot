@@ -328,15 +328,28 @@ Format-specific rules for the two newest readers (both treat their input as untr
   results (percent of the original size converted to pixels of the real image, rounded to 1e-6 pixel; an
   overshoot of at most 0.001 pixel is snapped and counted in `annotations.bbox_snapped`) and `choices`
   results (classification). The dataset is detection if any box was read, else classification; categories
-  are the sorted label names in use, so `categories.id` is counted for any category whose id is not its
-  sorted position. `annotations` entries are `human` rows, the first `predictions` entry gives `model` rows
-  with their score. One annotation per task is read (ground truth first, else the lowest id); counted in
+  are the sorted label names in use; the writer ranks exactly the categories that rows use, counts
+  `categories.id` for any of them whose id is not its position there, and counts `categories.unused` for a
+  category no row uses (the format has no list of classes). The task type follows the human rows (boxes, else
+  choices) and only without any human row the model rows. `annotations` entries are `human` rows, the first
+  `predictions` entry of a task with a kept annotation gives `model` rows with their score (a null score is
+  none); predictions of an unlabeled task are `skipped` as `annotations.prediction_of_unlabeled_task`. One annotation per task is read (ground truth first, else the lowest id); counted in
   `skipped`: `annotations.cancelled`, `annotations.of_other_annotators`, `annotations.of_other_predictions`,
   `annotations.unsupported.<type>` (polygon, brush, keypoint, text area, relation, `multi_label_rectangle`,
   `rotated_rectangle`, `image_rotation`, `choices` in a detection dataset, other), `images.remote_uri`
-  (never fetched). A task without a kept annotation is marked `source.unlabeled`. Task, annotation and
-  result fields are kept in `source`; personal fields of `completed_by` are never stored.
-- `ingest --strict` fails when a reader dropped or skipped anything, before anything is written.
+  (never fetched). A task without a kept annotation is marked `source.unlabeled`. Only an allow-list of
+  fields reaches `source` (task `created_at`, `updated_at`, `inner_id`; annotation `id`, `ground_truth`,
+  `was_cancelled`, `lead_time`, `created_at`, `updated_at`; prediction `id`, `model_version`, `score`,
+  `created_at`, `updated_at`; result `id`, `from_name`, `to_name`, `origin`), every other key is dropped and
+  counted by name (`images.source.<key>`, `images.source.annotation.<key>`, `images.source.prediction.<key>`,
+  `annotations.source.<key>`, `annotations.source.value.<key>`), and so are task `data` fields other than
+  `image` unless `ingest --keep-task-data` is given. `source.layout_*` keys (the original document name when
+  read from `annotations/`, the original form of the image reference) are layout hints that a write to the
+  same format reproduces and that no writer counts; a same-format round trip is field-identical for every
+  kept field, one document per original file.
+- `ingest --strict` fails when a reader dropped or skipped anything, before anything is written. Report
+  columns are bounded names (`safe_key`: at most 64 characters of `[A-Za-z0-9_.-]`, else `invalid_key`) and a
+  report holds at most 200 distinct columns (the rest is counted under `<table>.other`).
 
 Dropped-field counts for the synthetic fixtures (`tests/fixtures/synth.py`), asserted by
 `tests/golden/test_roundtrip_matrix.py`. Rows are the source format, columns the target;

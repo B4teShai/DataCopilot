@@ -12,9 +12,13 @@ import re
 import shutil
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+from pydantic import ValidationError as PydanticValidationError
 
 from datacopilot.core.errors import FormatError, ValidationError
 from datacopilot.core.schema import (
@@ -103,11 +107,15 @@ def _read_source(
     group_by: str | None,
     name: str | None,
     strict: bool,
+    options: Mapping[str, object] | None,
 ) -> _Source:
     pattern = parse_group_by(group_by) if group_by else None
-    reader = registry.get_reader(format)
+    reader: Any = registry.get_reader(format)
     path = Path(source)
-    result = reader.read(path)
+    try:
+        result = reader.read(path, **options) if options else reader.read(path)
+    except PydanticValidationError:  # a reader let a row-level validation error escape
+        raise FormatError(f"{format}: the input contains a value the data model rejects") from None
     if not result.images:
         raise FormatError("no images found in the input")
     images = list(result.images)
@@ -130,14 +138,17 @@ def _read_source(
         seen[image.image_id] = label
     validate_tables(images, result.annotations, result.categories, task=result.task)
     rows = len(images) + len(result.annotations)
-    report = ConversionReport(
-        source_format=format,
-        target_format=DCP_FORMAT,
-        rows_read=rows,
-        rows_written=rows,
-        dropped=result.dropped,
-        skipped=result.skipped,
-    )
+    try:
+        report = ConversionReport(
+            source_format=format,
+            target_format=DCP_FORMAT,
+            rows_read=rows,
+            rows_written=rows,
+            dropped=result.dropped,
+            skipped=result.skipped,
+        )
+    except PydanticValidationError:
+        raise FormatError(f"{format}: the reader produced an invalid loss report") from None
     if strict and not report.is_lossless():
         _log_loss(report)
     enforce_strict(report, strict=strict)
@@ -161,6 +172,7 @@ def ingest(
     name: str | None = None,
     limits: StoreLimits | None = None,
     strict: bool = False,
+    reader_options: Mapping[str, object] | None = None,
 ) -> IngestResult:
     """Read ``source`` with the named reader, validate, and write a new ``dataset.dcp``.
 
@@ -173,7 +185,9 @@ def ingest(
         ValueError: for an invalid ``group_by`` expression.
     """
     started = time.perf_counter()
-    read = _read_source(source, format, group_by=group_by, name=name, strict=strict)
+    read = _read_source(
+        source, format, group_by=group_by, name=name, strict=strict, options=reader_options
+    )
     store = DatasetStore.create(
         out,
         read.images,
@@ -203,6 +217,7 @@ def load_dataset(
     group_by: str | None = None,
     name: str | None = None,
     strict: bool = False,
+    reader_options: Mapping[str, object] | None = None,
 ) -> tuple[Dataset, ConversionReport]:
     """Read ``source`` into a validated in-memory :class:`Dataset` without writing anything.
 
@@ -212,7 +227,9 @@ def load_dataset(
     Raises:
         FormatError, ValidationError, ConversionLossError, ValueError: as :func:`ingest`.
     """
-    read = _read_source(source, format, group_by=group_by, name=name, strict=strict)
+    read = _read_source(
+        source, format, group_by=group_by, name=name, strict=strict, options=reader_options
+    )
     manifest = DatasetManifest(
         version=models_version(
             read.images, read.annotations, read.categories, schema_version=SCHEMA_VERSION

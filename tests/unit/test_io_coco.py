@@ -431,3 +431,21 @@ def test_deeply_nested_source_value_is_rejected_cleanly(tmp_path: Path) -> None:
     write_json(root, doc)
     with pytest.raises((FormatError, ValidationError)):
         plugin.read(root)
+
+
+def test_a_format_key_in_the_input_cannot_replace_the_marker_of_the_row(tmp_path: Path) -> None:
+    import json
+
+    from fixtures import synth
+
+    root = synth.build_coco(tmp_path / "coco")
+    path = root / "annotations" / "instances_train.json"
+    doc = json.loads(path.read_text())
+    doc["images"][0]["format"] = "voc"
+    doc["annotations"][0]["format"] = "yolo"
+    path.write_text(json.dumps(doc))
+    result = plugin.read(root)
+    assert {i.source["format"] for i in result.images} == {"coco"}
+    assert {a.source["format"] for a in result.annotations} == {"coco"}
+    assert result.dropped["images.source.format"] == 1
+    assert result.dropped["annotations.source.format"] == 1

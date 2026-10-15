@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -33,12 +34,17 @@ def build_row(model: type[M], ref: str, **fields: object) -> M:
 
 
 def make_image(path: Path, *, split: Split, source: Mapping[str, object], ref: str) -> Image:
-    """Image row from a real file: content-hash id and header dimensions."""
-    width, height = files.image_size(path)
+    """Image row from a real file: content-hash id and header dimensions.
+
+    ``path`` is the result of :func:`files.safe_join` (already resolved inside the dataset root);
+    it is opened once, without following a symlink, and both values come from that descriptor.
+    """
+    header, digest = files.identify(path, nofollow=True)
+    width, height = header.oriented_size
     return build_row(
         Image,
         ref,
-        image_id=files.image_id(path),
+        image_id=digest,
         file_path=str(path),
         width=width,
         height=height,
@@ -51,13 +57,40 @@ def is_native(source: Mapping[str, object], fmt: str) -> bool:
     return source.get(NATIVE_KEY) == fmt
 
 
+LAYOUT_PREFIX = "layout_"
+"""``source`` keys with this prefix record where a row came from (file, reference form) so that a
+write to the same format can reproduce it; they are not data and no writer counts them."""
+MAX_KEY_CHARS = 64
+"""Longest key of a ``source`` that may name a report column."""
+MAX_COUNTERS = 200
+"""Distinct columns of one report before new ones are aggregated into ``<table>.other``."""
+_KEY = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def safe_key(key: object) -> str:
+    """``key`` when it is a plain name of at most :data:`MAX_KEY_CHARS` characters, else
+    ``invalid_key``: a key read from an untrusted file becomes a report column, a log field and a
+    line of ``--strict`` output, so it must not carry control characters, markup or length."""
+    if isinstance(key, str) and len(key) <= MAX_KEY_CHARS and _KEY.fullmatch(key):
+        return key
+    return "invalid_key"
+
+
+def count(counter: Counter[str], name: str, amount: int = 1) -> None:
+    """Add to ``counter[name]``; once the report holds :data:`MAX_COUNTERS` distinct columns a
+    new one is counted under ``<table>.other`` instead: the total is kept, the size is bounded."""
+    if name not in counter and len(counter) >= MAX_COUNTERS:
+        name = name.partition(".")[0] + ".other"
+    counter[name] += amount
+
+
 def foreign_source_drops(
     counter: Counter[str], column: str, source: Mapping[str, object], held: frozenset[str]
 ) -> None:
     """Count every ``source`` key of a foreign-format row that the target cannot hold."""
     for key in source:
-        if key != NATIVE_KEY and key not in held:
-            counter[f"{column}.source.{key}"] += 1
+        if key != NATIVE_KEY and key not in held and not key.startswith(LAYOUT_PREFIX):
+            count(counter, f"{column}.source.{safe_key(key)}")
 
 
 def require_empty_dir(out: Path) -> None:

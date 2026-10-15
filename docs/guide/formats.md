@@ -38,8 +38,24 @@ Multiple annotators are never merged: one annotation per task is read (the first
 prediction are counted (`annotations.cancelled`, `annotations.of_other_annotators`,
 `annotations.of_other_predictions`). Polygons, brushes, keypoints, text areas, relations,
 multi-label and rotated rectangles and rotated images are counted as unsupported. Images that are
-not local files (`http`, `s3`, `data:`) are counted as `images.remote_uri` and never fetched. Personal
-fields of `completed_by` are never stored.
+not local files (`http`, `s3`, `data:`) are counted as `images.remote_uri` and never fetched. Predictions
+of a task that has no kept annotation are not read as rows (`annotations.prediction_of_unlabeled_task`),
+and the task type follows the human rows (boxes, else choices) before the model rows.
+
+Personal and free-form data: only an allow-list of fields is read, stored, reported and re-emitted
+(task `created_at`, `updated_at`, `inner_id`; annotation `id`, `ground_truth`, `was_cancelled`,
+`lead_time`, `created_at`, `updated_at`; prediction `id`, `model_version`, `score`, `created_at`,
+`updated_at`; result `id`, `from_name`, `to_name`, `origin`). Every other key (`completed_by`,
+`created_username`, `updated_by`, `comment_authors`, `meta`, `file_upload` and so on) is dropped and
+counted by name, and task `data` fields other than `image` are dropped and counted too unless you pass
+`--keep-task-data` (they are then stored and re-emitted as they are). The allow-list cannot know that a
+label name, an image file name or an allowed text value contains personal data.
+
+A same-format round trip reproduces the original file layout (one document per original file under
+`annotations/`, the form of the image reference, empty predictions) and is field-identical for the kept
+fields. A category that no row uses cannot be carried (Label Studio has no list of classes): the writer
+counts it as `categories.unused`. The reference `images/<name>` is a file path, not a URL Label Studio can
+serve; use the `/data/local-files/?d=...` form in the source if you need that.
 
 ## What each conversion loses
 

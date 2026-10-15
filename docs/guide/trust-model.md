@@ -28,7 +28,10 @@ is the user-facing summary.
 
 No network call from a gate; no telemetry; no `trust_remote_code`; no pickled weights; no secret in
 a log or report (the cache key is shown as set or unset); no image path with a user name in a log
-field; no personal fields copied from Label Studio's `completed_by`.
+field; no Label Studio field outside a fixed allow-list (so no `completed_by`, usernames, e-mail addresses,
+comments, upload names or presigned URLs) in the stored dataset, a report or a re-exported file. What the
+allow-list cannot see is free text you put into a label name, an image file name or task `data` that you
+asked to keep (`--keep-task-data`).
 
 ## Caches
 

@@ -68,7 +68,8 @@ def test_reads_fixture(ls: Path) -> None:
         "format": "label_studio",
         "id": 1,
         "file_name": "a.png",
-        "annotation": {"id": 10, "completed_by": 1, "lead_time": 1.5},
+        "layout_document": "train.json",
+        "annotation": {"id": 10, "was_cancelled": False, "lead_time": 1.5},
     }
     boxes = sorted((x for x in r.annotations if x.image_id == a.image_id), key=lambda x: x.ann_id)
     assert [b.ann_id for b in boxes] == ["train:1:a000000", "train:1:a000001"]
@@ -232,27 +233,40 @@ def test_missing_files_skip_the_task_and_are_counted(tmp_path: Path) -> None:
     assert r.skipped == {"images.file_missing": 1, "annotations.of_missing_image": 1}
 
 
-def test_unlabelled_tasks_are_marked_and_personal_fields_are_not_stored(tmp_path: Path) -> None:
-    profile = {"id": 4, "email": "someone@example.com", "first_name": "Some", "last_name": "One"}
-    t = task()
-    t["annotations"][0]["completed_by"] = profile
+def test_unlabelled_tasks_are_marked_and_their_predictions_are_not_read_as_rows(
+    tmp_path: Path,
+) -> None:
     bare = {"id": 2, "data": {"image": "images/b.png"}, "annotations": []}
-    root = one(tmp_path / "r", [t, bare])
+    pre = {"id": 3, "data": {"image": "images/c.png"}, "annotations": [],
+           "predictions": [{"result": [rect(), rect()]}]}  # fmt: skip
+    root = one(tmp_path / "r", [task(), bare, pre])
     synth.write_png(root / "images" / "b.png", 40, 40, 2)
+    synth.write_png(root / "images" / "c.png", 40, 40, 3)
     r = plugin.read(root)
     by_name = {i.source["file_name"]: i for i in r.images}
-    assert by_name["b.png"].source["unlabeled"] is True
-    assert by_name["a.png"].source["annotation"] == {"id": 5, "completed_by": 4}
-    assert "someone@example.com" not in json.dumps([i.source for i in r.images])
+    assert by_name["b.png"].source["unlabeled"] is True and by_name["c.png"].source["unlabeled"]
+    assert len(r.annotations) == 1  # only the human box of a.png
+    assert r.skipped == {"annotations.prediction_of_unlabeled_task": 2}
 
 
-def test_task_and_data_extras_are_kept_in_source(tmp_path: Path) -> None:
-    t = task(file_upload="a.png", meta={"k": [1, 2]}, data={"image": "images/a.png", "text": "hi"})
+def test_task_fields_outside_the_allow_list_are_dropped_and_counted(tmp_path: Path) -> None:
+    t = task(file_upload="a.png", meta={"k": [1, 2]}, created_at="2024-01-01", inner_id=3,
+             data={"image": "images/a.png", "text": "hi"})  # fmt: skip
     r = plugin.read(one(tmp_path / "r", [t]))
-    assert r.images[0].source["data"] == {"text": "hi"}
-    assert r.images[0].source["file_upload"] == "a.png" and r.images[0].source["meta"] == {
-        "k": [1, 2]
+    source = r.images[0].source
+    assert source["created_at"] == "2024-01-01" and source["inner_id"] == 3
+    assert "data" not in source and "file_upload" not in source and "meta" not in source
+    assert r.dropped == {
+        "images.source.file_upload": 1,
+        "images.source.meta": 1,
+        "images.source.data.text": 1,
     }
+
+
+def test_task_data_fields_are_kept_only_on_request(tmp_path: Path) -> None:
+    t = task(data={"image": "images/a.png", "text": "hi"})
+    r = plugin.read(one(tmp_path / "r", [t]), keep_task_data=True)
+    assert r.images[0].source["data"] == {"text": "hi"} and r.dropped == {}
 
 
 def test_single_file_path_and_missing_inputs(tmp_path: Path) -> None:

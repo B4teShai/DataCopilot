@@ -200,7 +200,7 @@ def ls_rect(
 
 def build_label_studio(root: Path) -> Path:
     """Label Studio JSON export: annotations/<split>.json (one task per image) plus
-    ``images/<name>``. Every task has one annotation with an ``id``, ``completed_by`` (user id) and
+    ``images/<name>``. Every task has one annotation with an ``id``, ``was_cancelled`` and
     ``lead_time``; every result has an ``id``."""
     by_split: dict[str, list[int]] = {}
     for n, (_, _, _, split, _) in enumerate(IMAGES):
@@ -219,7 +219,7 @@ def build_label_studio(root: Path) -> Path:
                     "id": n + 1,
                     "data": {"image": f"images/{name}"},
                     "annotations": [
-                        {"id": n + 10, "completed_by": 1, "lead_time": 1.5, "result": results}
+                        {"id": n + 10, "was_cancelled": False, "lead_time": 1.5, "result": results}
                     ],
                     "predictions": [],
                 }

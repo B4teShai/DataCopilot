@@ -19,7 +19,9 @@ First release candidate. Before 1.0 a minor version may break the public API.
   `rectanglelabels` (percent of the original size, converted to pixels, rounded to 1e-6) and `choices`
   (classification), annotations as human rows and the first prediction as model rows with scores, one
   annotation per task (ground truth first, else the lowest id) with the rest counted, unsupported result
-  types, rotated rectangles and remote images counted, personal fields of `completed_by` never stored.
+  types, rotated rectangles and remote images counted; only an allow-list of task, annotation, prediction and
+  result fields is stored and re-emitted (everything else, including `completed_by`, usernames, comments and
+  presigned URLs, is dropped and counted by name; task `data` fields only with `--keep-task-data`).
   Both are in the loss matrix and the round-trip goldens.
 - `datacopilot ingest --strict`: fail, writing nothing, when a reader skipped or dropped anything.
 - `datacopilot doctor` is a real diagnosis: versions of the package and its core dependencies, importable
@@ -170,6 +172,14 @@ First release candidate. Before 1.0 a minor version may break the public API.
 
 ### Changed
 
+- Label Studio reader: a skipped entry with no results is no longer counted as zero (a normal export with a
+  cancelled annotation or a second annotator without results made `ingest` exit 1 without a message and made
+  `load` leak a validation error); `ConversionReport` drops zero counts and a reader's row-level validation
+  error is a `FormatError`; a null prediction score is no score; the task type follows the human rows;
+  predictions of an unlabeled task are counted instead of read as rows; the writer keeps empty predictions,
+  the original document files (`annotations/<name>.json`) and the form of the image reference, and counts
+  `categories.unused` and renamed images. CVAT: one document per original file, image `<attribute>` children
+  counted (`images.attributes`), labels derived from boxes bounded like the others.
 - `doctor` prints several lines instead of `ok`; the first line is still the status. `Dataset` gained
   an optional `root` (not part of equality or of the content version).
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.
@@ -191,6 +201,13 @@ First release candidate. Before 1.0 a minor version may break the public API.
 
 ### Security
 
+- Label Studio and CVAT data handling: allow-listed fields only (personal data and presigned URLs never reach
+  the store, the reports or re-exported files), bounded report column names (`safe_key`) and at most 200
+  distinct columns, every illegal-character replacement in the CVAT writer counted and the written image name
+  equal to the file name, reserved `format` and `file_name` attributes can no longer replace the metadata of
+  a row (CVAT, COCO), images are opened once, without following a symlink, and their size and digest come
+  from the same descriptor, a single huge start tag is refused after about 1 MiB instead of being built in
+  memory.
 - Release pipeline hardening: the build refuses a commit that is not an ancestor of `origin/main`; the build
   backend and its dependencies are exact pins; the publish job is download, verify (exact file set and the
   digest the build job exported) and publish, nothing else; the audit tool is the locked one and runs for
@@ -219,5 +236,5 @@ First release candidate. Before 1.0 a minor version may break the public API.
 - The embedding cache is bound to the dataset version, so a new version recomputes every embedding;
   `label_noise`, `split`, `propose`, `review` and `apply` are not implemented yet.
 - A Label Studio export does not carry the labelling configuration, so classes that no row uses are not
-  carried; CVAT label attribute definitions beyond a name are counted, not kept.
+  carried (the writer counts them as `categories.unused`); CVAT label attribute definitions beyond a name are counted, not kept.
 - Before 1.0 a minor version may break the public API (`datacopilot.__all__`); the changelog says so.

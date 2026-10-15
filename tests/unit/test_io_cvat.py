@@ -59,7 +59,12 @@ def test_reads_fixture(cvat: Path) -> None:
         "d.png": "test",
     }
     a = next(i for i in r.images if i.source["file_name"] == "a.png")
-    assert a.source == {"format": "cvat_xml", "id": 0, "file_name": "a.png"}
+    assert a.source == {
+        "format": "cvat_xml",
+        "id": 0,
+        "file_name": "a.png",
+        "layout_document": "train.xml",
+    }
     assert (a.width, a.height) == (64, 48)
     boxes = sorted((x for x in r.annotations if x.image_id == a.image_id), key=lambda x: x.ann_id)
     assert [b.ann_id for b in boxes] == ["train:0:000000", "train:0:000001"]
@@ -512,3 +517,158 @@ def test_in_memory_dataset_from_read_result_writes(cvat: Path, tmp_path: Path) -
 def _empty(path: Path) -> Path:
     path.mkdir()
     return path
+
+
+# ------------------------------------------------------------- accounting and reserved keys
+def test_attribute_children_of_an_image_are_counted(tmp_path: Path) -> None:
+    body = (
+        '<image id="0" name="a.png" width="64" height="48">'
+        '<attribute name="k">v</attribute><attribute name="j">w</attribute>'
+        f"<box {BOX}/></image>"
+    )
+    r = plugin.read(one(tmp_path / "r", doc(body)))
+    assert r.dropped == {"images.attributes": 2} and len(r.annotations) == 1
+
+
+def test_attributes_cannot_replace_the_metadata_of_a_row(tmp_path: Path) -> None:
+    body = (
+        '<image id="0" name="a.png" width="64" height="48" format="coco" file_name="evil.png">'
+        f'<box {BOX} format="yolo"/></image>'
+    )
+    r = plugin.read(one(tmp_path / "r", doc(body)))
+    assert r.images[0].source["format"] == "cvat_xml" and r.images[0].source["file_name"] == "a.png"
+    assert r.annotations[0].source["format"] == "cvat_xml"
+    assert r.dropped == {
+        "images.source.format": 1,
+        "images.source.file_name": 1,
+        "annotations.source.format": 1,
+    }
+
+
+def test_labels_derived_from_boxes_are_bounded_and_validated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shapes = "".join(f'<box label="c{n}" xtl="1" ytl="1" xbr="5" ybr="5"/>' for n in range(5))
+    root = one(tmp_path / "a", doc(image(shapes), "<task></task>"))
+    monkeypatch.setattr("datacopilot.io.cvat.MAX_LABELS", 3)
+    with pytest.raises(FormatError, match="more than 3 labels"):
+        plugin.read(root)
+    monkeypatch.undo()
+    long = "x" * 5000
+    root = one(
+        tmp_path / "b",
+        doc(image(f'<box label="{long}" xtl="1" ytl="1" xbr="5" ybr="5"/>'), "<task/>"),
+    )
+    with pytest.raises(FormatError, match="label name"):
+        plugin.read(root)
+
+
+def test_a_label_name_over_the_limit_in_the_meta_is_a_format_error(tmp_path: Path) -> None:
+    meta = f"<task><labels><label><name>{'y' * 5000}</name></label></labels></task>"
+    with pytest.raises(FormatError, match="label name|too long"):
+        plugin.read(one(tmp_path / "r", doc(image(), meta)))
+
+
+def test_every_replacement_of_an_illegal_character_is_counted_and_the_file_matches(
+    tmp_path: Path,
+) -> None:
+    synth.write_png(tmp_path / "i.png", 8, 8, 1)
+    img = Image(
+        image_id=f"{1:016x}",
+        file_path=str(tmp_path / "i.png"),
+        width=8,
+        height=8,
+        source={
+            "format": "cvat_xml",
+            "id": 0,
+            "file_name": "we\x01ird.png",
+            "tag\x02": "v",
+            "note": "a\x03b",
+        },
+    )
+    ann = Annotation(
+        ann_id="a", image_id=img.image_id, category_id=0, kind="bbox",
+        bbox_xyxy_abs=(1.0, 1.0, 4.0, 4.0), attributes={"k\x04": "v\x05"},
+        source={"format": "cvat_xml", "z\x06": "1", "z_order": "0\x07"},
+    )  # fmt: skip
+    cats = [Category(id=0, name="ca\x01t", attributes={"color": "#f\x08f"})]
+    ds = dataset_from([img], [ann], cats, name="na\x0bme")
+    report = convert.export(ds, "cvat_xml", tmp_path / "out")
+    assert report.dropped["dataset.text.invalid_xml_chars"] == 1
+    assert report.dropped["categories.text.invalid_xml_chars"] == 2  # name and colour
+    assert report.dropped["images.text.invalid_xml_chars"] == 2  # file name and attribute value
+    assert report.dropped["annotations.text.invalid_xml_chars"] >= 3
+    assert report.dropped["images.source.invalid_key"] == 1
+    assert report.dropped["annotations.source.invalid_key"] == 1
+    names = [p.name for p in (tmp_path / "out" / "images").iterdir()]
+    assert names == ["we�ird.png"]
+    back = plugin.read(tmp_path / "out")  # the name in the document is the name of the file
+    assert back.skipped == {} and len(back.images) == 1
+
+
+# ------------------------------------------ same-format round trips with several documents
+def multi_file(root: Path) -> Path:
+    synth.write_png(root / "images" / "a.png", 64, 48, 1)
+    synth.write_png(root / "images" / "b.png", 64, 48, 2)
+    (root / "annotations").mkdir(parents=True, exist_ok=True)
+    (root / "annotations" / "job1.xml").write_text(doc(image()))
+    (root / "annotations" / "job2.xml").write_text(doc(image(name="b.png")))  # the same image id
+    (root / "annotations" / "job3.xml").write_text(doc(""))  # a document without images
+    return root
+
+
+def test_several_documents_of_one_split_keep_their_ids_through_the_round_trip(
+    tmp_path: Path,
+) -> None:
+    root = multi_file(tmp_path / "cv")
+    first = convert.ingest(root, "cvat_xml", tmp_path / "a.dcp", strict=True)
+    ds = DatasetStore.open(tmp_path / "a.dcp").read()
+    assert sorted(a.ann_id for a in ds.annotations) == ["job1:0:000000", "job2:0:000000"]
+    report = convert.export(ds, "cvat_xml", tmp_path / "out", strict=True)
+    assert report.dropped == {}
+    second = convert.ingest(tmp_path / "out", "cvat_xml", tmp_path / "b.dcp", strict=True)
+    ds2 = DatasetStore.open(tmp_path / "b.dcp").read()
+    assert table_rows(ds.images, ds.annotations) == table_rows(ds2.images, ds2.annotations)
+    assert first.manifest.version == second.manifest.version
+    assert sorted(p.name for p in (tmp_path / "out" / "annotations").iterdir()) == [
+        "job1.xml",
+        "job2.xml",
+    ]
+
+
+def test_a_single_document_in_the_annotations_folder_keeps_its_prefix(tmp_path: Path) -> None:
+    synth.write_png(tmp_path / "cv" / "images" / "a.png", 64, 48, 1)
+    (tmp_path / "cv" / "annotations").mkdir(parents=True)
+    (tmp_path / "cv" / "annotations" / "only.xml").write_text(doc(image()))
+    convert.ingest(tmp_path / "cv", "cvat_xml", tmp_path / "a.dcp", strict=True)
+    ds = DatasetStore.open(tmp_path / "a.dcp").read()
+    assert [a.ann_id for a in ds.annotations] == ["only:0:000000"]
+    convert.export(ds, "cvat_xml", tmp_path / "out", strict=True)
+    ds2 = dc_load(tmp_path / "out")
+    assert [a.ann_id for a in ds2.annotations] == ["only:0:000000"]
+
+
+def dc_load(path: Path):  # type: ignore[no-untyped-def]
+    import datacopilot as dc
+
+    return dc.load(path, format="cvat_xml", strict=True)
+
+
+def test_a_renumbered_image_id_is_counted(tmp_path: Path) -> None:
+    from datacopilot.core.schema import Image as Img
+
+    synth.write_png(tmp_path / "i.png", 8, 8, 1)
+    synth.write_png(tmp_path / "j.png", 8, 8, 2)
+    imgs = [
+        Img(
+            image_id=f"{n:016x}",
+            file_path=str(tmp_path / f),
+            width=8,
+            height=8,
+            source={"format": "cvat_xml", "id": 5, "file_name": f},
+        )  # fmt: skip
+        for n, f in ((1, "i.png"), (2, "j.png"))
+    ]
+    ds = dataset_from(imgs, [], [Category(id=0, name="c")])
+    report = convert.export(ds, "cvat_xml", tmp_path / "out")
+    assert report.dropped == {"images.source.id": 1}

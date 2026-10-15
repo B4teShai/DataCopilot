@@ -207,6 +207,39 @@ def _jpeg_header(handle: BinaryIO, path: Path) -> ImageHeader:
     raise FormatError(f"{path.name}: JPEG has no frame header")
 
 
+def _parse_header(handle: BinaryIO, path: Path) -> ImageHeader:
+    head = handle.read(8)
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        rest = _read_exact(handle, 16, path)
+        if rest[4:8] != b"IHDR":
+            raise FormatError(f"{path.name}: invalid PNG header")
+        width, height = struct.unpack(">II", rest[8:16])
+        header = ImageHeader("png", width, height)
+    elif head.startswith(b"\xff\xd8"):
+        handle.seek(2)
+        header = _jpeg_header(handle, path)
+    elif head.startswith((b"GIF87a", b"GIF89a")):
+        handle.seek(6)
+        width, height = struct.unpack("<HH", _read_exact(handle, 4, path))
+        header = ImageHeader("gif", width, height)
+    elif head.startswith(b"BM"):
+        handle.seek(14)
+        (dib_size,) = struct.unpack("<I", _read_exact(handle, 4, path))
+        if dib_size == 12:  # BITMAPCOREHEADER: unsigned 16-bit sides
+            width, height = struct.unpack("<HH", _read_exact(handle, 4, path))
+            header = ImageHeader("bmp", width, height)
+        elif dib_size in _BMP_INFO_HEADERS:  # signed 32-bit width and height
+            width, height = struct.unpack("<ii", _read_exact(handle, 8, path))
+            header = ImageHeader("bmp", width, abs(height))
+        else:
+            raise FormatError(f"{path.name}: unsupported BMP header size")
+    else:
+        raise UnsupportedImageError(f"{path.name}: unsupported or invalid image format")
+    if header.width <= 0 or header.height <= 0:
+        raise FormatError(f"{path.name}: image has a zero dimension")
+    return header
+
+
 def image_header(path: Path, *, nofollow: bool = False) -> ImageHeader:
     """Format, stored size and EXIF orientation from the file header (PNG, JPEG, GIF, BMP).
 
@@ -219,38 +252,32 @@ def image_header(path: Path, *, nofollow: bool = False) -> ImageHeader:
     """
     try:
         with open_regular(path, nofollow=nofollow) as handle:
-            head = handle.read(8)
-            if head.startswith(b"\x89PNG\r\n\x1a\n"):
-                rest = _read_exact(handle, 16, path)
-                if rest[4:8] != b"IHDR":
-                    raise FormatError(f"{path.name}: invalid PNG header")
-                width, height = struct.unpack(">II", rest[8:16])
-                header = ImageHeader("png", width, height)
-            elif head.startswith(b"\xff\xd8"):
-                handle.seek(2)
-                header = _jpeg_header(handle, path)
-            elif head.startswith((b"GIF87a", b"GIF89a")):
-                handle.seek(6)
-                width, height = struct.unpack("<HH", _read_exact(handle, 4, path))
-                header = ImageHeader("gif", width, height)
-            elif head.startswith(b"BM"):
-                handle.seek(14)
-                (dib_size,) = struct.unpack("<I", _read_exact(handle, 4, path))
-                if dib_size == 12:  # BITMAPCOREHEADER: unsigned 16-bit sides
-                    width, height = struct.unpack("<HH", _read_exact(handle, 4, path))
-                    header = ImageHeader("bmp", width, height)
-                elif dib_size in _BMP_INFO_HEADERS:  # signed 32-bit width and height
-                    width, height = struct.unpack("<ii", _read_exact(handle, 8, path))
-                    header = ImageHeader("bmp", width, abs(height))
-                else:
-                    raise FormatError(f"{path.name}: unsupported BMP header size")
-            else:
-                raise UnsupportedImageError(f"{path.name}: unsupported or invalid image format")
+            return _parse_header(handle, path)
     except OSError:
         raise FormatError(f"cannot read image {path.name}") from None
-    if header.width <= 0 or header.height <= 0:
-        raise FormatError(f"{path.name}: image has a zero dimension")
-    return header
+
+
+def identify(path: Path, *, nofollow: bool = False) -> tuple[ImageHeader, str]:
+    """Header and :func:`image_id` of one file read through **one** descriptor.
+
+    Opening the path twice (once for the size, once for the digest) would let a file swapped in
+    between make the two disagree; here both come from the same opened, regular file. With
+    ``nofollow`` the final path component must not be a symlink (callers pass paths they already
+    resolved, so a link that appears afterwards fails instead of being followed).
+
+    Raises:
+        FormatError: as :func:`image_header`, or the file cannot be read.
+    """
+    try:
+        with open_regular(path, nofollow=nofollow) as handle:
+            header = _parse_header(handle, path)
+            handle.seek(0)
+            digest = hashlib.sha256()
+            while chunk := handle.read(_CHUNK):
+                digest.update(chunk)
+    except OSError:
+        raise FormatError(f"cannot read image {path.name}") from None
+    return header, digest.hexdigest()[:16]
 
 
 def image_size(path: Path) -> tuple[int, int]:

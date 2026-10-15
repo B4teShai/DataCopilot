@@ -157,3 +157,4 @@ datacopilot ingest [OPTIONS] PATH
 | `--group-by` | `TEXT` |  | Regex over the image path; group `g` (or 1) is the group id. |
 | `--name` | `TEXT` |  | Dataset name (default: input name). |
 | `--strict` |  | off | Fail (nothing is written) if the reader skipped or dropped anything. |
+| `--keep-task-data` |  | off | label_studio only: also keep the task data fields other than `image` (they are dropped and counted by default because they can hold personal data or URLs). |

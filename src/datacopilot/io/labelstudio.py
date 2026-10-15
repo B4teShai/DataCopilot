@@ -3,28 +3,50 @@
 Layout read: ``annotations.json``, or ``annotations/*.json`` (one file per split, the split
 inferred from a ``train``/``val``/``test`` word in the file name), or one JSON file given
 directly. The file is the "JSON" export: an array of tasks. Images are looked up next to the
-annotation root and under ``images/``. The writer emits ``annotations.json`` (no splits) or
-``annotations/<split>.json`` plus ``images/<name>``.
+annotation root and under ``images/``. The writer emits ``annotations.json`` (no splits) or one
+document per original file (``annotations/<name>.json``, or ``annotations/<split>.json`` for rows
+that came from elsewhere) plus ``images/<name>``.
 
-Mapped: ``rectanglelabels`` results (percent of the original image size, converted to pixels of
-the real image; boxes are rounded to 1e-6 pixel) and ``choices`` results (classification). A task
+Mapped: ``rectanglelabels`` results (percent of the original image size, converted to pixels of the
+real image; boxes are rounded to 1e-6 pixel) and ``choices`` results (classification). A task
 becomes an image; ``annotations`` results are human rows, results of the first ``predictions``
-entry are model rows (the result's or the prediction's ``score``). The task type is detection when
-any box was read, otherwise classification. Categories are the sorted label names in use (the
-labelling configuration is never read, so classes without a row are not carried).
+entry are model rows (the result's or the prediction's ``score``; a null score is no score). The
+task type is decided by the human rows first (boxes, else choices) and only without any human row by
+the model rows; rows of the other kind are counted. Categories are the sorted label names in use
+(the labelling configuration is never read), so a category that no row uses is not carried and the
+writer counts it (``categories.unused``).
 
 Multiple annotators: one annotation set per task is read, never merged: the first annotation
 marked ``ground_truth``, else the lowest ``id``. Cancelled annotations and every other annotation
 or prediction are counted (``skipped``: ``annotations.cancelled``,
-``annotations.of_other_annotators``, ``annotations.of_other_predictions``). Everything else on a
-task, annotation, prediction or result is kept verbatim in ``source`` and re-emitted for Label
-Studio rows. Personal fields of ``completed_by`` (anything but the numeric user id) are never
-stored.
+``annotations.of_other_annotators``, ``annotations.of_other_predictions``). Predictions of a task
+without a kept annotation are not read as rows (they would be unreviewed model output standing in
+for labels): counted as ``annotations.prediction_of_unlabeled_task``.
 
-Never mapped, always counted (``skipped`` ``annotations.unsupported.<type>``): polygons, brushes,
-keypoints, text areas, relations, every other result type, rectangles with several labels, rotated
-rectangles and rotated images. Images that are not local files (``http``, ``s3``, ``data:`` and
-so on) are counted as ``images.remote_uri`` and never fetched.
+Personal and free-form data. Exports carry usernames, e-mail addresses, comment authors, upload
+names and presigned URLs in task, annotation, prediction and result fields. Only an allow-list is
+read into ``source`` and re-emitted: the task fields ``created_at``, ``updated_at`` and
+``inner_id``; the annotation fields ``id``, ``ground_truth``, ``was_cancelled``, ``lead_time``,
+``created_at`` and ``updated_at`` (short scalars); the prediction fields ``id``,
+``model_version``, ``score``, ``created_at`` and ``updated_at``; the result fields ``id``,
+``from_name``, ``to_name`` and ``origin``. Every other key is dropped and counted by name
+(``images.source.<key>``, ``images.source.annotation.<key>``,
+``images.source.prediction.<key>``, ``annotations.source.<key>``; the names are bounded, see
+``common.safe_key``), including ``completed_by``, ``created_username``, ``updated_by``,
+``comment_authors``, ``meta`` and ``file_upload``. Task ``data`` fields other than ``image`` are
+dropped and counted too (``images.source.data.<key>``) unless ``keep_task_data`` is set
+(``datacopilot ingest --keep-task-data``); kept data is stored and re-emitted as it is, so use it
+only for data you have checked. The allow-list protects the stored dataset, the reports and the
+re-exported JSON; it cannot know that a label name, an image file name or an allowed text field
+holds personal data.
+
+Where a row came from is kept in ``layout_`` keys of ``source`` (never counted by another format's
+writer): the original document name (when read from ``annotations/``) and the original form of the
+image reference, so a same-format write reproduces both. Never mapped, always counted
+(``skipped`` ``annotations.unsupported.<type>``): polygons, brushes, keypoints, text areas,
+relations, every other result type, rectangles with several labels, rotated rectangles and
+rotated images. Images that are not local files (``http``, ``s3``, ``data:`` and so on) are
+counted as ``images.remote_uri`` and never fetched.
 
 The JSON is read through a bounded descriptor, duplicate keys and non-finite numbers are refused,
 every percentage and size is validated and every image path is contained in the dataset root.
@@ -46,11 +68,13 @@ from datacopilot.io import files
 from datacopilot.io.common import (
     NATIVE_KEY,
     build_row,
+    count,
     foreign_source_drops,
     is_native,
     make_image,
     parse_json,
     require_empty_dir,
+    safe_key,
 )
 from datacopilot.io.registry import ReadResult
 from datacopilot.io.report import ConversionReport
@@ -69,11 +93,19 @@ _SPLIT = re.compile(r"(?<![a-z])(train|val|test)(?![a-z])")
 _REMOTE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.\-]*://|data:)")
 _NAME_HINTS = frozenset({"file_name", "filename"})
 _TASK_RESERVED = frozenset({"id", "data", "annotations", "predictions"})
-_TASK_INTERNAL = frozenset({NATIVE_KEY, "file_name", "annotation", "prediction", "unlabeled"})
+_TASK_KEEP = frozenset({"created_at", "updated_at", "inner_id"})
+_ANNOTATION_KEEP = frozenset(
+    {"id", "ground_truth", "was_cancelled", "lead_time", "created_at", "updated_at"}
+)
+_PREDICTION_KEEP = frozenset({"id", "model_version", "score", "created_at", "updated_at"})
+_RESULT_KEEP = frozenset({"origin"})
 _RESULT_RESERVED = frozenset(
     {"original_width", "original_height", "image_rotation", "value", "id", "from_name", "to_name"}
     | {"type"}
 )
+LAYOUT_DOCUMENT = "layout_document"
+LAYOUT_REF = "layout_image_ref"
+MAX_SCALAR_CHARS = 256
 _VALUE_RESERVED = frozenset({"x", "y", "width", "height", "rotation", "rectanglelabels"})
 _KNOWN_UNSUPPORTED = frozenset(
     {
@@ -200,17 +232,37 @@ def _entries(items: object, what: str, noun: str) -> list[_Entry]:
     return out
 
 
-def _clean_meta(meta: dict[str, object]) -> dict[str, object]:
-    """Annotation or prediction fields to keep; ``completed_by`` keeps only a numeric user id."""
-    out = dict(meta)
-    who = out.get("completed_by")
-    if isinstance(who, dict):
-        who = who.get("id")
-    if isinstance(who, int) and not isinstance(who, bool):
-        out["completed_by"] = who
-    else:
-        out.pop("completed_by", None)
-    return out
+def _scalar(value: object) -> bool:
+    """A short JSON scalar (text, finite number or flag): the only shape of a kept field."""
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return math.isfinite(value)
+    return isinstance(value, str) and len(value) <= MAX_SCALAR_CHARS
+
+
+def _keep(
+    meta: dict[str, object], allowed: frozenset[str], table: str, dropped: Counter[str]
+) -> dict[str, object]:
+    """The allow-listed, scalar fields of ``meta``; every other key is dropped and counted.
+
+    A null is an absent value, not a loss. ``table`` names the report column family.
+    """
+    kept: dict[str, object] = {}
+    for key, value in meta.items():
+        if value is None:
+            continue
+        if key in allowed and _scalar(value):
+            kept[key] = value
+        else:
+            count(dropped, f"{table}.{safe_key(key)}")
+    return kept
+
+
+def _skip(counter: Counter[str], key: str, amount: int) -> None:
+    """Count skipped rows; a zero is nothing (a zero entry would make an invalid report)."""
+    if amount > 0:
+        count(counter, key, amount)
 
 
 class LabelStudioFormat:
@@ -219,13 +271,13 @@ class LabelStudioFormat:
     )
 
     # ------------------------------------------------------------------ read
-    def read(self, path: Path) -> ReadResult:
+    def read(self, path: Path, *, keep_task_data: bool = False) -> ReadResult:
         path = Path(path)
         if not path.exists():
             raise FormatError(f"{path.name} does not exist")
         root = path if path.is_dir() else path.parent
         documents = _annotation_files(path)
-        prefix = len(documents) > 1
+        folder = path.is_dir() and not (path / "annotations.json").is_file()
         images: list[Image] = []
         raws: list[_Raw] = []
         dropped: Counter[str] = Counter()
@@ -241,9 +293,8 @@ class LabelStudioFormat:
             seen: set[int] = set()
             for item in doc:
                 self._task(
-                    item, file, root, f"{file.stem}:" if prefix else "", seen, images, raws,
-                    dropped, skipped,
-                )  # fmt: skip
+                    item, file, root, folder, keep_task_data, seen, images, raws, dropped, skipped
+                )
         return self._finish(root, images, raws, dropped, skipped)
 
     def _task(
@@ -251,7 +302,8 @@ class LabelStudioFormat:
         item: object,
         file: Path,
         root: Path,
-        prefix: str,
+        folder: bool,
+        keep_task_data: bool,
         seen: set[int],
         images: list[Image],
         raws: list[_Raw],
@@ -277,38 +329,51 @@ class LabelStudioFormat:
         predictions = _entries(item.get("predictions"), what, "prediction")
         located, name, remote = self._locate(ref, _image_roots(file, root), root)
         if located is None:
-            skipped["images.remote_uri" if remote else "images.file_missing"] += 1
-            total = sum(len(e.results) for e in annotations + predictions)
-            if total:
-                skipped["annotations.of_missing_image"] += total
+            count(skipped, "images.remote_uri" if remote else "images.file_missing")
+            _skip(
+                skipped,
+                "annotations.of_missing_image",
+                sum(len(e.results) for e in annotations + predictions),
+            )
             return
         chosen = self._choose(annotations, skipped)
         first = predictions[0] if predictions else None
         for other in predictions[1:]:
-            skipped["annotations.of_other_predictions"] += len(other.results)
+            _skip(skipped, "annotations.of_other_predictions", len(other.results))
+        if chosen is None and first is not None:
+            _skip(skipped, "annotations.prediction_of_unlabeled_task", len(first.results))
+            first = None
         source: dict[str, object] = {NATIVE_KEY: NAME, "id": tid, "file_name": name}
-        extra_data = {k: v for k, v in data.items() if k != "image"}
-        if extra_data:
-            source["data"] = extra_data
-        for key, value in item.items():
-            if key in _TASK_RESERVED:
+        if ref != f"images/{name}":
+            source[LAYOUT_REF] = ref
+        if folder:
+            source[LAYOUT_DOCUMENT] = file.name
+        for key, value in data.items():
+            if key == "image":
                 continue
-            if key in _TASK_INTERNAL:
-                dropped[f"images.source.{key}"] += 1
+            if keep_task_data:
+                source.setdefault("data", {})[key] = value  # type: ignore[index]
             else:
-                source[key] = value
+                count(dropped, f"images.source.data.{safe_key(key)}")
+        task_extras = {k: v for k, v in item.items() if k not in _TASK_RESERVED}
+        source.update(_keep(task_extras, _TASK_KEEP, "images.source", dropped))
         if chosen is None:
             source["unlabeled"] = True
-        elif meta := _clean_meta(chosen.meta):
-            source["annotation"] = meta
-        if first is not None and (pmeta := _clean_meta(first.meta)):
-            source["prediction"] = pmeta
+        else:
+            source["annotation"] = _keep(
+                chosen.meta, _ANNOTATION_KEEP, "images.source.annotation", dropped
+            )
+        if first is not None:
+            source["prediction"] = _keep(
+                first.meta, _PREDICTION_KEEP, "images.source.prediction", dropped
+            )
         image = make_image(located, split=_split_of(file.stem), source=source, ref=what)
         sets: list[tuple[str, _Entry, float | None]] = []
         if chosen is not None:
             sets.append(("a", chosen, None))
         if first is not None:
             sets.append(("p", first, self._score(first.meta, what)))
+        prefix = f"{file.stem}:" if folder else ""
         mismatch = False
         for origin, entry, score in sets:
             for index, result in enumerate(entry.results):
@@ -317,21 +382,20 @@ class LabelStudioFormat:
                     dropped, skipped,
                 )  # fmt: skip
         if mismatch:
-            dropped["images.declared_size"] += 1
+            count(dropped, "images.declared_size")
         images.append(image)
 
     @staticmethod
     def _score(meta: dict[str, object], what: str) -> float | None:
-        if "score" not in meta:
-            return None
-        return _number(meta["score"], f"{what}: prediction score")
+        value = meta.get("score")
+        return None if value is None else _number(value, f"{what}: prediction score")
 
     @staticmethod
     def _choose(entries: list[_Entry], skipped: Counter[str]) -> _Entry | None:
         live = []
         for entry in entries:
             if entry.meta.get("was_cancelled") is True:
-                skipped["annotations.cancelled"] += len(entry.results)
+                _skip(skipped, "annotations.cancelled", len(entry.results))
             else:
                 live.append(entry)
         if not live:
@@ -342,7 +406,7 @@ class LabelStudioFormat:
         ]
         for entry in live:
             if entry is not chosen:
-                skipped["annotations.of_other_annotators"] += len(entry.results)
+                _skip(skipped, "annotations.of_other_annotators", len(entry.results))
         return chosen
 
     @staticmethod
@@ -393,7 +457,7 @@ class LabelStudioFormat:
         kind = result.get("type")
         if kind not in ("rectanglelabels", "choices"):
             key = kind if isinstance(kind, str) and kind in _KNOWN_UNSUPPORTED else "other"
-            skipped[f"annotations.unsupported.{key}"] += 1
+            count(skipped, f"annotations.unsupported.{key}")
             return False
         value = result.get("value")
         if not isinstance(value, dict):
@@ -408,13 +472,10 @@ class LabelStudioFormat:
         if "id" in result:
             source["id"] = _text(result["id"], f"{what}: id", MAX_FIELD_CHARS)
         reserved = _RESULT_RESERVED | ({"score"} if origin == "p" else frozenset())
-        for key, item in result.items():
-            if key == NATIVE_KEY:
-                dropped["annotations.source.format"] += 1
-            elif key not in reserved:
-                source[key] = item
+        extras = {k: v for k, v in result.items() if k not in reserved}
+        source.update(_keep(extras, _RESULT_KEEP, "annotations.source", dropped))
         score = prediction_score
-        if origin == "p" and "score" in result:
+        if origin == "p" and result.get("score") is not None:
             score = _number(result["score"], f"{what}: score")
         raw = _Raw(image, prefix, tid, origin, [], None, score, source)
         if kind == "choices":
@@ -423,24 +484,24 @@ class LabelStudioFormat:
                 raise FormatError(f"{what}: choices must be a short list")
             raw.labels = [_text(c, f"{what}: choice label", MAX_LABEL_CHARS) for c in choices]
             if not raw.labels:
-                skipped["annotations.unsupported.empty_choices"] += 1
+                count(skipped, "annotations.unsupported.empty_choices")
                 return False
-            extras = {k: v for k, v in value.items() if k != "choices"}
-            if extras:
-                source["value"] = extras
+            for key in value:
+                if key != "choices":
+                    count(dropped, f"annotations.source.value.{safe_key(key)}")
             raws.append(raw)
             return False
         labels = value.get("rectanglelabels")
         if not isinstance(labels, list):
             raise FormatError(f"{what}: rectanglelabels must be a list")
         if len(labels) != 1:
-            skipped["annotations.unsupported.multi_label_rectangle"] += 1
+            count(skipped, "annotations.unsupported.multi_label_rectangle")
             return False
         if _number(value.get("rotation", 0), f"{what}: rotation") != 0:
-            skipped["annotations.unsupported.rotated_rectangle"] += 1
+            count(skipped, "annotations.unsupported.rotated_rectangle")
             return False
         if _number(result.get("image_rotation", 0), f"{what}: image_rotation") != 0:
-            skipped["annotations.unsupported.image_rotation"] += 1
+            count(skipped, "annotations.unsupported.image_rotation")
             return False
         raw.labels = [_text(labels[0], f"{what}: label", MAX_LABEL_CHARS)]
         x = _percent(value, "x", what, positive=False)
@@ -453,9 +514,9 @@ class LabelStudioFormat:
             oh = _dimension(result.get("original_height"), "original_height", what)
             mismatch = (ow, oh) != (float(image.width), float(image.height))
         raw.box = self._pixels(x, y, w, h, image, what, dropped)
-        extras = {k: v for k, v in value.items() if k not in _VALUE_RESERVED}
-        if extras:
-            source["value"] = extras
+        for key in value:
+            if key not in _VALUE_RESERVED:
+                count(dropped, f"annotations.source.value.{safe_key(key)}")
         raws.append(raw)
         return mismatch
 
@@ -477,7 +538,7 @@ class LabelStudioFormat:
                 raise FormatError(f"{what}: the box extends beyond the image")
             y2, snapped = height, True
         if snapped:
-            dropped["annotations.bbox_snapped"] += 1
+            count(dropped, "annotations.bbox_snapped")
         return (x1, y1, x2, y2)
 
     def _finish(
@@ -488,15 +549,18 @@ class LabelStudioFormat:
         dropped: Counter[str],
         skipped: Counter[str],
     ) -> ReadResult:
+        by_people = [r for r in raws if r.origin == "a"]
+        decisive = by_people or raws
         task: Task = (
             "detection"
-            if any(r.box is not None for r in raws) or not any(r.labels for r in raws)
+            if any(r.box is not None for r in decisive) or not any(r.labels for r in decisive)
             else "classification"
         )
         wanted = [r for r in raws if (r.box is not None) == (task == "detection")]
         for raw in raws:
             if raw not in wanted:
-                skipped["annotations.unsupported.choices"] += 1
+                kind = "choices" if task == "detection" else "rectanglelabels"
+                count(skipped, f"annotations.unsupported.{kind}")
         names = sorted({label for r in wanted for label in r.labels})
         ids = {name: i for i, name in enumerate(names)}
         counters: Counter[tuple[str, str]] = Counter()
@@ -539,7 +603,11 @@ class LabelStudioFormat:
         require_empty_dir(out)
         dropped: Counter[str] = Counter()
         label_of: dict[int, str] = {}
-        for rank, cat in enumerate(sorted(ds.categories, key=lambda c: c.name)):
+        used = {a.category_id for a in ds.annotations}
+        # a reader numbers the categories that rows use, by name: rank exactly those
+        for rank, cat in enumerate(
+            sorted((c for c in ds.categories if c.id in used), key=_by_name)
+        ):
             if not 0 < len(cat.name) <= MAX_LABEL_CHARS:
                 raise FormatError(f"class name is longer than {MAX_LABEL_CHARS} characters")
             for column, lost in (
@@ -548,26 +616,38 @@ class LabelStudioFormat:
                 ("attributes", bool(cat.attributes)),
             ):
                 if lost:
-                    dropped[f"categories.{column}"] += 1
+                    count(dropped, f"categories.{column}")
             label_of[cat.id] = cat.name
+        for cat in ds.categories:
+            if cat.id not in used:  # no row names it, and the format has no list of classes
+                count(dropped, "categories.unused")
         names = self._names(ds)
         anns_of: dict[str, list[Annotation]] = {}
         for ann in sorted(ds.annotations, key=lambda a: a.ann_id):
             anns_of.setdefault(ann.image_id, []).append(ann)
-        by_split: dict[str, list[Image]] = {}
+        groups: dict[tuple[str, str], list[Image]] = {}
         for image in sorted(ds.images, key=lambda i: (names[i.image_id], i.image_id)):
-            by_split.setdefault(image.split, []).append(image)
-        documents = {
-            split: self._tasks(members, names, anns_of, label_of, dropped)
-            for split, members in by_split.items()
-        }
-        if set(documents) <= {"unassigned"}:
-            targets = {"unassigned": out / "annotations.json"}
+            groups.setdefault(_document_of(image), []).append(image)
+        splits_of: dict[str, set[str]] = {}
+        for document, split in groups:
+            splits_of.setdefault(document, set()).add(split)
+        files_out: dict[str, list[dict[str, object]]] = {}
+        for (document, split), members in groups.items():
+            target = document
+            if len(splits_of[document]) > 1:  # one original file whose images changed split
+                target = f"{document.removesuffix('.json')}_{split}.json"
+            tasks = self._tasks(members, names, anns_of, label_of, dropped)
+            files_out.setdefault(target, []).extend(tasks)
+        single = set(files_out) <= {"unassigned.json"} and not any(
+            is_native(i.source, NAME) and LAYOUT_DOCUMENT in i.source for i in ds.images
+        )
+        if single:
+            targets = {name: out / "annotations.json" for name in files_out}
         else:
             (out / "annotations").mkdir()
-            targets = {s: out / "annotations" / f"{s}.json" for s in documents}
-        for split, tasks in documents.items():
-            targets[split].write_text(
+            targets = {name: out / "annotations" / name for name in files_out}
+        for name, tasks in files_out.items():
+            targets[name].write_text(
                 json.dumps(tasks, ensure_ascii=False, allow_nan=False), encoding="utf-8"
             )
         for image in ds.images:
@@ -617,22 +697,30 @@ class LabelStudioFormat:
                 while next_id in used or next_id in taken:
                     next_id += 1
                 tid = next_id
+                if native:
+                    count(dropped, "images.source.id")
             used.add(tid)
+            name = names[image.image_id]
+            ref = f"images/{name}"
+            if native:
+                original = image.source.get(LAYOUT_REF)
+                if name != image.source.get("file_name"):
+                    count(dropped, "images.source.file_name")  # renamed to keep names unique
+                elif isinstance(original, str):
+                    ref = original
             data: dict[str, object] = {}
             extra_data = image.source.get("data") if native else None
             if isinstance(extra_data, dict):
                 data.update(extra_data)
-            data["image"] = f"images/{names[image.image_id]}"
+            data["image"] = ref
             task: dict[str, object] = {}
             if native:
-                for key, value in image.source.items():
-                    if key not in _TASK_RESERVED | _TASK_INTERNAL:
-                        task[key] = value
+                task.update({k: v for k, v in image.source.items() if k in _TASK_KEEP})
             else:
                 foreign_source_drops(dropped, "images", image.source, _NAME_HINTS)
             task.update({"id": tid, "data": data})
             if image.group_id is not None:
-                dropped["images.group_id"] += 1
+                count(dropped, "images.group_id")
             humans: list[dict[str, object]] = []
             models: list[dict[str, object]] = []
             for ann in anns_of.get(image.image_id, []):
@@ -646,8 +734,8 @@ class LabelStudioFormat:
                 ]
             else:
                 task["annotations"] = []
-            if models:
-                pmeta = image.source.get("prediction") if native else None
+            pmeta = image.source.get("prediction") if native else None
+            if models or isinstance(pmeta, dict):
                 task["predictions"] = [
                     {**(pmeta if isinstance(pmeta, dict) else {}), "result": models}
                 ]
@@ -673,9 +761,6 @@ class LabelStudioFormat:
                 "original_height": image.height,
                 "image_rotation": 0,
             }
-        extra_value = ann.source.get("value") if native else None
-        if isinstance(extra_value, dict):
-            value.update(extra_value)
         if kind == "choices":
             value["choices"] = [label]
         else:
@@ -690,9 +775,7 @@ class LabelStudioFormat:
                 }
             )
         if native:
-            for key, item in ann.source.items():
-                if key not in {NATIVE_KEY, "value", "from_name", "to_name", "id"}:
-                    result[key] = item
+            result.update({k: v for k, v in ann.source.items() if k in _RESULT_KEEP})
         else:
             foreign_source_drops(dropped, "annotations", ann.source, frozenset())
         from_name = ann.source.get("from_name") if native else None
@@ -718,8 +801,24 @@ class LabelStudioFormat:
             ("provenance", ann.provenance == "proposal_accepted"),
         ):
             if present:
-                dropped[f"annotations.{column}"] += 1
+                count(dropped, f"annotations.{column}")
         return result
+
+
+_DOCUMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.json")
+
+
+def _by_name(category: Category) -> str:
+    return category.name
+
+
+def _document_of(image: Image) -> tuple[str, str]:
+    """``(output document name, split)``: the original file when the row came from one."""
+    if is_native(image.source, NAME):
+        document = image.source.get(LAYOUT_DOCUMENT)
+        if isinstance(document, str) and _DOCUMENT_NAME.fullmatch(document):
+            return document, image.split
+    return f"{image.split}.json", image.split
 
 
 def _hint(image: Image) -> str:

@@ -114,6 +114,14 @@ def ingest(
             "--strict", help="Fail (nothing is written) if the reader skipped or dropped anything."
         ),
     ] = False,
+    keep_task_data: Annotated[
+        bool,
+        typer.Option(
+            "--keep-task-data",
+            help="label_studio only: also keep the task data fields other than `image` (they "
+            "are dropped and counted by default because they can hold personal data or URLs).",
+        ),
+    ] = False,
 ) -> None:
     """Convert a dataset into a versioned dataset.dcp directory and print its version.
 
@@ -125,6 +133,10 @@ def ingest(
 
     if output.suffix != ".dcp":
         raise typer.BadParameter("must end with .dcp", param_hint="--output")
+    if keep_task_data and format != "label_studio":
+        raise typer.BadParameter(
+            "only valid with --format label_studio", param_hint="--keep-task-data"
+        )
     if group_by is not None:
         try:
             convert.parse_group_by(group_by)
@@ -135,7 +147,14 @@ def ingest(
         max_rows=settings.max_table_rows, max_uncompressed_bytes=settings.max_table_bytes
     )
     result = convert.ingest(
-        path, format, output, group_by=group_by, name=name, limits=limits, strict=strict
+        path,
+        format,
+        output,
+        group_by=group_by,
+        name=name,
+        limits=limits,
+        strict=strict,
+        reader_options={"keep_task_data": True} if keep_task_data else None,
     )
     typer.echo(result.manifest.version)
 

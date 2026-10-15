@@ -36,11 +36,13 @@ from datacopilot.io import files
 from datacopilot.io.common import (
     NATIVE_KEY,
     build_row,
+    count,
     foreign_source_drops,
     is_native,
     make_image,
     require_empty_dir,
     require_task,
+    safe_key,
 )
 from datacopilot.io.registry import ReadResult
 from datacopilot.io.report import ConversionReport
@@ -53,6 +55,8 @@ MAX_TEXT_CHARS = 4096
 MAX_ATTRIBUTE_NAME_CHARS = 256
 MAX_ATTRIBUTES_PER_BOX = 256
 MAX_LABELS = 100_000
+MAX_LABEL_CHARS = 4096
+LAYOUT_DOCUMENT = "layout_document"
 _SPLIT = re.compile(r"(?<![a-z])(train|val|test)(?![a-z])")
 _UINT = re.compile(r"[0-9]{1,9}")
 _SPLITS = ("train", "val", "test")
@@ -61,11 +65,12 @@ _UNSUPPORTED_SHAPES = frozenset(
 )
 _LABEL_KEYS = frozenset({"id", "name", "color", "type", "attributes"})
 _LABEL_UNSUPPORTED = frozenset({"parent", "svg", "sublabels"})
-_BOX_RESERVED = frozenset({"label", "occluded", "xtl", "ytl", "xbr", "ybr", "source"})
-_IMAGE_RESERVED = frozenset({"id", "name", "width", "height"})
+_BOX_RESERVED = frozenset({"label", "occluded", "xtl", "ytl", "xbr", "ybr", "source", "format"})
+_IMAGE_RESERVED = frozenset({"id", "name", "width", "height", "format", "file_name"})
 _ATTR_SPEC_TAGS = frozenset({"name", "mutable", "input_type", "default_value", "values"})
 _NAME_HINTS = frozenset({"file_name", "filename"})
 _ILLEGAL_XML = re.compile("[\x00-\x08\x0b\x0c\x0d\x0e-\x1f\ud800-\udfff￾￿]")
+_DOCUMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.xml")
 _NAME_START = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
 _NAME_REST = _NAME_START | frozenset("0123456789.-")
 
@@ -154,8 +159,12 @@ def _trivial_spec(spec: ET.Element) -> bool:
     )
 
 
-def _clean(text: str) -> str:
-    return _ILLEGAL_XML.sub("�", text)
+def _clean(text: str, dropped: Counter[str], table: str) -> str:
+    """``text`` without the characters XML 1.0 cannot carry; each replaced value is counted."""
+    if _ILLEGAL_XML.search(text):
+        count(dropped, f"{table}.text.invalid_xml_chars")
+        return _ILLEGAL_XML.sub("\N{REPLACEMENT CHARACTER}", text)
+    return text
 
 
 class CvatFormat:
@@ -183,11 +192,11 @@ class CvatFormat:
         skipped: Counter[str] = Counter()
         categories = self._categories(documents, dropped)
         ids = {c.name: c.id for c in categories}
-        prefix = len(documents) > 1
+        folder = path.is_dir() and not (path / "annotations.xml").is_file()
         images: list[Image] = []
         annotations: list[Annotation] = []
         for file, tree in documents:
-            self._rows(file, tree, root, prefix, ids, images, annotations, dropped, skipped)
+            self._rows(file, tree, root, folder, ids, images, annotations, dropped, skipped)
         return ReadResult(
             name=root.name or NAME,
             task="detection",
@@ -212,8 +221,10 @@ class CvatFormat:
         for file, tree in documents:
             for label in self._label_elements(tree):
                 name = _text(label.find("name"))
-                if not name:
-                    raise FormatError(f"{file.name}: a label has no name")
+                if not name or len(name) > MAX_LABEL_CHARS:
+                    raise FormatError(
+                        f"{file.name}: a label name must have 1 to {MAX_LABEL_CHARS} characters"
+                    )
                 attributes: dict[str, str] = {}
                 for key in ("color", "type"):
                     value = _text(label.find(key))
@@ -252,7 +263,13 @@ class CvatFormat:
                 if box.get("label")
             }
             for name in sorted(n for n in used if n):
-                by_name[name] = Category(id=len(by_name), name=name)
+                if len(name) > MAX_LABEL_CHARS:
+                    raise FormatError(f"a label name has more than {MAX_LABEL_CHARS} characters")
+                if len(by_name) >= MAX_LABELS:
+                    raise FormatError(f"more than {MAX_LABELS} labels")
+                by_name[name] = build_row(
+                    Category, f"label {name[:40]!r}", id=len(by_name), name=name
+                )
         return list(by_name.values())
 
     def _rows(
@@ -260,7 +277,7 @@ class CvatFormat:
         file: Path,
         tree: ET.Element,
         root: Path,
-        prefix: bool,
+        folder: bool,
         ids: dict[str, int],
         images: list[Image],
         annotations: list[Annotation],
@@ -283,6 +300,8 @@ class CvatFormat:
             if not name:
                 raise FormatError(f"{file.name}: image {image_id} has no name")
             shapes = [c for c in el if c.tag != "attribute"]
+            if len(el) > len(shapes):  # <attribute> children of an image have no place in the model
+                count(dropped, "images.attributes", len(el) - len(shapes))
             if len(shapes) > MAX_SHAPES_PER_IMAGE:
                 raise FormatError(f"{file.name}: image {image_id} has too many shapes")
             declared = None
@@ -299,9 +318,14 @@ class CvatFormat:
                 continue
             extras: dict[str, str] = {}
             for key, value in el.attrib.items():
-                if key not in _IMAGE_RESERVED:
+                if key in ("format", "file_name"):  # would replace metadata of the row
+                    count(dropped, f"images.source.{key}")
+                elif key not in _IMAGE_RESERVED:
                     extras[key] = _checked(value, f"image {image_id} attribute {key}")
-            source = {NATIVE_KEY: NAME, "id": image_id, "file_name": name} | extras
+            source: dict[str, object] = {NATIVE_KEY: NAME, "id": image_id, "file_name": name}
+            if folder:
+                source[LAYOUT_DOCUMENT] = file.name
+            source |= extras
             image = make_image(located, split=split, source=source, ref=f"image {image_id}")
             if declared is not None and declared != (image.width, image.height):
                 dropped["images.declared_size"] += 1
@@ -314,7 +338,7 @@ class CvatFormat:
                 if shape.tag != "box":
                     skipped["annotations.unsupported.other"] += 1
                     continue
-                stem = f"{file.stem}:" if prefix else ""
+                stem = f"{file.stem}:" if folder else ""
                 ann_id = f"{stem}{image_id}:{index:06d}"
                 row = self._box(shape, ann_id, image, ids, skipped, dropped)
                 if row is not None:
@@ -366,6 +390,8 @@ class CvatFormat:
             if len(attributes) >= MAX_ATTRIBUTES_PER_BOX:
                 raise FormatError(f"{where}: too many attributes")
             attributes[key] = _text(child)
+        if "format" in el.attrib:
+            count(dropped, "annotations.source.format")
         extras = {
             k: _checked(v, f"{where} attribute {k}")
             for k, v in el.attrib.items()
@@ -408,30 +434,38 @@ class CvatFormat:
         dropped: Counter[str] = Counter()
         categories = sorted(ds.categories, key=lambda c: c.id)
         labels = self._labels(categories, dropped)
-        names = self._names(ds)
+        names = self._names(ds, dropped)
         anns_of: dict[str, list[Annotation]] = {}
         for ann in sorted(ds.annotations, key=lambda a: a.ann_id):
             anns_of.setdefault(ann.image_id, []).append(ann)
-        by_split: dict[str, list[Image]] = {}
+        groups: dict[tuple[str, str], list[Image]] = {}
         for image in sorted(ds.images, key=lambda i: (names[i.image_id], i.image_id)):
-            by_split.setdefault(image.split, []).append(image)
-
+            groups.setdefault(_document_of(image), []).append(image)
+        splits_of: dict[str, set[str]] = {}
+        for document, split in groups:
+            splits_of.setdefault(document, set()).add(split)
         used_attrs: dict[int, set[str]] = {}
         for ann in ds.annotations:
             used_attrs.setdefault(ann.category_id, set()).update(ann.attributes)
         documents: dict[str, ET.Element] = {}
-        for split, members in by_split.items():
-            documents[split] = self._document(
+        for (document, split), members in groups.items():
+            target = document
+            if len(splits_of[document]) > 1:  # one original file whose images changed split
+                target = f"{document.removesuffix('.xml')}_{split}.xml"
+            documents[target] = self._document(
                 ds, split, members, names, anns_of, labels, used_attrs, dropped
             )
-        if set(documents) <= {"unassigned"}:
-            targets = {"unassigned": out / "annotations.xml"}
+        single = set(documents) <= {"unassigned.xml"} and not any(
+            is_native(i.source, NAME) and LAYOUT_DOCUMENT in i.source for i in ds.images
+        )
+        if single:
+            targets = {name: out / "annotations.xml" for name in documents}
         else:
             (out / "annotations").mkdir()
-            targets = {s: out / "annotations" / f"{s}.xml" for s in documents}
-        for split, element in documents.items():
+            targets = {name: out / "annotations" / name for name in documents}
+        for name, element in documents.items():
             ET.indent(element)
-            targets[split].write_bytes(
+            targets[name].write_bytes(
                 b'<?xml version="1.0" encoding="utf-8"?>\n'
                 + ET.tostring(element, encoding="utf-8", xml_declaration=False)
                 + b"\n"
@@ -460,9 +494,7 @@ class CvatFormat:
             ):
                 if lost:
                     dropped[f"categories.{column}"] += 1
-            name = _clean(cat.name)
-            if name != cat.name:
-                dropped["categories.text.invalid_xml_chars"] += 1
+            name = _clean(cat.name, dropped, "categories")
             clean[cat.id] = cat.model_copy(update={"name": name})
         names = [c.name for c in clean.values()]
         if len(set(names)) != len(names):
@@ -470,11 +502,16 @@ class CvatFormat:
         return clean
 
     @staticmethod
-    def _names(ds: Dataset) -> dict[str, str]:
+    def _names(ds: Dataset, dropped: Counter[str]) -> dict[str, str]:
+        """Output file names: cleaned of characters XML cannot carry first, so the name written in
+        the document is the name of the file on disk, then made unique."""
         used: set[str] = set()
         names: dict[str, str] = {}
-        for image in sorted(ds.images, key=lambda i: (_hint(i), i.image_id)):
-            names[image.image_id] = files.unique_name(_hint(image), used, image.image_id[:8])
+        cleaned = {i.image_id: _clean(_hint(i), dropped, "images") for i in ds.images}
+        for image in sorted(ds.images, key=lambda i: (cleaned[i.image_id], i.image_id)):
+            names[image.image_id] = files.unique_name(
+                cleaned[image.image_id], used, image.image_id[:8]
+            )
             files.safe_join(Path("images"), names[image.image_id])
         return names
 
@@ -492,7 +529,7 @@ class CvatFormat:
         root = ET.Element("annotations")
         ET.SubElement(root, "version").text = "1.1"
         task = ET.SubElement(ET.SubElement(root, "meta"), "task")
-        ET.SubElement(task, "name").text = _clean(ds.manifest.name)
+        ET.SubElement(task, "name").text = _clean(ds.manifest.name, dropped, "dataset")
         ET.SubElement(task, "size").text = str(len(members))
         ET.SubElement(task, "mode").text = "annotation"
         if split != "unassigned":
@@ -503,11 +540,13 @@ class CvatFormat:
             ET.SubElement(label, "name").text = cat.name
             for key in ("color", "type"):
                 if key in cat.attributes:
-                    ET.SubElement(label, key).text = _clean(cat.attributes[key])
+                    ET.SubElement(label, key).text = _clean(
+                        cat.attributes[key], dropped, "categories"
+                    )
             specs = ET.SubElement(label, "attributes")
             for attr in sorted(used_attrs.get(cat.id, ())):
                 spec = ET.SubElement(specs, "attribute")
-                ET.SubElement(spec, "name").text = _clean(attr)
+                ET.SubElement(spec, "name").text = _clean(attr, dropped, "annotations")
                 ET.SubElement(spec, "mutable").text = "False"
                 ET.SubElement(spec, "input_type").text = "text"
                 ET.SubElement(spec, "default_value").text = ""
@@ -528,10 +567,12 @@ class CvatFormat:
                 while next_id in used or next_id in taken:
                     next_id += 1
                 image_id = next_id
+                if native:
+                    count(dropped, "images.source.id")
             used.add(image_id)
             el = ET.SubElement(root, "image")
             el.set("id", str(image_id))
-            el.set("name", _clean(names[image.image_id]))
+            el.set("name", names[image.image_id])
             el.set("width", str(image.width))
             el.set("height", str(image.height))
             if native:
@@ -539,9 +580,9 @@ class CvatFormat:
                     if key in (NATIVE_KEY, "id", "file_name"):
                         continue
                     if _valid_name(key) and key not in _IMAGE_RESERVED and isinstance(value, str):
-                        el.set(key, _clean(value))
+                        el.set(key, _clean(value, dropped, "images"))
                     else:
-                        dropped[f"images.source.{_safe_key(key)}"] += 1
+                        count(dropped, f"images.source.{safe_key(key)}")
             else:
                 foreign_source_drops(dropped, "images", image.source, _NAME_HINTS)
             if image.group_id is not None:
@@ -573,22 +614,22 @@ class CvatFormat:
                 if key in (NATIVE_KEY, "source"):
                     continue
                 if _valid_name(key) and key not in _BOX_RESERVED and isinstance(extra, str):
-                    el.set(key, _clean(extra))
+                    el.set(key, _clean(extra, dropped, "annotations"))
                 else:
-                    dropped[f"annotations.source.{_safe_key(key)}"] += 1
+                    count(dropped, f"annotations.source.{safe_key(key)}")
         else:
             foreign_source_drops(dropped, "annotations", ann.source, frozenset())
         stringified = False
         for key, attr in ann.attributes.items():
             child = ET.SubElement(el, "attribute")
-            child.set("name", _clean(key))
+            child.set("name", _clean(key, dropped, "annotations"))
             if isinstance(attr, bool):
                 text, stringified = ("true" if attr else "false"), True
             elif isinstance(attr, str):
                 text = attr
             else:
                 text, stringified = repr(attr), True
-            child.text = _clean(text)
+            child.text = _clean(text, dropped, "annotations")
         for column, present in (
             ("attributes_stringified", stringified),
             ("is_crowd", ann.is_crowd),
@@ -605,8 +646,13 @@ def _valid_name(tag: str) -> bool:
     return 0 < len(tag) <= 64 and tag[0] in _NAME_START and all(c in _NAME_REST for c in tag)
 
 
-def _safe_key(key: str) -> str:
-    return key if _valid_name(key) else "invalid_key"
+def _document_of(image: Image) -> tuple[str, str]:
+    """``(output document name, split)``: the original file when the row came from one."""
+    if is_native(image.source, NAME):
+        document = image.source.get(LAYOUT_DOCUMENT)
+        if isinstance(document, str) and _DOCUMENT_NAME.fullmatch(document):
+            return document, image.split
+    return f"{image.split}.xml", image.split
 
 
 def _hint(image: Image) -> str:
