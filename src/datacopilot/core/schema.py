@@ -1,0 +1,336 @@
+"""Pydantic models for the dataset tables and the invariants of docs/architecture/03-data-model.md.
+
+Row-level invariants live in model validators; invariants that span rows (unique ids, foreign
+keys, boxes inside their image) are checked by :func:`validate_tables`.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Annotated, Literal
+
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    model_validator,
+)
+
+from datacopilot.core.errors import ValidationError
+
+Split = Literal["train", "val", "test", "unassigned"]
+Kind = Literal["bbox", "classification"]
+Provenance = Literal["human", "model", "proposal_accepted"]
+Task = Literal["detection", "classification"]
+Severity = Literal["CRITICAL", "WARN", "INFO"]
+SEVERITIES: tuple[Severity, ...] = ("CRITICAL", "WARN", "INFO")
+
+SCHEMA_VERSION = 1
+MAX_PATH_CHARS = 4096
+"""Longest ``Image.file_path`` (the usual operating-system path limit)."""
+MAX_NAME_CHARS = 65_536
+"""Longest ``Category.name``; reports and findings show a truncated form."""
+MAX_ID_CHARS = 1024
+"""Longest ``Annotation.ann_id`` (and the ``Finding.ann_id`` that refers to it)."""
+_MAX_REPORTED = 5
+MAX_PAYLOAD_BYTES = 65_536
+"""Largest ``Finding.payload`` in canonical JSON bytes; a class histogram of 1,000 classes fits."""
+MAX_PAYLOAD_DEPTH = 6
+"""Deepest nesting of a ``Finding.payload``; findings are flat records, not documents."""
+MAX_PAYLOAD_NODES = 20_000
+"""Most JSON values (containers and scalars) in one ``Finding.payload``."""
+
+
+def _finite(value: JsonValue) -> JsonValue:
+    """Reject NaN and infinities anywhere in a JSON-like value (they break canonical hashing)."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("non-finite number")
+    if isinstance(value, dict):
+        for item in value.values():
+            _finite(item)
+    elif isinstance(value, list):
+        for item in value:
+            _finite(item)
+    return value
+
+
+def _bounded_payload(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Bound a finding payload by depth, node count and serialised size before it is stored.
+
+    The walk is iterative, so a hostile plugin cannot trigger deep recursion here.
+    """
+    nodes = 0
+    stack: list[tuple[JsonValue, int]] = [(value, 1)]
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if depth > MAX_PAYLOAD_DEPTH or nodes > MAX_PAYLOAD_NODES:
+            raise ValueError("payload is nested too deeply or has too many values")
+        if isinstance(item, dict):
+            stack.extend((v, depth + 1) for v in item.values())
+        elif isinstance(item, list):
+            stack.extend((v, depth + 1) for v in item)
+    size = len(json.dumps(value, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+    if size > MAX_PAYLOAD_BYTES:
+        raise ValueError(f"payload is {size} bytes; the limit is {MAX_PAYLOAD_BYTES}")
+    return value
+
+
+Source = dict[str, Annotated[JsonValue, AfterValidator(_finite)]]
+Payload = Annotated[
+    dict[str, Annotated[JsonValue, AfterValidator(_finite)]], AfterValidator(_bounded_payload)
+]
+Scalar = str | int | float | bool
+
+
+class _Row(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    def to_row(self) -> dict[str, JsonValue]:
+        """Plain JSON-compatible mapping of this row (tuples become lists)."""
+        return self.model_dump(mode="json")
+
+
+class Category(_Row):
+    id: int
+    name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
+    aliases: tuple[str, ...] = ()
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class Image(_Row):
+    image_id: str = Field(pattern=r"^[0-9a-f]{16}$")
+    file_path: str = Field(min_length=1, max_length=MAX_PATH_CHARS)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    split: Split = "unassigned"
+    group_id: str | None = None
+    source: Source = Field(default_factory=dict)
+
+
+class Annotation(_Row):
+    ann_id: str = Field(min_length=1, max_length=MAX_ID_CHARS)
+    image_id: str = Field(pattern=r"^[0-9a-f]{16}$")
+    category_id: int
+    kind: Kind
+    bbox_xyxy_abs: tuple[float, float, float, float] | None = None
+    score: float | None = None
+    is_crowd: bool = False
+    occluded: bool | None = None
+    truncated: bool | None = None
+    attributes: dict[str, Scalar] = Field(default_factory=dict)
+    provenance: Provenance = "human"
+    source: Source = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self) -> Annotation:
+        box = self.bbox_xyxy_abs
+        if self.kind == "classification":
+            if box is not None:
+                raise ValueError("classification annotation must not have a box")
+        else:
+            if box is None:
+                raise ValueError("bbox annotation requires bbox_xyxy_abs")
+            x1, y1, x2, y2 = box
+            if not (0 <= x1 < x2 and 0 <= y1 < y2):
+                raise ValueError("box must satisfy 0 <= x_min < x_max and 0 <= y_min < y_max")
+        if self.score is not None and self.provenance == "human":
+            raise ValueError("score must be null for human provenance")
+        for value in self.attributes.values():
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("non-finite attribute value")
+        return self
+
+
+_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class PluginSpec(BaseModel, frozen=True):
+    """Metadata every registered plugin exposes before its implementation is used."""
+
+    name: str = Field(pattern=_NAME.pattern)
+    kind: Literal["format", "check", "proposer", "embedder"]
+    license: str = Field(min_length=1)
+    extra: str | None
+    gpu_memory_gb: float | None
+    version: str = Field(min_length=1)
+
+
+class DatasetManifest(_Row):
+    version: str = Field(pattern=r"^[0-9a-f]{32}$")
+    schema_version: int = Field(ge=1)
+    name: str = Field(min_length=1)
+    task: Task
+    categories: tuple[Category, ...]
+    lineage: tuple[str, ...] = ()
+    image_count: int = Field(ge=0)
+    annotation_count: int = Field(ge=0)
+    created_at: AwareDatetime
+
+
+_CHECK_NAME = r"^[a-z][a-z0-9_]{0,63}$"
+_UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+class Finding(_Row):
+    """One problem a check found; embedded in :class:`AuditRun`."""
+
+    finding_id: str = Field(pattern=r"^[0-9a-f]{16}$")
+    run_id: str = Field(pattern=_UUID)
+    check: str = Field(pattern=_CHECK_NAME)
+    severity: Severity
+    image_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+    ann_id: str | None = Field(default=None, min_length=1, max_length=MAX_ID_CHARS)
+    payload: Payload = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_id(self) -> Finding:
+        from datacopilot.core.version import finding_id
+
+        expected = finding_id(self.check, self.image_id, self.ann_id, self.payload)
+        if self.finding_id != expected:
+            raise ValueError("finding_id does not match the finding's check, target and payload")
+        return self
+
+
+class Counts(_Row):
+    """Findings per severity."""
+
+    critical: int = Field(ge=0)
+    warn: int = Field(ge=0)
+    info: int = Field(ge=0)
+
+
+MAX_SUMMARY_NAME_CHARS = 200
+"""Category names are cut to this length in :class:`Summary`."""
+
+
+class SummaryClass(_Row):
+    id: int
+    name: str = Field(max_length=MAX_SUMMARY_NAME_CHARS)
+
+
+class Summary(_Row):
+    """Dataset facts the reports need (histogram, split by class table), computed once per run.
+
+    ``class_counts`` maps ``split -> str(category_id) -> annotations``. When the dataset has more
+    classes than the summary cap, ``classes`` and ``class_counts`` are empty and
+    ``classes_omitted`` is true; the totals are always present.
+    """
+
+    task: Task
+    image_count: int = Field(ge=0)
+    annotation_count: int = Field(ge=0)
+    split_images: dict[str, int]
+    classes: tuple[SummaryClass, ...] = ()
+    classes_omitted: bool = False
+    class_counts: dict[str, dict[str, int]] = Field(default_factory=dict)
+
+
+class AuditRun(_Row):
+    """Result of one audit: the findings plus the facts needed to reproduce and gate on them.
+
+    Attributes:
+        run_id: the CLI ``request_id`` of the invocation (lowercase UUID).
+        fail_on: the gate that was evaluated; ``passed`` is False when it matched.
+        timings_ms: wall time per check, in run order. Not part of the determinism contract.
+        summary: dataset totals and per-split class counts for the reports.
+    """
+
+    run_id: str = Field(pattern=_UUID)
+    dataset_version: str = Field(pattern=r"^[0-9a-f]{32}$")
+    started_at: AwareDatetime
+    checks: tuple[str, ...]
+    embedder: str | None = None
+    counts: Counts
+    passed: bool
+    fail_on: tuple[str, ...] = ()
+    timings_ms: dict[str, int] = Field(default_factory=dict)
+    summary: Summary | None = None
+    findings: tuple[Finding, ...] = ()
+
+    @model_validator(mode="after")
+    def _check(self) -> AuditRun:
+        seen: set[str] = set()
+        for f in self.findings:
+            if f.run_id != self.run_id:
+                raise ValueError(f"finding {f.finding_id} belongs to run_id {f.run_id}")
+            if f.finding_id in seen:
+                raise ValueError(f"duplicate finding_id {f.finding_id}")
+            seen.add(f.finding_id)
+        tally = Counter(f.severity for f in self.findings)
+        expected = Counts(critical=tally["CRITICAL"], warn=tally["WARN"], info=tally["INFO"])
+        if self.counts != expected:
+            raise ValueError(f"counts {self.counts.model_dump()} do not equal the findings")
+        return self
+
+
+@dataclass(frozen=True)
+class Dataset:
+    """A validated dataset version: manifest plus the image and annotation tables."""
+
+    manifest: DatasetManifest
+    images: tuple[Image, ...]
+    annotations: tuple[Annotation, ...]
+
+    @property
+    def categories(self) -> tuple[Category, ...]:
+        return self.manifest.categories
+
+
+def _duplicates(values: Sequence[object]) -> list[object]:
+    return [v for v, n in Counter(values).items() if n > 1]
+
+
+def validate_tables(
+    images: Sequence[Image],
+    annotations: Sequence[Annotation],
+    categories: Sequence[Category],
+    *,
+    task: Task,
+) -> None:
+    """Check the cross-row invariants (3, 4, 6 and id uniqueness) of the three tables.
+
+    Raises:
+        ValidationError: listing up to five problems (naming ann_id or image_id), then a count.
+    """
+    problems: list[str] = []
+    for label, values in (
+        ("image_id", [i.image_id for i in images]),
+        ("ann_id", [a.ann_id for a in annotations]),
+        ("category id", [c.id for c in categories]),
+        ("category name", [c.name for c in categories]),
+    ):
+        problems += [f"duplicate {label} {v!r}" for v in _duplicates(values)]
+    by_id = {i.image_id: i for i in images}
+    category_ids = {c.id for c in categories}
+    expected: Kind = "bbox" if task == "detection" else "classification"
+    for ann in annotations:
+        ref = f"ann_id {ann.ann_id!r}"
+        if ann.kind != expected:
+            problems.append(f"{ref} has kind {ann.kind!r} but dataset task is {task!r}")
+        image = by_id.get(ann.image_id)
+        if image is None:
+            problems.append(f"{ref} references unknown image_id {ann.image_id!r}")
+        elif ann.bbox_xyxy_abs is not None:
+            _, _, x2, y2 = ann.bbox_xyxy_abs
+            if x2 > image.width or y2 > image.height:
+                problems.append(
+                    f"{ref} box {ann.bbox_xyxy_abs} outside image {image.image_id!r} "
+                    f"({image.width}x{image.height})"
+                )
+        if ann.category_id not in category_ids:
+            problems.append(f"{ref} references unknown category id {ann.category_id}")
+    if problems:
+        shown = "; ".join(problems[:_MAX_REPORTED])
+        more = len(problems) - _MAX_REPORTED
+        suffix = f"; and {more} more" if more > 0 else ""
+        raise ValidationError(f"invalid dataset: {shown}{suffix}")

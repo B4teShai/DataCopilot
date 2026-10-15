@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;sha256-nF5Ylnhp5Ku9PEYC0V2Bj08osxu8prU/NHpTiW1IflI=&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<title>DataCopilot audit</title>
+<style>:root{color-scheme:light dark;--bg:#fff;--fg:#1b1f24;--muted:#5b6570;--line:#d6dbe1;--crit:#b42318;--warn:#b54708;--info:#175cd3;--ok:#067647;--bar:#4f6bed}@media (prefers-color-scheme:dark){:root{--bg:#14181d;--fg:#e6e9ed;--muted:#9aa5b1;--line:#2c333b;--crit:#f97066;--warn:#fdb022;--info:#84adff;--ok:#47cd89;--bar:#8098f9}}body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}main{max-width:1100px;margin:0 auto}h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{color:var(--muted);font-weight:600}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}.cards{display:flex;flex-wrap:wrap;gap:12px}.card{border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:96px}.card b{display:block;font-size:22px}.muted{color:var(--muted)}.critical{color:var(--crit)}.warn{color:var(--warn)}.info{color:var(--info)}.pass{color:var(--ok)}.fail{color:var(--crit)}svg{max-width:100%;height:auto}svg text{fill:var(--fg);font:12px system-ui,sans-serif}svg rect.bar{fill:var(--bar)}code{font-family:ui-monospace,monospace;font-size:12px}</style>
+</head>
+<body>
+<main>
+<h1>DataCopilot audit <span class="fail">FAILED</span></h1>
+<p class="muted">Run <code>1111aaaa-2222-4333-8444-5555bbbb5555</code> on dataset version <code>32d05067c3df6c1686d714d97c138df5</code>, started 2026-01-01T00:00:00+00:00. Gate (--fail-on): critical. datacopilot 0.0.1.dev0.</p>
+
+<h2>Score card</h2>
+<div class="cards">
+<div class="card critical"><b>5</b>critical</div>
+<div class="card warn"><b>8</b>warn</div>
+<div class="card info"><b>0</b>info</div>
+<div class="card"><b>18</b>images</div>
+<div class="card"><b>18</b>annotations</div>
+</div>
+
+<h2>Checks</h2>
+<table>
+<tr><th>Check</th><th class="num">Findings</th><th class="num">Time (ms)</th></tr>
+<tr><td>integrity</td><td class="num">3</td><td class="num">0</td></tr>
+<tr><td>duplicates</td><td class="num">4</td><td class="num">0</td></tr>
+<tr><td>imbalance</td><td class="num">3</td><td class="num">0</td></tr>
+<tr><td>boxes</td><td class="num">3</td><td class="num">0</td></tr>
+</table>
+
+<h2>Class histogram</h2>
+<svg width="690" height="60" viewBox="0 0 690 60" role="img">
+<text x="0" y="14">cat</text>
+<rect class="bar" x="200" y="3" width="420.0" height="14" />
+<text x="626.0" y="14">15</text>
+<text x="0" y="34">dog</text>
+<rect class="bar" x="200" y="23" width="56.0" height="14" />
+<text x="262.0" y="34">2</text>
+<text x="0" y="54">bird</text>
+<rect class="bar" x="200" y="43" width="28.0" height="14" />
+<text x="234.0" y="54">1</text>
+</svg>
+
+<h2>Split by class</h2>
+<table>
+<tr><th>Class</th><th class="num">train</th><th class="num">val</th><th class="num">test</th></tr>
+<tr class="muted"><td>images</td><td class="num">15</td><td class="num">1</td><td class="num">2</td></tr>
+<tr><td>cat <span class="muted">(1)</span></td><td class="num">14</td><td class="num">1</td><td class="num">0</td></tr>
+<tr><td>dog <span class="muted">(2)</span></td><td class="num">1</td><td class="num">0</td><td class="num">1</td></tr>
+<tr><td>bird <span class="muted">(3)</span></td><td class="num">1</td><td class="num">0</td><td class="num">0</td></tr>
+</table>
+
+<h2>Findings</h2>
+<table>
+<tr><th>Severity</th><th>Check</th><th>Rule</th><th>Image</th><th>File</th><th>Detail</th></tr>
+<tr class="finding"><td class="critical">CRITICAL</td><td>integrity</td><td>Image file is missing <span class="muted">(file_missing)</span></td><td><code>27eb8ea4a311ec78</code></td><td>f.png</td><td></td></tr>
+<tr class="finding"><td class="critical">CRITICAL</td><td>integrity</td><td>Declared size differs from the image header <span class="muted">(size_mismatch)</span></td><td><code>560205b3ec517689</code></td><td>e.png</td><td>actual=[50,50]; declared=[60,50]</td></tr>
+<tr class="finding"><td class="critical">CRITICAL</td><td>duplicates</td><td>Images with identical file content <span class="muted">(exact_duplicate)</span></td><td><code>00000000000000c1</code></td><td></td><td>count=2; cross_split=true; group_id=995e9ce2b9cb; members=[{&#34;image_id&#34;:&#34;00000000000000c1&#34;,&#34;split&#34;:&#34;train&#34;,&#34;file_name&#34;:&#34;c.png&#34;},{&#34;image_id&#34;:&#34;00000000000000d1&#34;,&#34;split&#34;:&#34;test&#34;,&#34;file_name&#34;:&#34;d.png&#34;}]; splits={&#34;test&#34;:1,&#34;train&#34;:1}</td></tr>
+<tr class="finding"><td class="critical">CRITICAL</td><td>duplicates</td><td>File content no longer matches the image id <span class="muted">(content_changed)</span></td><td><code>00000000000000c1</code></td><td>c.png</td><td>actual=995e9ce2b9cb; expected=00000000000000c1</td></tr>
+<tr class="finding"><td class="critical">CRITICAL</td><td>duplicates</td><td>File content no longer matches the image id <span class="muted">(content_changed)</span></td><td><code>00000000000000d1</code></td><td>d.png</td><td>actual=995e9ce2b9cb; expected=00000000000000d1</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>integrity</td><td>Remote images were not checked <span class="muted">(remote_not_checked)</span></td><td><code></code></td><td></td><td>count=1; total=18</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>duplicates</td><td>Some images could not be hashed <span class="muted">(images_not_hashed)</span></td><td><code></code></td><td></td><td>count=2; reasons={&#34;file_missing&#34;:1,&#34;remote&#34;:1}; total=18</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>imbalance</td><td>Class distribution is long-tailed <span class="muted">(long_tail)</span></td><td><code></code></td><td></td><td>classes_present=3; effective_classes=1.5895; head=[{&#34;id&#34;:1,&#34;name&#34;:&#34;cat&#34;,&#34;count&#34;:14},{&#34;id&#34;:2,&#34;name&#34;:&#34;dog&#34;,&#34;count&#34;:1},{&#34;id&#34;:3,&#34;name&#34;:&#34;bird&#34;,&#34;count&#34;:1}]; ratio=14.0; split=train; tail=[{&#34;id&#34;:2,&#34;name&#34;:&#34;dog&#34;,&#34;count&#34;:1},{&#34;id&#34;:3,&#34;name&#34;:&#34;bird&#34;,&#34;count&#34;:1},{&#34;id&#34;:1,&#34;name&#34;:&#34;cat&#34;,&#34;count&#34;:14}]; total=16</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>imbalance</td><td>Classes missing from a split <span class="muted">(class_missing_in_split)</span></td><td><code></code></td><td></td><td>class_ids=[1,3]; count=2; split=test</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>imbalance</td><td>Classes missing from a split <span class="muted">(class_missing_in_split)</span></td><td><code></code></td><td></td><td>class_ids=[2,3]; count=2; split=val</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>boxes</td><td>Box has an extreme aspect ratio <span class="muted">(extreme_aspect)</span></td><td><code>55ac5348b50cd24b</code></td><td></td><td>aspect_ratio=40.0</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>boxes</td><td>Box is very small <span class="muted">(tiny_box)</span></td><td><code>55ac5348b50cd24b</code></td><td></td><td>area_fraction=0.008333; height=40.0; width=1.0</td></tr>
+<tr class="finding"><td class="warn">WARN</td><td>boxes</td><td>Duplicate box of the same class <span class="muted">(duplicate_box)</span></td><td><code>733494d1bd6f1402</code></td><td></td><td>category_id=1; iou=0.9855; other_ann_id=0-0</td></tr>
+</table>
+<p class="muted">Showing 13 of 13 findings. Thumbnails are not included in this report.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{{ csp }}">
+<title>DataCopilot audit</title>
+{# css is a constant defined in html_report.py (never dataset text); it is allowed by hash in the CSP above #}
+<style>{{ css | safe }}</style>
+</head>
+<body>
+<main>
+<h1>DataCopilot audit {% if gated %}<span class="{{ 'pass' if passed else 'fail' }}">{{ 'PASSED' if passed else 'FAILED' }}</span>{% else %}<span class="muted">no gate applied</span>{% endif %}</h1>
+<p class="muted">Run <code>{{ run_id }}</code> on dataset version <code>{{ dataset_version }}</code>, started {{ started_at }}. Gate (--fail-on): {{ fail_on }}. datacopilot {{ version }}.</p>
+
+<h2>Score card</h2>
+<div class="cards">
+<div class="card critical"><b>{{ counts.critical }}</b>critical</div>
+<div class="card warn"><b>{{ counts.warn }}</b>warn</div>
+<div class="card info"><b>{{ counts.info }}</b>info</div>
+{% if summary %}
+<div class="card"><b>{{ summary.image_count }}</b>images</div>
+<div class="card"><b>{{ summary.annotation_count }}</b>annotations</div>
+{% endif %}
+</div>
+
+<h2>Checks</h2>
+<table>
+<tr><th>Check</th><th class="num">Findings</th><th class="num">Time (ms)</th></tr>
+{% for c in checks %}
+<tr><td>{{ c.name }}</td><td class="num">{{ c.findings }}</td><td class="num">{{ c.ms if c.ms is not none else '' }}</td></tr>
+{% endfor %}
+</table>
+
+{% if histogram %}
+<h2>Class histogram</h2>
+<svg width="{{ 200 + bar_area + 70 }}" height="{{ histogram_height }}" viewBox="0 0 {{ 200 + bar_area + 70 }} {{ histogram_height }}" role="img">
+{% for bar in histogram %}
+<text x="0" y="{{ bar.y + 14 }}">{{ bar.label }}</text>
+<rect class="bar" x="200" y="{{ bar.y + 3 }}" width="{{ bar.width }}" height="14" />
+<text x="{{ 206 + bar.width }}" y="{{ bar.y + 14 }}">{{ bar.count }}</text>
+{% endfor %}
+</svg>
+{% endif %}
+
+{% if split_table %}
+<h2>Split by class</h2>
+<table>
+<tr><th>Class</th>{% for s in split_table.splits %}<th class="num">{{ s }}</th>{% endfor %}</tr>
+<tr class="muted"><td>images</td>{% for n in split_table.images %}<td class="num">{{ n }}</td>{% endfor %}</tr>
+{% for r in split_table.rows %}
+<tr><td>{{ r.name }} <span class="muted">({{ r.id }})</span></td>{% for n in r.counts %}<td class="num">{{ n }}</td>{% endfor %}</tr>
+{% endfor %}
+</table>
+{% if split_table.omitted %}<p class="muted">{{ split_table.omitted }} more classes are in the JSON report.</p>{% endif %}
+{% endif %}
+
+<h2>Findings</h2>
+{% if total_findings == 0 %}
+<p class="muted">No findings.</p>
+{% else %}
+<table>
+<tr><th>Severity</th><th>Check</th><th>Rule</th><th>Image</th><th>File</th><th>Detail</th></tr>
+{% for r in rows %}
+<tr class="finding"><td class="{{ r.severity_class }}">{{ r.severity }}</td><td>{{ r.check }}</td><td>{{ r.summary }} <span class="muted">({{ r.rule }})</span></td><td><code>{{ r.image_id }}</code></td><td>{{ r.file_name }}</td><td>{{ r.detail }}</td></tr>
+{% endfor %}
+</table>
+{% if shown_findings < total_findings %}
+<p class="muted">Showing {{ shown_findings }} of {{ total_findings }} findings (most severe first); omitted: {{ omitted }}. The JSON report has all of them.</p>
+{% else %}
+<p class="muted">Showing {{ shown_findings }} of {{ total_findings }} findings. Thumbnails are not included in this report.</p>
+{% endif %}
+{% endif %}
+</main>
+</body>
+</html>

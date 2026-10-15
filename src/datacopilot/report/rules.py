@@ -1,0 +1,51 @@
+"""Human descriptions of the first-party findings, keyed by ``check/rule``."""
+
+from __future__ import annotations
+
+from datacopilot.report.text import clean_text
+
+_DESCRIPTIONS: dict[str, str] = {
+    "integrity/file_missing": "Image file is missing",
+    "integrity/unsafe_path": "Image path is unsafe and was not opened",
+    "integrity/not_a_regular_file": "Image path is not a regular file",
+    "integrity/unreadable": "Image file cannot be read",
+    "integrity/empty_file": "Image file is empty",
+    "integrity/invalid_header": "Image header is invalid or truncated",
+    "integrity/size_mismatch": "Declared size differs from the image header",
+    "integrity/file_too_large": "Image file exceeds the size limit and was not read",
+    "integrity/unsupported_format": "Image format is not supported by the header reader",
+    "integrity/exif_orientation": "Image has a non-default EXIF orientation",
+    "integrity/remote_not_checked": "Remote images were not checked",
+    "integrity/external_not_checked": "Images outside the dataset root were not checked",
+    "duplicates/exact_duplicate": "Images with identical file content",
+    "duplicates/content_changed": "File content no longer matches the image id",
+    "duplicates/hash_cache_mismatch": "Hash cache disagreed with the files and was discarded",
+    "duplicates/images_not_hashed": "Some images could not be hashed",
+    "imbalance/long_tail": "Class distribution is long-tailed",
+    "imbalance/class_missing_in_split": "Classes missing from a split",
+    "imbalance/class_unused": "Classes without any annotation",
+    "boxes/invalid_box": "Box has a non-finite coordinate",
+    "boxes/out_of_bounds": "Box lies outside its image",
+    "boxes/zero_area": "Box has zero or negative area",
+    "boxes/tiny_box": "Box is very small",
+    "boxes/extreme_aspect": "Box has an extreme aspect ratio",
+    "boxes/duplicate_box": "Duplicate box of the same class",
+    "boxes/conflicting_class": "Same box labelled with different classes",
+    "boxes/pairwise_skipped": "Pair search skipped for images with too many boxes",
+    "boxes/boxes_truncated": "Findings of one rule were truncated",
+}
+
+
+_GENERIC: dict[str, str] = {
+    "findings_truncated": "Findings of this check were truncated at the per-check cap",
+    "audit_incomplete": "The check ended before examining every image (budget reached)",
+}
+
+
+def describe_rule(check: str, rule: str) -> str:
+    """Description of a rule; unknown (plugin) rules get a bounded, cleaned fallback."""
+    known = _DESCRIPTIONS.get(f"{check}/{rule}")
+    if known is not None:
+        return known
+    generic = _GENERIC.get(rule)
+    return generic if generic is not None else f"{check}: {clean_text(rule, 64)}"
