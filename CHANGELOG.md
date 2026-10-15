@@ -54,6 +54,16 @@ once a release is tagged.
   resumable, `float16` or `float32` storage with a documented rounding. A forged, truncated, stale or
   malformed shard is ignored and counted by reason, never trusted.
 
+- Embedding backends (`embed/backends.py`): `dinov2_small`, `dinov2_base` and `siglip2_base` through a
+  lazy `transformers` import. Revision pinned to a full commit, only the card's safetensors files and
+  `config.json` downloaded, sha256 of every weight file verified before it is loaded, weight hashes
+  logged (`model_loaded`), `trust_remote_code=False`, `use_safetensors=True`, bounded download
+  timeouts, CPU fallback, deterministic Pillow preprocessing. Decoding is bounded: only JPEG, PNG, GIF
+  and BMP reach a decoder, the declared pixel count is checked against 64,000,000 before any pixel is
+  decoded, truncated files and decompression bombs are errors.
+- `hash`: a dependency-free test embedder (SimHash of byte shingles) for tests and benchmarks.
+- A `real_model` pytest marker (off by default) for smoke tests with real weights and real FAISS.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.
