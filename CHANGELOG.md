@@ -6,6 +6,10 @@ once a release is tagged.
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-15
+
+First release candidate. Before 1.0 a minor version may break the public API.
+
 ### Added
 
 - CVAT for images 1.1 XML (`cvat_xml`) and Label Studio JSON (`label_studio`) readers and writers.

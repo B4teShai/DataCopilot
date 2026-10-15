@@ -12,7 +12,7 @@ import typing as _typing
 
 import datacopilot.audit as _audit_package
 
-__version__ = "0.0.1.dev0"
+__version__ = "0.1.0"
 
 if _typing.TYPE_CHECKING:
     from datacopilot.api import audit, export, load

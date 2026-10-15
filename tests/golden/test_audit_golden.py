@@ -15,6 +15,7 @@ import pytest
 from fixtures.auditdata import Img, build
 from fixtures.synth import png_bytes
 
+from datacopilot import __version__
 from datacopilot.audit.context import CheckContext
 from datacopilot.audit.engine import run_audit
 from datacopilot.core.schema import AuditRun, Dataset
@@ -64,7 +65,15 @@ def run(tmp_path: Path) -> AuditRun:
     return normalised(run_audit(ds, "all", ctx, fail_on=["critical"]))
 
 
+GOLDEN_VERSION = "0.0.1.dev0"
+"""The package version the golden files were written with. Reports name the tool version; it is
+replaced by this value before comparing, so a release does not rewrite every golden file."""
+
+
 def check(name: str, text: str) -> None:
+    text = text.replace(f'"{__version__}"', f'"{GOLDEN_VERSION}"').replace(
+        f"datacopilot {__version__}", f"datacopilot {GOLDEN_VERSION}"
+    )
     target = DATA / name
     if os.environ.get("UPDATE_GOLDEN"):
         target.write_text(text, encoding="utf-8")
