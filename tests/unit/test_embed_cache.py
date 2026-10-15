@@ -44,6 +44,11 @@ def ids(n: int, start: int = 0) -> list[str]:
     return [f"{start + i:016x}" for i in range(n)]
 
 
+def dg(n: int, start: int = 0) -> list[str]:
+    """Full digests of the image bytes, one per row."""
+    return [f"{start + i:064x}" for i in range(n)]
+
+
 def open_cache(
     root: Path, identity: ec.CacheIdentity | None = None, secret: bytes | None = SECRET
 ) -> ec.EmbeddingCache:
@@ -73,7 +78,7 @@ def write_manifest(root: Path, doc: dict[str, object], secret: bytes | None = SE
 def fill(root: Path, n: int = 5, **kw: object) -> ec.EmbeddingCache:
     c = open_cache(root, **kw)  # type: ignore[arg-type]
     c.load()
-    c.append(ids(n), unit(n))
+    c.append(ids(n), unit(n), dg(n))
     return c
 
 
@@ -85,7 +90,7 @@ def test_roundtrip_returns_exactly_the_canonical_vectors(tmp_path: Path, dtype: 
     assert c.load().state == "absent"
     raw = np.random.default_rng(0).standard_normal((20, DIMS)).astype(np.float32) * 7.0
     canonical = ec.canonical_vectors(raw, dtype)  # type: ignore[arg-type]
-    c.append(ids(20), canonical)
+    c.append(ids(20), canonical, dg(20))
     got = ec.EmbeddingCache.open(tmp_path / "embeddings", identity, SECRET).load()
     assert got.state == "ok" and got.rejected == {}
     assert list(got.ids) == sorted(ids(20))
@@ -113,10 +118,10 @@ def test_canonical_vectors_reject_nan_inf_zero_and_wrong_shapes() -> None:
 def test_resume_appends_shards_and_keeps_earlier_ones(tmp_path: Path) -> None:
     c = open_cache(tmp_path)
     c.load()
-    c.append(ids(4), unit(4))
+    c.append(ids(4), unit(4), dg(4))
     c2 = open_cache(tmp_path)
     assert len(c2.load().ids) == 4
-    c2.append(ids(3, start=4), unit(3, seed=1))
+    c2.append(ids(3, start=4), unit(3, seed=1), dg(3, start=4))
     got = open_cache(tmp_path).load()
     assert list(got.ids) == sorted(ids(7)) and len(shard_files(tmp_path)) == 2
 
@@ -127,7 +132,7 @@ def test_the_manifest_records_identity_dataset_version_weights_and_digests(
     weights = {"model.safetensors": "c" * 64}
     c = ec.EmbeddingCache.open(tmp_path / "embeddings", ident(weights=weights), SECRET)
     c.load()
-    c.append(ids(3), unit(3))
+    c.append(ids(3), unit(3), dg(3))
     doc = manifest(tmp_path)
     assert (doc["model_id"], doc["revision"], doc["dims"], doc["dtype"]) == (
         "m",
@@ -175,7 +180,7 @@ def test_a_forged_shard_with_a_matching_digest_but_no_key_is_rejected(tmp_path: 
     fill(tmp_path, 5)
     doc = manifest(tmp_path)
     (entry,) = doc["shards"]  # type: ignore[misc]
-    forged = ec.encode_shard(ident(), ids(5), unit(5, seed=99))
+    forged = ec.encode_shard(ident(), ids(5), unit(5, seed=99), dg(5))
     (cache_dir(tmp_path) / entry["name"]).write_bytes(forged)
     entry.update(sha256=hashlib.sha256(forged).hexdigest(), bytes=len(forged))
     (cache_dir(tmp_path) / "manifest.json").write_text(json.dumps(doc))  # old MAC kept
@@ -187,7 +192,7 @@ def test_without_a_secret_the_cache_is_disabled_and_writes_nothing(tmp_path: Pat
     c = ec.EmbeddingCache.open(tmp_path / "embeddings", ident(), None)
     got = c.load()
     assert got.state == "disabled" and len(got.ids) == 0
-    c.append(ids(2), unit(2))  # a no-op, not an error: the caller computes in memory
+    c.append(ids(2), unit(2), dg(2))  # a no-op, not an error: the caller computes in memory
     assert not (tmp_path / "embeddings").exists()
 
 
@@ -200,8 +205,8 @@ def test_disabled_cache_reports_the_reason_it_was_given(tmp_path: Path) -> None:
 def test_a_truncated_shard_is_rejected_and_the_others_survive(tmp_path: Path) -> None:
     c = open_cache(tmp_path)
     c.load()
-    c.append(ids(3), unit(3))
-    c.append(ids(3, 3), unit(3, 1))
+    c.append(ids(3), unit(3), dg(3))
+    c.append(ids(3, 3), unit(3, 1), dg(3, 3))
     first = shard_files(tmp_path)[0]
     first.write_bytes(first.read_bytes()[:-20])
     got = open_cache(tmp_path).load()
@@ -238,7 +243,7 @@ def test_unlisted_shards_and_temporary_files_are_ignored_and_cleaned_on_write(
     assert got.state == "ok" and got.rejected == {} and len(got.ids) == 5
     c = open_cache(tmp_path)
     c.load()
-    c.append(ids(1, 9), unit(1, 7))
+    c.append(ids(1, 9), unit(1, 7), dg(1, 9))
     assert not orphan.exists() and not partial.exists()
     assert len(open_cache(tmp_path).load().ids) == 6
 
@@ -258,7 +263,7 @@ def test_a_crash_between_the_shard_and_the_manifest_leaves_the_old_state_valid(
     c.load()
     monkeypatch.setattr(os, "replace", failing)
     with pytest.raises(OSError):
-        c.append(ids(3, 4), unit(3, 5))
+        c.append(ids(3, 4), unit(3, 5), dg(3, 4))
     monkeypatch.undo()
     got = open_cache(tmp_path).load()
     assert got.state == "ok" and got.rejected == {} and list(got.ids) == sorted(ids(4))
@@ -269,7 +274,7 @@ def test_a_rejected_manifest_means_the_next_write_starts_a_fresh_cache(tmp_path:
     (cache_dir(tmp_path) / "manifest.json").write_text("{not json")
     c = open_cache(tmp_path)
     assert c.load().state == "rejected"
-    c.append(ids(2, 20), unit(2, 2))
+    c.append(ids(2, 20), unit(2, 2), dg(2, 20))
     got = open_cache(tmp_path).load()
     assert got.state == "ok" and list(got.ids) == sorted(ids(2, 20))
     assert len(shard_files(tmp_path)) == 1  # the old shard was an orphan and was removed
@@ -333,7 +338,7 @@ def test_a_symlinked_cache_directory_is_refused_and_never_written_through(
     c = open_cache(tmp_path)
     assert c.load().rejected == {"not_a_directory": 1}
     with pytest.raises(OSError):
-        c.append(ids(1), unit(1))
+        c.append(ids(1), unit(1), dg(1))
     assert list(target.iterdir()) == []
 
 
@@ -352,8 +357,8 @@ def test_shard_names_in_the_manifest_are_validated(tmp_path: Path, name: str) ->
 def test_a_shard_that_is_a_symlink_or_a_directory_is_rejected(tmp_path: Path) -> None:
     c = open_cache(tmp_path)
     c.load()
-    c.append(ids(3), unit(3))
-    c.append(ids(3, 3), unit(3, 1))
+    c.append(ids(3), unit(3), dg(3))
+    c.append(ids(3, 3), unit(3, 1), dg(3, 3))
     a, b = shard_files(tmp_path)
     data = a.read_bytes()
     a.unlink()
@@ -412,7 +417,13 @@ def table_of(
     n, d = matrix.shape
     flat = pa.array(matrix.reshape(-1).astype(np.float32), type=pa.float32()).cast(dtype)  # type: ignore[arg-type]
     vec = pa.ListArray.from_arrays(pa.array(np.arange(0, (n + 1) * d, d, dtype=np.int32)), flat)
-    return pa.table({"image_id": pa.array(id_list, type=pa.string()), "vector": vec})
+    return pa.table(
+        {
+            "image_id": pa.array(id_list, type=pa.string()),
+            "vector": vec,
+            "content_sha256": pa.array(dg(n), type=pa.string()),
+        }
+    )
 
 
 def test_the_planting_helper_accepts_a_valid_shard(tmp_path: Path) -> None:
@@ -496,6 +507,27 @@ BAD_SHARDS: list[tuple[str, Callable[[], bytes], str]] = [
         "bad_values",
     ),
     (
+        "malformed content digest",
+        lambda: parquet_bytes(
+            table_of(ids(2), unit(2)).set_column(2, "content_sha256", pa.array(["zz", "yy"]))
+        ),
+        "bad_values",
+    ),
+    (
+        "null content digest",
+        lambda: parquet_bytes(
+            table_of(ids(2), unit(2)).set_column(
+                2, "content_sha256", pa.array([dg(1)[0], None], type=pa.string())
+            )
+        ),
+        "bad_values",
+    ),
+    (
+        "missing content digest column",
+        lambda: parquet_bytes(table_of(ids(2), unit(2)).drop_columns(["content_sha256"])),
+        "bad_shape",
+    ),
+    (
         "extra column",
         lambda: parquet_bytes(table_of(ids(2), unit(2)).append_column("x", pa.array([1, 2]))),
         "bad_shape",
@@ -509,6 +541,7 @@ BAD_SHARDS: list[tuple[str, Callable[[], bytes], str]] = [
                     "vector": pa.array(
                         [[0.1] * DIMS, [0.1] * (DIMS - 1)], type=pa.list_(pa.float32())
                     ),
+                    "content_sha256": pa.array(dg(2)),
                 }
             )
         ),
@@ -521,6 +554,7 @@ BAD_SHARDS: list[tuple[str, Callable[[], bytes], str]] = [
                 {
                     "image_id": pa.array(ids(2)),
                     "vector": pa.array([None, [0.1] * DIMS], type=pa.list_(pa.float32())),
+                    "content_sha256": pa.array(dg(2)),
                 }
             )
         ),
@@ -573,7 +607,7 @@ def test_a_shard_over_the_byte_cap_is_never_read(
 def test_the_same_id_in_two_shards_is_refused_not_picked_arbitrarily(tmp_path: Path) -> None:
     fill(tmp_path, 3)
     doc = manifest(tmp_path)
-    second = ec.encode_shard(ident(), ids(3, 2), unit(3, 1))  # id 2 occurs in both shards
+    second = ec.encode_shard(ident(), ids(3, 2), unit(3, 1), dg(3, 2))  # id 2 occurs in both shards
     name = "shard-" + "f" * 32 + ".parquet"
     (cache_dir(tmp_path) / name).write_bytes(second)
     doc["shards"].append(  # type: ignore[attr-defined]
@@ -589,15 +623,15 @@ def test_append_rejects_duplicates_bad_ids_and_wrong_shapes(tmp_path: Path) -> N
     c = open_cache(tmp_path)
     c.load()
     with pytest.raises(ValueError):
-        c.append(["0" * 16, "0" * 16], unit(2))
+        c.append(["0" * 16, "0" * 16], unit(2), dg(2))
     with pytest.raises(ValueError):
-        c.append(["zz"], unit(1))
+        c.append(["zz"], unit(1), dg(1))
     with pytest.raises(ValueError):
-        c.append(ids(2), unit(3))
+        c.append(ids(2), unit(3), dg(2))
     with pytest.raises(ValueError):
-        c.append(ids(1), unit(1, dims=DIMS + 1))
+        c.append(ids(1), unit(1, dims=DIMS + 1), dg(1))
     with pytest.raises(ValueError):
-        c.append([], np.zeros((0, DIMS), dtype=np.float32))
+        c.append([], np.zeros((0, DIMS), dtype=np.float32), [])
     assert not cache_dir(tmp_path).exists() or shard_files(tmp_path) == []
 
 
@@ -606,18 +640,20 @@ def test_append_refuses_vectors_that_are_not_canonical(tmp_path: Path) -> None:
     c.load()
     raw = np.random.default_rng(0).standard_normal((2, DIMS)).astype(np.float32)
     with pytest.raises(ValueError, match="canonical"):
-        c.append(ids(2), raw / np.linalg.norm(raw, axis=1, keepdims=True))  # not f16-representable
+        c.append(
+            ids(2), raw / np.linalg.norm(raw, axis=1, keepdims=True), dg(2)
+        )  # not f16-representable
     with pytest.raises(ValueError):
-        c.append(ids(2), unit(2, dtype="float16") * 3.0)  # not unit norm
+        c.append(ids(2), unit(2, dtype="float16") * 3.0, dg(2))  # not unit norm
     with pytest.raises(ValueError):
-        c.append(ids(1), unit(1).astype(np.float64))  # wrong dtype
+        c.append(ids(1), unit(1).astype(np.float64), dg(1))  # wrong dtype
     assert not cache_dir(tmp_path).exists() or shard_files(tmp_path) == []
 
 
 def test_append_refuses_ids_already_in_the_cache(tmp_path: Path) -> None:
     c = fill(tmp_path, 3)
     with pytest.raises(ValueError):
-        c.append(ids(1), unit(1))
+        c.append(ids(1), unit(1), dg(1))
 
 
 def test_the_total_row_cap_stops_the_cache_with_a_clear_error(
@@ -626,9 +662,9 @@ def test_the_total_row_cap_stops_the_cache_with_a_clear_error(
     monkeypatch.setattr(ec, "MAX_CACHE_ROWS", 5)
     c = open_cache(tmp_path)
     c.load()
-    c.append(ids(4), unit(4))
+    c.append(ids(4), unit(4), dg(4))
     with pytest.raises(ec.CacheFullError):
-        c.append(ids(2, 4), unit(2, 1))
+        c.append(ids(2, 4), unit(2, 1), dg(2, 4))
     assert len(open_cache(tmp_path).load().ids) == 4
 
 
@@ -638,10 +674,10 @@ def test_the_shard_count_cap_stops_the_cache(
     monkeypatch.setattr(ec, "MAX_SHARDS", 2)
     c = open_cache(tmp_path)
     c.load()
-    c.append(ids(1), unit(1))
-    c.append(ids(1, 1), unit(1, 1))
+    c.append(ids(1), unit(1), dg(1))
+    c.append(ids(1, 1), unit(1, 1), dg(1, 1))
     with pytest.raises(ec.CacheFullError):
-        c.append(ids(1, 2), unit(1, 2))
+        c.append(ids(1, 2), unit(1, 2), dg(1, 2))
 
 
 def test_float16_shards_are_smaller_than_float32(tmp_path: Path) -> None:
@@ -650,7 +686,7 @@ def test_float16_shards_are_smaller_than_float32(tmp_path: Path) -> None:
         root.mkdir()
         c = ec.EmbeddingCache.open(root / "embeddings", ident(dtype=dtype), SECRET)
         c.load()
-        c.append(ids(500), unit(500, seed=1, dtype=dtype))
+        c.append(ids(500), unit(500, seed=1, dtype=dtype), dg(500))
     size = lambda root: sum(p.stat().st_size for p in (root / "embeddings" / "m@1").glob("shard-*"))  # noqa: E731
     assert size(b) < size(a)
 
@@ -672,6 +708,54 @@ def test_identity_validates_its_fields() -> None:
 def test_reset_drops_the_old_shards_on_the_next_write(tmp_path: Path) -> None:
     c = fill(tmp_path, 4)
     c.reset()
-    c.append(ids(2, 50), unit(2, 4))
+    c.append(ids(2, 50), unit(2, 4), dg(2, 50))
     got = open_cache(tmp_path).load()
     assert list(got.ids) == sorted(ids(2, 50)) and len(shard_files(tmp_path)) == 1
+
+
+def test_digests_come_back_with_their_vectors_in_id_order(tmp_path: Path) -> None:
+    c = open_cache(tmp_path)
+    c.load()
+    c.append(ids(3, 5), unit(3), dg(3, 100))
+    c.append(ids(3), unit(3, 1), dg(3, 200))
+    got = open_cache(tmp_path).load()
+    assert list(got.ids) == sorted(ids(3) + ids(3, 5))
+    assert list(got.digests) == dg(3, 200) + dg(3, 100)
+
+
+def test_append_requires_one_well_formed_digest_per_row(tmp_path: Path) -> None:
+    c = open_cache(tmp_path)
+    c.load()
+    for bad in ([], ["zz", "yy"], dg(3), ["0" * 63 + "g", "0" * 64]):
+        with pytest.raises(ValueError, match="digests"):
+            c.append(ids(2), unit(2), bad)
+
+
+def test_a_manifest_with_a_duplicated_key_is_rejected_before_the_mac_is_checked(
+    tmp_path: Path,
+) -> None:
+    fill(tmp_path)
+    path = cache_dir(tmp_path) / "manifest.json"
+    text = path.read_text()
+    path.write_text(text.replace('"format": 2', '"format": 2, "format": 2', 1))
+    got = open_cache(tmp_path).load()
+    assert got.state == "rejected" and got.rejected == {"manifest_invalid": 1}
+    path.write_text(text.replace('"shards": [', '"shards": [], "shards": [', 1))
+    assert open_cache(tmp_path).load().rejected == {"manifest_invalid": 1}
+
+
+def test_the_mac_key_is_separated_from_the_secrets_other_uses(tmp_path: Path) -> None:
+    import hashlib as h
+
+    identity = ident()
+    plain = h.sha256(SECRET + b"\x00" + identity.binding()).digest()  # the old derivation
+    assert ec._mac_key(SECRET, identity) != plain
+    assert ec._mac_key(SECRET, identity) != ec._mac_key(SECRET, ident(preprocess=2))
+
+
+def test_a_cache_for_another_preprocessing_version_is_stale(tmp_path: Path) -> None:
+    fill(tmp_path)
+    got = open_cache(tmp_path, ident(preprocess=2)).load()
+    assert got.state == "stale" and len(got.ids) == 0
+    with pytest.raises(ValueError):
+        ident(preprocess=0)

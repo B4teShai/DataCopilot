@@ -267,7 +267,8 @@ def audit(
     Prints one line (`passed|failed critical=N warn=N info=N run_id=ID`) and stores the run as
     audits/<run_id>.json. The default gate is `--fail-on critical`; `--fail-on none` applies no
     gate. Exit codes: 0 gate passed (or no gate); 1 a --fail-on match, an empty dataset or an
-    unreadable dataset, an embedder that is not allowed (DATACOPILOT_ALLOWED_LICENSES) or fails
+    unreadable dataset, an image the leakage check could not embed (under a gate), an embedder
+    that is not allowed (DATACOPILOT_ALLOWED_LICENSES) or fails
     to load; 2 bad option or configuration (unknown check, bad --fail-on, bad value).
     """
     from datacopilot.audit import engine

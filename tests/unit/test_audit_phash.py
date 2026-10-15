@@ -97,7 +97,7 @@ def test_images_that_cannot_be_hashed_keep_their_pairs_and_say_so(tmp_path: Path
 
     def flaky(image, context):  # type: ignore[no-untyped-def]
         calls.append(image.file_path)
-        if len(calls) > 3 and image.file_path.endswith("a.png"):
+        if image.file_path.endswith("a.png"):
             return None, "file_missing"
         return real_read(image, context)
 

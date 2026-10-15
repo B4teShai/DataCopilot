@@ -51,8 +51,8 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
 
 **Cache: Option B.** Rules reviewers check:
 
-1. Layout `embeddings/<model_id>@<revision>/{manifest.json, shard-*.parquet}`; a shard has two
-   columns (`image_id`, `vector`); identity lives in the manifest and is repeated in each shard's
+1. Layout `embeddings/<model_id>@<revision>/{manifest.json, shard-*.parquet}`; a shard has three
+   columns (`image_id`, `vector`, `content_sha256`, the full digest of the image bytes); identity lives in the manifest and is repeated in each shard's
    metadata.
 2. Every bound is checked before any row is decoded: manifest at most 4 MiB, shard at most 128 MiB,
    at most 16,384 rows per shard, at most 2,048 shards, at most 2,000,000 rows, dimensions at most
@@ -63,6 +63,11 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
    dtype, weight hashes and **dataset version**. Without a key outside CI the secret is generated
    beside the cache directory; in CI without a key the cache is not read and not written. A forged
    shard cannot verify without the key; a shard from another dataset version fails the binding.
+4a. The dataset version in the binding comes from the table rows, which do not see the image
+   files, so each vector also carries the full sha256 of the bytes it came from. The audit hashes
+   the file of every cache hit (I/O only); any change discards the whole cache, and a hit whose
+   file cannot be read is dropped and reported as not embedded. `image_id` stays a 64-bit label and
+   is never the thing compared.
 5. As a second layer a sample of cache hits (1 percent, 10 to 64) is re-embedded on every run and
    compared (cosine at least 0.999 between canonical vectors: both sides are rounded identically, so
    only the backend's nondeterminism, about 1e-5, remains). The sample is ordered by

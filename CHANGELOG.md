@@ -95,6 +95,16 @@ once a release is tagged.
   warm cache and FAISS were not measured.
 - ADR-0007 (embedding cache and index) and updated diagrams.
 
+- Embedding cache format 2: each shard row carries the full sha256 of the image bytes; the audit
+  hashes the file of every cache hit and recomputes vectors whose file changed (the cache is bound
+  to the dataset rows, which do not see the files), treats unreadable cached images as unchecked,
+  and keeps `image_id` out of the comparison (it is a 64-bit label). The manifest is parsed once
+  with duplicate keys refused, the MAC key has a domain label and the identity names the
+  preprocessing version. New finding `embedding_cache_content_changed`.
+- `leakage`: under a gate any image not embedded (other than by time budget) is CRITICAL, so one
+  unembeddable test image cannot pass the default gate; `images_without_group` (INFO) shows images
+  that cannot take part in `group_overlap`.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

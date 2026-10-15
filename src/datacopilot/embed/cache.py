@@ -4,7 +4,7 @@ Layout (one directory per model revision)::
 
     dataset.dcp/embeddings/<model_id>@<revision>/
         manifest.json                  # identity, dataset version, weights, shard digests, MAC
-        shard-<32 hex>.parquet         # columns: image_id string, vector list<float16|float32>
+        shard-<32 hex>.parquet         # image_id, vector list<float16|float32>, content_sha256
 
 **Why this is defended like an input.** The directory travels with the dataset, so a pull request
 can change it. A forged cache that maps a test image to a train image's vector would hide
@@ -18,12 +18,20 @@ leakage and make the gate pass. The layers, in the order they are applied on rea
 3. *Digest per shard.* The sha256 of the shard bytes must equal the manifest entry; the shard is
    parsed from the very bytes that were hashed (no re-open, no time-of-check gap).
 4. *Authentication.* The manifest carries an HMAC over its canonical JSON (which contains every
-   shard digest), keyed by a secret and bound to model, revision, dimensions, dtype and the
+   shard digest), keyed by a secret (with a domain label, so it is not the hash cache's key) and
+   bound to model, revision, dimensions, dtype, weight hashes, preprocessing version and the
    dataset version. Without the key an attacker cannot make a forged shard verify. Digests alone
    only detect damage; the MAC is what defends against forgery. When no key is available the
    cache is *disabled* (see ``audit/embedding.py``) rather than trusted.
 5. *Content.* Ids are 16-hex and unique, vectors have exactly ``dims`` finite values and unit
    norm, the declared metadata matches the manifest, and an id may occur in only one shard.
+6. *Binding to the image bytes.* Every row carries the full sha256 of the bytes its vector was
+   computed from (covered by the shard digest and so by the MAC). The cache is bound to the dataset
+   *rows* through the manifest version, which does not see the image files; the audit therefore
+   hashes the file of every cache hit and recomputes any vector whose file changed. ``image_id`` is
+   only a 64-bit label and is never the thing compared.
+7. *One manifest, one parse.* The manifest is parsed once, with duplicate keys refused, and the
+   same object feeds the MAC and the model.
 
 A shard that fails any check is ignored and counted by reason; a manifest that fails makes the
 whole cache untrusted. Nothing is repaired in place: the next write replaces it. Writes are
@@ -34,9 +42,11 @@ dataset version is "stale" and ignored (embeddings are recomputed), never reused
 
 **Rounding.** Vectors are L2-normalised, rounded to the storage dtype (IEEE-754 round to nearest
 even; ``float16`` keeps 11 significant bits, absolute error below 1e-3 per component for unit
-vectors), converted back to ``float32`` and normalised again. :func:`canonical_vectors` is that
-function and the pipeline applies it to fresh vectors too, so a computed vector and a cached one
-are bit-identical and a check's verdict cannot depend on whether the cache was warm.
+vectors) and converted back to ``float32``; they are *not* normalised again, so the norm of a
+stored vector is within 1e-3 of one (float16) and the kNN index re-normalises its working copy.
+:func:`canonical_vectors` is that function and the pipeline applies it to fresh vectors too, so a
+computed vector and a cached one are bit-identical and a check's verdict cannot depend on whether
+the cache was warm.
 """
 
 from __future__ import annotations
@@ -99,7 +109,13 @@ MAX_CACHE_ROWS = 2_000_000
 """Most embeddings one cache may hold (50,000 x 768 float16 is 77 MB; this is 3 GB of float16)."""
 WRITE_SHARD_ROWS = 4_096
 """Rows the pipeline puts in one shard (a resumable unit of work)."""
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+"""2: shards carry the full sha256 of each image's bytes; the MAC key has a domain label and the
+identity names the preprocessing version."""
+MAC_LABEL = b"datacopilot/embedding-cache/v2"
+"""Domain separation of the MAC key from every other use of the cache secret (the hash cache)."""
+PREPROCESS_VERSION = 1
+"""Bumped when image decoding or preprocessing changes the vectors a model produces."""
 _ID = re.compile(r"^[0-9a-f]{16}$")
 _NAME_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SHARD_NAME = re.compile(r"^shard-[0-9a-f]{32}\.parquet$")
@@ -130,8 +146,9 @@ class CacheIdentity:
         dims: vector width.
         dtype: storage dtype.
         dataset_version: ``manifest.version`` the vectors were computed for.
-        weights: ``file -> sha256`` of the weights, recorded for provenance; ``{}`` for a model
-            without weights.
+        weights: ``file -> sha256`` of the weights and configuration, recorded for provenance;
+            ``{}`` for a model without weights.
+        preprocess: version of the decoding and preprocessing code (``PREPROCESS_VERSION``).
     """
 
     model_id: str
@@ -140,6 +157,7 @@ class CacheIdentity:
     dtype: Dtype
     dataset_version: str
     weights: dict[str, str] = field(default_factory=dict)
+    preprocess: int = PREPROCESS_VERSION
 
     def __post_init__(self) -> None:
         if not _NAME_PART.fullmatch(self.model_id) or not _NAME_PART.fullmatch(self.revision):
@@ -154,6 +172,8 @@ class CacheIdentity:
             _NAME_PART.fullmatch(k) and _SHA256.fullmatch(v) for k, v in self.weights.items()
         ):
             raise ValueError("weights must map plain file names to sha256 digests")
+        if not 1 <= self.preprocess <= 10_000:
+            raise ValueError("preprocess must be a small positive version number")
 
     @property
     def directory_name(self) -> str:
@@ -169,6 +189,7 @@ class CacheIdentity:
                 self.dtype,
                 self.dataset_version,
                 sorted(self.weights.items()),
+                self.preprocess,
             ],
             separators=(",", ":"),
         )
@@ -181,6 +202,7 @@ class LoadResult:
 
     Attributes:
         ids: image ids, sorted.
+        digests: full sha256 hex of the bytes each vector came from, in the order of ``ids``.
         matrix: canonical ``float32`` vectors, one row per id, in the order of ``ids``.
         rejected: count of rejected parts by reason (a shard counts once; a manifest-level
             failure counts once under its reason). Empty when nothing was refused.
@@ -189,6 +211,7 @@ class LoadResult:
     """
 
     ids: tuple[str, ...]
+    digests: tuple[str, ...]
     matrix: NDArray[np.float32]
     rejected: dict[str, int]
     state: State
@@ -236,6 +259,7 @@ class _Manifest(BaseModel, frozen=True, extra="forbid"):
     dims: int
     dtype: Dtype
     dataset_version: str
+    preprocess: int
     weights: dict[str, str] = Field(max_length=16)
     shards: tuple[_ShardEntry, ...] = Field(max_length=2_048)
     mac: str | None = None
@@ -287,7 +311,7 @@ def _require_canonical(vectors: NDArray[np.float32], dtype: Dtype) -> None:
 
 
 def _mac_key(secret: bytes, identity: CacheIdentity) -> bytes:
-    return hashlib.sha256(secret + b"\x00" + identity.binding()).digest()
+    return hashlib.sha256(MAC_LABEL + b"\x00" + secret + b"\x00" + identity.binding()).digest()
 
 
 def _canonical_json(doc: dict[str, object]) -> bytes:
@@ -305,9 +329,13 @@ def _vector_type(dtype: Dtype) -> pa.DataType:
 
 
 def encode_shard(
-    identity: CacheIdentity, image_ids: list[str], vectors: NDArray[np.float32]
+    identity: CacheIdentity,
+    image_ids: list[str],
+    vectors: NDArray[np.float32],
+    digests: list[str],
 ) -> bytes:
-    """Parquet bytes of one shard: ids plus canonical vectors in the storage dtype.
+    """Parquet bytes of one shard: ids, canonical vectors in the storage dtype and the full sha256
+    of the image bytes each vector was computed from.
 
     ``vectors`` must already be canonical (:func:`canonical_vectors`): storing them must not
     change a single bit, so what the caller holds in memory is what a later run reads back.
@@ -323,6 +351,7 @@ def encode_shard(
         {
             "image_id": pa.array(image_ids, type=pa.string()),
             "vector": pa.ListArray.from_arrays(offsets, flat),
+            "content_sha256": pa.array(digests, type=pa.string()),
         }
     )
     meta = {
@@ -337,6 +366,20 @@ def encode_shard(
         table.replace_schema_metadata(meta), buffer, compression="zstd", row_group_size=n
     )
     return buffer.getvalue()
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """``object_pairs_hook`` that refuses a repeated key.
+
+    The manifest is parsed once and the same object feeds the MAC and the model, so a document in
+    which the two parsers could disagree about a duplicated key does not exist.
+    """
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate key")
+        out[key] = value
+    return out
 
 
 class _Reject(Exception):
@@ -369,7 +412,7 @@ def _read_file(path: Path, limit: int, *, missing: str, unreadable: str, oversiz
 
 def _decode_shard(
     data: bytes, entry: _ShardEntry, identity: CacheIdentity
-) -> tuple[list[str], NDArray[np.float32]]:
+) -> tuple[list[str], list[str], NDArray[np.float32]]:
     """Validate one shard that already matched its digest; ``_Reject`` names what was wrong."""
     try:
         pf = pq.ParquetFile(io.BytesIO(data))
@@ -395,11 +438,12 @@ def _decode_shard(
         }
         if any(declared.get(k) != v.encode() for k, v in expected.items()):
             raise _Reject("bad_shape")
-        if schema.names != ["image_id", "vector"]:
+        if schema.names != ["image_id", "vector", "content_sha256"]:
             raise _Reject("bad_shape")
         vtype = schema.field("vector").type
         if (
             schema.field("image_id").type != pa.string()
+            or schema.field("content_sha256").type != pa.string()
             or not pa.types.is_list(vtype)
             or vtype.value_type != _vector_type(identity.dtype)
         ):
@@ -429,10 +473,16 @@ def _decode_shard(
         set(image_ids)
     ) != len(image_ids):
         raise _Reject("bad_values")
+    digest_col = table.column("content_sha256")
+    if digest_col.null_count:
+        raise _Reject("bad_values")
+    digests = digest_col.to_pylist()
+    if not all(isinstance(d, str) and _SHA256.fullmatch(d) for d in digests):
+        raise _Reject("bad_values")
     norms = np.linalg.norm(matrix, axis=1)
     if not np.isfinite(matrix).all() or not np.all(np.abs(norms - 1.0) <= _NORM_TOLERANCE):
         raise _Reject("bad_values")
-    return image_ids, matrix
+    return image_ids, digests, matrix
 
 
 def _fsync_dir(path: Path) -> None:
@@ -516,7 +566,7 @@ class EmbeddingCache:
 
     def _empty(self, state: State, rejected: dict[str, int] | None = None) -> LoadResult:
         dims = self._identity.dims if self._identity else 1
-        return LoadResult((), np.zeros((0, dims), dtype=np.float32), rejected or {}, state)
+        return LoadResult((), (), np.zeros((0, dims), dtype=np.float32), rejected or {}, state)
 
     def load(self) -> LoadResult:
         """Verify the cache and return every vector that passed (see the module docstring)."""
@@ -546,8 +596,9 @@ class EmbeddingCache:
                 return self._empty("absent")
             return self._empty("rejected", {exc.reason: 1})
         try:
-            manifest = _Manifest.model_validate_json(raw)
-        except (ValidationError, ValueError):
+            doc = json.loads(raw, object_pairs_hook=_no_duplicate_keys)
+            manifest = _Manifest.model_validate(doc)
+        except (ValidationError, ValueError, RecursionError, TypeError):
             return self._empty("rejected", {"manifest_invalid": 1})
         if (
             manifest.format != FORMAT_VERSION
@@ -557,9 +608,9 @@ class EmbeddingCache:
             or manifest.dtype != identity.dtype
             or manifest.dataset_version != identity.dataset_version
             or manifest.weights != identity.weights
+            or manifest.preprocess != identity.preprocess
         ):
             return self._empty("stale")
-        doc = json.loads(raw)
         expected_mac = mac_for(doc, self._secret, identity)
         if manifest.mac is None or not hmac.compare_digest(manifest.mac, expected_mac):
             return self._empty("rejected", {"bad_mac": 1})
@@ -570,6 +621,7 @@ class EmbeddingCache:
         identity = self._identity
         rejected: Counter[str] = Counter()
         all_ids: list[str] = []
+        all_digests: list[str] = []
         blocks: list[NDArray[np.float32]] = []
         seen: set[str] = set()
         total = 0
@@ -590,7 +642,7 @@ class EmbeddingCache:
                     raise _Reject("bad_size")
                 if not hmac.compare_digest(hashlib.sha256(data).hexdigest(), entry.sha256):
                     raise _Reject("bad_digest")
-                shard_ids, matrix = _decode_shard(data, entry, identity)
+                shard_ids, shard_digests, matrix = _decode_shard(data, entry, identity)
                 if not seen.isdisjoint(shard_ids):
                     raise _Reject("duplicate_ids")
             except _Reject as exc:
@@ -598,6 +650,7 @@ class EmbeddingCache:
                 continue
             seen.update(shard_ids)
             all_ids.extend(shard_ids)
+            all_digests.extend(shard_digests)
             blocks.append(matrix)
             self._shards.append(entry)
         self._ids = seen
@@ -605,7 +658,13 @@ class EmbeddingCache:
             return self._empty("ok", dict(rejected))
         matrix = np.concatenate(blocks, axis=0)
         order = sorted(range(len(all_ids)), key=all_ids.__getitem__)
-        return LoadResult(tuple(all_ids[i] for i in order), matrix[order], dict(rejected), "ok")
+        return LoadResult(
+            tuple(all_ids[i] for i in order),
+            tuple(all_digests[i] for i in order),
+            matrix[order],
+            dict(rejected),
+            "ok",
+        )
 
     def reset(self) -> None:
         """Forget every shard: the next ``append`` publishes a fresh manifest and the old shard
@@ -613,8 +672,13 @@ class EmbeddingCache:
         images (the spot check); nothing on disk changes until then."""
         self._shards, self._ids, self._loaded = [], set(), True
 
-    def append(self, image_ids: list[str], vectors: NDArray[np.float32]) -> None:
+    def append(
+        self, image_ids: list[str], vectors: NDArray[np.float32], digests: list[str]
+    ) -> None:
         """Write ``vectors`` as one new shard and publish it in the manifest.
+
+        ``digests`` are the full sha256 hex digests of the image bytes the vectors were computed
+        from; a later run recomputes any vector whose file no longer hashes to its digest.
 
         Raises:
             ValueError: ids not unique 16-hex strings, already cached, or a bad shape or value.
@@ -634,11 +698,13 @@ class EmbeddingCache:
             raise ValueError("vectors must have shape (len(image_ids), dims)")
         if len(set(image_ids)) != n or not all(_ID.fullmatch(i) for i in image_ids):
             raise ValueError("image ids must be unique 16-hex strings")
+        if len(digests) != n or not all(_SHA256.fullmatch(d) for d in digests):
+            raise ValueError("digests must be one sha256 hex digest per image")
         if not self._ids.isdisjoint(image_ids):
             raise ValueError("image id is already cached")
         if len(self._ids) + n > MAX_CACHE_ROWS or len(self._shards) >= MAX_SHARDS:
             raise CacheFullError
-        data = encode_shard(identity, image_ids, vectors)
+        data = encode_shard(identity, image_ids, vectors, digests)
         if len(data) > MAX_SHARD_BYTES:
             raise ValueError("shard would exceed the size limit")
         if self._root.is_symlink():
@@ -663,6 +729,7 @@ class EmbeddingCache:
             "dims": identity.dims,
             "dtype": identity.dtype,
             "dataset_version": identity.dataset_version,
+            "preprocess": identity.preprocess,
             "weights": dict(sorted(identity.weights.items())),
             "shards": [s.model_dump() for s in shards],
         }

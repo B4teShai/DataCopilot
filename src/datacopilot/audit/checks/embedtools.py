@@ -20,7 +20,7 @@ from datacopilot.audit.context import CheckContext
 from datacopilot.audit.embedding import EmbeddingSet
 from datacopilot.audit.findings import make_finding
 from datacopilot.audit.paths import display_name, safe_text, unchecked_severity
-from datacopilot.core.schema import Dataset, Finding, Image
+from datacopilot.core.schema import Dataset, Finding, Image, Severity
 
 MAX_MEMBERS_LISTED = 20
 """Images named in one cluster finding; ``count`` always carries the true size."""
@@ -104,6 +104,30 @@ def incomplete_finding(
     )
 
 
+STRICT_CHECKS = frozenset({"leakage"})
+"""Checks where one unembedded image (not by time budget) is CRITICAL under a gate."""
+
+
+def not_embedded_severity(es: EmbeddingSet, ctx: CheckContext, name: str) -> Severity:
+    """Severity of ``images_not_embedded``.
+
+    ``leakage``: an image that cannot be compared can be the leaked one (an attacker needs only one
+    undecodable file in the test split), so under a gate any image not embedded for a reason other
+    than the time budget is CRITICAL, whatever the share of the dataset. Without a gate
+    (``--fail-on none``) it is WARN. The other embedding checks keep the exact-duplicate rule:
+    WARN, CRITICAL above ``max_unchecked_fraction`` or with ``--require-local-images``.
+    """
+    hard = any(reason != "time_budget" for reason in es.missing)
+    if name in STRICT_CHECKS and hard and ctx.incomplete_is_critical:
+        return "CRITICAL"
+    return unchecked_severity(
+        es.missing_count,
+        es.total,
+        max_fraction=ctx.config.max_unchecked_fraction,
+        require_local=ctx.require_local_images,
+    )
+
+
 def embedding_set(
     ds: Dataset, ctx: CheckContext, name: str
 ) -> tuple[EmbeddingSet | None, list[Finding]]:
@@ -135,12 +159,7 @@ def embedding_set(
             make_finding(
                 ctx.run_id,
                 name,
-                unchecked_severity(
-                    es.missing_count,
-                    es.total,
-                    max_fraction=ctx.config.max_unchecked_fraction,
-                    require_local=ctx.require_local_images,
-                ),
+                not_embedded_severity(es, ctx, name),
                 payload={
                     "rule": "images_not_embedded",
                     "count": es.missing_count,
@@ -176,6 +195,18 @@ def embedding_set(
                     "rule": "embedding_cache_unverified",
                     "reason": es.cache_unverified,
                     "verified": es.spot_checked,
+                },
+            )
+        )
+    if es.cache_content_changed:
+        findings.append(
+            make_finding(
+                ctx.run_id,
+                name,
+                "WARN",
+                payload={
+                    "rule": "embedding_cache_content_changed",
+                    "count": es.cache_content_changed,
                 },
             )
         )

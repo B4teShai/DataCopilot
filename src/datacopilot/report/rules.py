@@ -37,6 +37,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "near_duplicates/phash_not_applied": "Perceptual-hash prefilter could not hash some images",
     "leakage/cross_split_near_duplicate": "Near-identical images in different splits",
     "leakage/group_overlap": "A group appears in more than one split",
+    "leakage/images_without_group": "Images without a group id are not covered by group overlap",
     "outliers/outlier": "Image is unlike the rest of its class",
     "outliers/classes_skipped": "Classes too small for the outlier check",
     "outliers/images_without_class": "Images without annotations were not scored",
@@ -50,6 +51,7 @@ _GENERIC: dict[str, str] = {
     "embedder_error": "The embedder failed; images were not compared",
     "images_not_embedded": "Some images have no embedding and were not compared",
     "embedding_cache_rejected": "Part of the embedding cache failed verification and was ignored",
+    "embedding_cache_content_changed": "Image files changed since their embeddings were cached",
     "embedding_cache_unverified": "Cached embeddings could not be verified and were not used",
     "embedding_cache_mismatch": "Cached embeddings disagreed with the images and were discarded",
 }

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fixtures.embedfakes import near, random_unit
+from fixtures.embedfakes import FakeEmbedder, near, random_unit
 from fixtures.embedscene import Row, scene
 
 from datacopilot.audit import embedding, registry
@@ -332,10 +332,30 @@ def test_an_embedder_error_is_critical_and_unembedded_images_are_counted(
     assert miss.severity == "CRITICAL"  # every image is unchecked: above the 50 percent line
 
 
-@pytest.mark.parametrize("name", sorted(CHECKS))
-def test_unembedded_images_are_at_least_warn_and_critical_above_half(
-    tmp_path: Path, name: str
+def test_one_unembedded_image_is_critical_for_leakage_under_a_gate_and_warn_without_one(
+    tmp_path: Path,
 ) -> None:
+    rows = [*clean_rows(9), Row("gone.png")]
+    ds, _, ctx = scene(tmp_path, rows)
+    (tmp_path / "images" / "gone.png").unlink()
+    (miss,) = of(leakage.plugin.run(ds, ctx), "images_not_embedded")  # a gate is applied
+    assert miss.severity == "CRITICAL" and miss.payload["reasons"] == {"file_missing": 1}
+    no_gate = ctx.model_copy(update={"incomplete_is_critical": False})
+    (miss,) = of(leakage.plugin.run(ds, no_gate), "images_not_embedded")
+    assert miss.severity == "WARN"
+
+
+def test_an_unreadable_test_split_cannot_hide_behind_a_large_train_split(tmp_path: Path) -> None:
+    rows = [*clean_rows(40), Row("t.png", "test")]
+    ds, _, ctx = scene(tmp_path, rows)
+    (tmp_path / "images" / "t.png").write_bytes(b"RIFF....WEBPVP8 ")  # not a dataset format
+    # the file no longer hashes to its id: content_changed, 1 of 41 images (2 percent)
+    (miss,) = of(leakage.plugin.run(ds, ctx), "images_not_embedded")
+    assert miss.severity == "CRITICAL"
+
+
+@pytest.mark.parametrize("name", ["near_duplicates", "outliers"])
+def test_the_other_embedding_checks_keep_the_fraction_rule(tmp_path: Path, name: str) -> None:
     rows = [*clean_rows(9), Row("gone.png")]
     ds, _, ctx = scene(tmp_path, rows)
     (tmp_path / "images" / "gone.png").unlink()
@@ -417,16 +437,39 @@ def test_findings_never_contain_directories(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("name", sorted(CHECKS))
-def test_an_unverifiable_cache_is_a_warn_finding_and_its_images_are_unchecked(
-    tmp_path: Path, name: str
-) -> None:
+def test_an_unverifiable_cache_is_a_warn_finding(tmp_path: Path, name: str) -> None:
     ds, emb, ctx = scene(tmp_path, clean_rows(12))
     CHECKS[name].plugin.run(ds, ctx)  # fills the cache
-    for path in (tmp_path / "images").iterdir():
-        path.unlink()
-    fresh = ctx.model_copy(update={"embeddings": embedding.PipelineProvider(emb, batch_size=8)})
+    broken = FakeEmbedder()  # the model is unavailable: no sampled vector can be re-checked
+    broken.fail_after = 0
+    fresh = ctx.model_copy(update={"embeddings": embedding.PipelineProvider(broken, batch_size=8)})
     found = CHECKS[name].plugin.run(ds, fresh)
     (f,) = of(found, "embedding_cache_unverified")
     assert f.severity == "WARN" and f.payload["reason"] == "too_few_verifiable"
-    (miss,) = of(found, "images_not_embedded")
-    assert miss.severity == "CRITICAL" and miss.payload["reasons"] == {"file_missing": 12}
+    assert of(found, "embedder_error") and of(found, "images_not_embedded")
+
+
+def test_images_without_a_group_id_are_counted_when_others_have_one(tmp_path: Path) -> None:
+    """Clearing group_id on the leaked images must not make group_overlap silently disappear."""
+    rows = [
+        Row("a.png", "train", group="g1"),
+        Row("b.png", "test", group="g1"),
+        Row("c.png", "test"),
+        Row("d.png", "train"),
+        *clean_rows(2, "val"),
+    ]
+    ds, _, ctx = scene(tmp_path, rows)
+    (f,) = of(leakage.plugin.run(ds, ctx), "images_without_group")
+    assert f.severity == "INFO" and f.payload["count"] == 4 and f.payload["total"] == 6
+
+
+def test_a_dataset_without_groups_or_with_all_grouped_has_no_missing_group_note(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a").mkdir()
+    ds, _, ctx = scene(tmp_path / "a", clean_rows(4))
+    assert of(leakage.plugin.run(ds, ctx), "images_without_group") == []
+    (tmp_path / "b").mkdir()
+    rows = [Row(f"g{k}.png", "train" if k % 2 else "test", group=f"s{k}") for k in range(6)]
+    ds2, _, ctx2 = scene(tmp_path / "b", rows)
+    assert of(leakage.plugin.run(ds2, ctx2), "images_without_group") == []

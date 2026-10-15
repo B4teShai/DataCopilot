@@ -88,10 +88,15 @@ def test_a_partially_embedded_dataset_cannot_pass_a_check_name_gate(tmp_path: Pa
     rows = [*clean(9), Row("gone.png")]
     ds, _, ctx = scene(tmp_path, rows)
     (tmp_path / "images" / "gone.png").unlink()
-    run = engine.run_audit(ds, ["leakage"], ctx, ["leakage"])
-    assert run.passed is False  # a WARN of the gated check still fails a gate on that check
-    assert engine.run_audit(ds, ["leakage"], ctx, ["critical"]).passed is True  # WARN < CRITICAL
+    assert engine.run_audit(ds, ["leakage"], ctx, ["leakage"]).passed is False
     assert engine.run_audit(ds, ["leakage"], ctx, ["warn"]).passed is False
+    # an attacker who makes one leaked image unembeddable must not pass the DEFAULT gate
+    assert engine.run_audit(ds, ["leakage"], ctx, ["critical"]).passed is False
+    run = engine.run_audit(ds, ["leakage"], ctx, [])  # no gate: reported, WARN, exit would be 0
+    assert run.passed is True
+    assert {f.severity for f in run.findings if f.payload["rule"] == "images_not_embedded"} == {
+        "WARN"
+    }
 
 
 def test_without_a_gate_an_embedder_failure_is_still_in_the_report_but_does_not_fail(

@@ -138,13 +138,15 @@ Shard columns (Parquet, zstd, one row group):
 |---|---|---|---|
 | `image_id` | str (16 hex) | no | Image; unique within the cache |
 | `vector` | list<float16 \| float32> | no | Exactly `dims` finite values, L2 norm 1 (within 1e-3 for float16, rounding documented in ADR-0007) |
+| `content_sha256` | str (64 hex) | no | Full sha256 of the image bytes the vector was computed from; a vector whose file no longer hashes to it is recomputed |
 
 Manifest (`manifest.json`, at most 4 MiB, strict schema):
 
 | Field | Meaning |
 |---|---|
-| `format` | `1` |
+| `format` | `2` (shards carry `content_sha256`; the MAC key has a domain label) |
 | `model_id`, `revision`, `dims`, `dtype` | The identity the vectors belong to; `dtype` is `float16` or `float32` |
+| `preprocess` | Version of the decoding and preprocessing code; another version is stale |
 | `dataset_version` | `manifest.version` the vectors were computed for; a cache for another version is ignored (stale) |
 | `weights` | `file -> sha256` of the model weights, recorded for provenance (empty for a model without weights) |
 | `shards` | `[{name, rows, bytes, sha256}]`, at most 2,048 entries, at most 16,384 rows each, at most 2,000,000 rows in all |

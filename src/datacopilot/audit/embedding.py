@@ -55,7 +55,10 @@ __all__ = [
     "EmbeddingSet",
     "PipelineProvider",
     "pick_sample",
+    "hash_image",
     "read_image_bytes",
+    "read_verified",
+    "short_id",
     "sample_size",
 ]
 
@@ -82,6 +85,8 @@ versus GPU), which is about 1e-5 in cosine for the supported models; float16 rou
 vector moves each component by under 1e-3 but is identical on both sides and does not count. A
 forged vector is far from this bound: the cosine of two unrelated images is below 0.9. One
 disagreeing sample discards the whole cache for the run."""
+Result = tuple[str, NDArray[np.float32] | None, str | None, str | None]
+"""``(image_id, vector, reason, full sha256)``: a vector and a digest, or a reason."""
 _DECODE_REASONS = frozenset({"decode_failed", "too_many_pixels"})
 
 
@@ -107,6 +112,8 @@ class EmbeddingSet:
         cache_hits: vectors taken from the cache and kept.
         spot_checked: cache hits that were re-embedded and compared.
         spot_mismatched: of those, how many disagreed (the cache was then discarded).
+        cache_content_changed: cached hits whose image file no longer hashes to the digest stored
+            with the vector (the whole cache was then discarded and recomputed).
         cache_unverified: reason code (``too_few_verifiable``) when too few sampled hits could be
             verified and the cached vectors were therefore not trusted.
         cache_unwritable: the cache could not be written (read-only dataset, cache full).
@@ -128,6 +135,7 @@ class EmbeddingSet:
     cache_hits: int = 0
     spot_checked: int = 0
     spot_mismatched: int = 0
+    cache_content_changed: int = 0
     cache_unverified: str | None = None
     cache_unwritable: bool = False
     cache_disabled_reason: str | None = None
@@ -156,35 +164,89 @@ def pick_sample(keys: list[str], run_id: str) -> list[str]:
     return ranked[: sample_size(len(keys))]
 
 
-def read_image_bytes(image: Image, ctx: CheckContext) -> tuple[bytes | None, str | None]:
-    """The bytes of one image, or the reason they cannot be used. Never raises for file problems.
+def short_id(digest: str) -> str:
+    """The 16-hex ``image_id`` a full sha256 digest corresponds to.
 
-    The path is classified and contained like every other read of the audit (remote, unsafe and
-    outside-root paths are not opened), the file is opened without following symlinks, must be a
-    regular file no larger than ``max_embed_image_bytes`` and must hash to ``image.image_id``.
+    ``image_id`` is a 64-bit label: it is cheap to compare but collisions can be constructed, so it
+    is only a first filter. The full digest is what binds a cached vector to a file.
     """
+    return digest[:16]
+
+
+def _resolve(image: Image, ctx: CheckContext) -> tuple[Path | None, str | None]:
+    """The real path to open, or the reason the image must not be opened."""
     resolved = resolve_image_path(
         image.file_path, ctx.root, allow_external=ctx.allow_external_images
     )
     if resolved.kind != "local" or resolved.path is None:
         reason = {"remote": "remote", "external": "outside_root"}.get(resolved.kind, "unsafe_path")
         return None, reason
+    return resolved.path, None
+
+
+def _open_reason(exc: Exception) -> str:
+    if isinstance(exc, FormatError):
+        return "not_a_regular_file" if "not a regular file" in str(exc) else "file_missing"
+    return "unreadable"
+
+
+def read_verified(image: Image, ctx: CheckContext) -> tuple[bytes | None, str | None, str | None]:
+    """``(bytes, full sha256, None)`` of one image, or ``(None, None, reason)``. Never raises for
+    file problems.
+
+    The path is classified and contained like every other read of the audit (remote, unsafe and
+    outside-root paths are not opened), the file is opened without following symlinks, must be a
+    regular file no larger than ``max_embed_image_bytes`` and must hash to ``image.image_id``.
+    """
+    path, reason = _resolve(image, ctx)
+    if path is None:
+        return None, None, reason
     limit = ctx.config.max_embed_image_bytes
     try:
-        with files.open_regular(resolved.path, nofollow=True) as handle:
+        with files.open_regular(path, nofollow=True) as handle:
+            if os.fstat(handle.fileno()).st_size > limit:
+                return None, None, "file_too_large"
+            data = handle.read(limit + 1)
+    except (FormatError, OSError) as exc:
+        return None, None, _open_reason(exc)
+    if len(data) > limit:
+        return None, None, "file_too_large"
+    digest = hashlib.sha256(data).hexdigest()
+    if short_id(digest) != image.image_id:
+        return None, None, "content_changed"
+    return data, digest, None
+
+
+def read_image_bytes(image: Image, ctx: CheckContext) -> tuple[bytes | None, str | None]:
+    """The bytes of one image, or the reason they cannot be used (see :func:`read_verified`)."""
+    data, _digest, reason = read_verified(image, ctx)
+    return data, reason
+
+
+def hash_image(image: Image, ctx: CheckContext) -> tuple[str | None, str | None]:
+    """``(full sha256, None)`` of one image streamed in 1 MiB chunks, or ``(None, reason)``.
+
+    Same containment and size cap as :func:`read_verified`; no image is held in memory. The digest
+    is returned whether or not it matches ``image_id`` (the caller compares it with the cache).
+    """
+    path, reason = _resolve(image, ctx)
+    if path is None:
+        return None, reason
+    limit = ctx.config.max_embed_image_bytes
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        with files.open_regular(path, nofollow=True) as handle:
             if os.fstat(handle.fileno()).st_size > limit:
                 return None, "file_too_large"
-            data = handle.read(limit + 1)
-    except FormatError as exc:
-        kind = "not_a_regular_file" if "not a regular file" in str(exc) else "file_missing"
-        return None, kind
-    except OSError:
-        return None, "unreadable"
-    if len(data) > limit:
-        return None, "file_too_large"
-    if hashlib.sha256(data).hexdigest()[:16] != image.image_id:
-        return None, "content_changed"
-    return data, None
+            while chunk := handle.read(1024 * 1024):
+                total += len(chunk)
+                if total > limit:
+                    return None, "file_too_large"
+                digest.update(chunk)
+    except (FormatError, OSError) as exc:
+        return None, _open_reason(exc)
+    return digest.hexdigest(), None
 
 
 class _State:
@@ -289,10 +351,12 @@ class PipelineProvider:
         )
         loaded = cache.load()
         hits = 0
+        stored: dict[int, str] = {}
         for row, image_id in enumerate(loaded.ids):
             slot = position.get(image_id)
             if slot is not None:
                 matrix[slot], have[slot] = loaded.matrix[row], True
+                stored[slot] = loaded.digests[row]
                 hits += 1
         rejected = dict(loaded.rejected)
         if disabled_reason is not None and disabled_reason not in (
@@ -303,6 +367,16 @@ class PipelineProvider:
         if rejected:
             log.warning("embedding_cache_rejected", state=loaded.state, reasons=rejected)
 
+        changed = 0
+        if hits and cache.enabled:
+            changed = self._verify_files(ctx, by_id, ids_sorted, have, stored, deadline)
+            hits = int(have.sum())
+            if changed:
+                log.warning("embedding_cache_content_changed", count=changed)
+                cache.reset()
+                have[:] = False
+                matrix[:] = 0.0
+                hits = 0
         sampled = mismatched = 0
         unverified: str | None = None
         if hits and cache.enabled:
@@ -348,6 +422,7 @@ class PipelineProvider:
             cache_hits=hits,
             spot_checked=sampled,
             spot_mismatched=mismatched,
+            cache_content_changed=changed,
             cache_unverified=unverified,
             cache_unwritable=unwritable,
             cache_disabled_reason=disabled_reason,
@@ -365,6 +440,47 @@ class PipelineProvider:
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
         return result
+
+    def _verify_files(
+        self,
+        ctx: CheckContext,
+        by_id: dict[str, Image],
+        ids_sorted: list[str],
+        have: NDArray[np.bool_],
+        stored: dict[int, str],
+        deadline: float,
+    ) -> int:
+        """Hash the file of every cache hit and drop the vectors it no longer matches.
+
+        The cache is bound to the dataset rows, which do not see the image files, so this is what
+        ties a cached vector to the bytes it was computed from. A hit whose file hashes to another
+        digest is counted (the caller then discards the whole cache); a hit whose file cannot be
+        read, is too large, is remote or outside the root, or was not reached before the deadline
+        is simply dropped, so the main pass classifies it and it becomes an unchecked image rather
+        than a trusted vector. Only I/O is spent here, no model.
+        """
+        slots = [int(s) for s in np.flatnonzero(have)]
+        images = [by_id[ids_sorted[s]] for s in slots]
+        window = max(1, min(ctx.workers, MAX_READ_WINDOW))
+        results = pool.bounded_map(
+            lambda image: hash_image(image, ctx),
+            images,
+            workers=ctx.workers,
+            window=window,
+            deadline=deadline,
+        )
+        reached = 0
+        changed = 0
+        for slot, (digest, _reason) in zip(slots, results, strict=False):
+            reached += 1
+            if digest == stored[slot]:
+                continue
+            have[slot] = False
+            if digest is not None:
+                changed += 1
+        for slot in slots[reached:]:
+            have[slot] = False
+        return changed
 
     def _spot_check(
         self,
@@ -385,8 +501,11 @@ class PipelineProvider:
         cached = [ids_sorted[int(s)] for s in np.flatnonzero(have)]
         sample = [by_id[i] for i in pick_sample(cached, ctx.run_id)]
         compared = disagreeing = 0
-        for image_id, vector, _reason in self._stream(sample, ctx, deadline, state):
+        for image_id, vector, reason, _digest in self._stream(sample, ctx, deadline, state):
             if vector is None:
+                if reason == "content_changed":  # a hit whose file changed: never "unverifiable"
+                    compared += 1
+                    disagreeing += 1
                 continue  # unreadable now (for example no images on a CI runner): cannot compare
             compared += 1
             if float(np.dot(vector, matrix[position[image_id]])) < SPOT_MIN_COSINE:
@@ -413,6 +532,7 @@ class PipelineProvider:
             return False
         pending_ids: list[str] = []
         pending_vecs: list[NDArray[np.float32]] = []
+        pending_digests: list[str] = []
         unwritable = False
 
         def flush() -> None:
@@ -420,36 +540,41 @@ class PipelineProvider:
             if not pending_ids or unwritable or not cache.enabled:
                 pending_ids.clear()
                 pending_vecs.clear()
+                pending_digests.clear()
                 return
             try:
-                cache.append(pending_ids, np.stack(pending_vecs))
+                cache.append(pending_ids, np.stack(pending_vecs), pending_digests)
             except (embed_cache.CacheFullError, OSError):
                 unwritable = True
             pending_ids.clear()
             pending_vecs.clear()
+            pending_digests.clear()
 
-        for image_id, vector, reason in self._stream(todo, ctx, deadline, state):
-            if vector is None:
+        for image_id, vector, reason, digest in self._stream(todo, ctx, deadline, state):
+            if vector is None or digest is None:
                 missing[reason or "unreadable"].append(image_id)
                 continue
             slot = position[image_id]
             matrix[slot], have[slot] = vector, True
             pending_ids.append(image_id)
             pending_vecs.append(vector)
+            pending_digests.append(digest)
             if len(pending_ids) >= embed_cache.WRITE_SHARD_ROWS:
                 flush()
         flush()
         return unwritable
 
     # ------------------------------------------------------------------ reading and embedding
-    def _read(self, image: Image, ctx: CheckContext) -> tuple[Image, bytes | None, str | None]:
-        data, reason = read_image_bytes(image, ctx)
-        return image, data, reason
+    def _read(
+        self, image: Image, ctx: CheckContext
+    ) -> tuple[Image, bytes | None, str | None, str | None]:
+        data, digest, reason = read_verified(image, ctx)
+        return image, data, digest, reason
 
     def _stream(
         self, images: list[Image], ctx: CheckContext, deadline: float, state: _State
-    ) -> Iterator[tuple[str, NDArray[np.float32] | None, str | None]]:
-        """Yield ``(image_id, vector or None, reason or None)`` for every image, in order."""
+    ) -> Iterator[Result]:
+        """Yield ``(image_id, vector, reason, digest)`` per image, in order (see ``Result``)."""
         window = max(1, min(ctx.workers, MAX_READ_WINDOW))
         reads = pool.bounded_map(
             lambda image: self._read(image, ctx),
@@ -458,14 +583,14 @@ class PipelineProvider:
             window=window,
             deadline=deadline,
         )
-        batch: list[tuple[Image, bytes]] = []
+        batch: list[tuple[Image, bytes, str]] = []
         batch_bytes = 0
         consumed = 0
         try:
-            for image, data, reason in reads:
+            for image, data, digest, reason in reads:
                 consumed += 1
-                if data is None:
-                    yield image.image_id, None, reason
+                if data is None or digest is None:
+                    yield image.image_id, None, reason or "unreadable", None
                     continue
                 if batch and (
                     len(batch) >= self._batch or batch_bytes + len(data) > MAX_BATCH_BYTES
@@ -473,45 +598,45 @@ class PipelineProvider:
                     yield from self._flush(batch, deadline, state)
                     batch, batch_bytes = [], 0
                     if state.error is not None:  # stop reading; the rest cannot be embedded
-                        yield image.image_id, None, "embedder_error"
+                        yield image.image_id, None, "embedder_error", None
                         break
-                batch.append((image, data))
+                batch.append((image, data, digest))
                 batch_bytes += len(data)
             else:
                 yield from self._flush(batch, deadline, state)
         finally:
             reads.close()
         for image in images[consumed:]:
-            yield image.image_id, None, "embedder_error" if state.error else "time_budget"
+            yield image.image_id, None, "embedder_error" if state.error else "time_budget", None
 
     def _flush(
-        self, batch: list[tuple[Image, bytes]], deadline: float, state: _State
-    ) -> Iterator[tuple[str, NDArray[np.float32] | None, str | None]]:
+        self, batch: list[tuple[Image, bytes, str]], deadline: float, state: _State
+    ) -> Iterator[Result]:
         dims = self._embedder.dims
         batch = list(batch)
         while batch:
             if time.monotonic() >= deadline:
-                for image, _ in batch:
-                    yield image.image_id, None, "time_budget"
+                for image, _, _ in batch:
+                    yield image.image_id, None, "time_budget", None
                 return
             try:
-                raw = self._embedder.embed([data for _, data in batch])
+                raw = self._embedder.embed([data for _, data, _ in batch])
             except ImageDecodeError as exc:
                 if not 0 <= exc.index < len(batch):
                     state.error = "InvalidEmbedderOutput"
-                    for image, _ in batch:
-                        yield image.image_id, None, "embedder_error"
+                    for image, _, _ in batch:
+                        yield image.image_id, None, "embedder_error", None
                     return
-                image, _ = batch.pop(exc.index)
+                image, _, _ = batch.pop(exc.index)
                 reason = exc.reason if exc.reason in _DECODE_REASONS else "decode_failed"
-                yield image.image_id, None, reason
+                yield image.image_id, None, reason, None
                 continue
             except Exception as exc:  # noqa: BLE001  # recorded by type only; text may hold secrets
                 state.error = type(exc).__name__
                 if isinstance(exc, DataCopilotError):
                     state.detail = safe_text(str(exc), 300)
-                for image, _ in batch:
-                    yield image.image_id, None, "embedder_error"
+                for image, _, _ in batch:
+                    yield image.image_id, None, "embedder_error", None
                 return
             out = np.asarray(raw)
             if (
@@ -520,8 +645,8 @@ class PipelineProvider:
                 or not np.isfinite(out).all()
             ):
                 state.error = "InvalidEmbedderOutput"
-                for image, _ in batch:
-                    yield image.image_id, None, "embedder_error"
+                for image, _, _ in batch:
+                    yield image.image_id, None, "embedder_error", None
                 return
             norms = np.linalg.norm(out.astype(np.float32), axis=1)
             good = norms > 0
@@ -531,10 +656,10 @@ class PipelineProvider:
                 else np.zeros((0, dims), dtype=np.float32)
             )
             row = 0
-            for n, (image, _) in enumerate(batch):
+            for n, (image, _, digest) in enumerate(batch):
                 if good[n]:
-                    yield image.image_id, canonical[row], None
+                    yield image.image_id, canonical[row], None, digest
                     row += 1
                 else:
-                    yield image.image_id, None, "zero_vector"
+                    yield image.image_id, None, "zero_vector", None
             return

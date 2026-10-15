@@ -137,12 +137,17 @@ Built checks and findings (`payload["rule"]`):
 The three embedding checks share these **fail-closed rules**, emitted by each of them so that
 `--fail-on <check>` and the severity gates see them: `embedder_missing` (CRITICAL, no provider),
 `embedder_error` (CRITICAL; the exception *type* only, never its text), `images_not_embedded`
-(WARN, CRITICAL above `max_unchecked_fraction` or with `--require-local-images`; counts by reason
+(`leakage`: CRITICAL under a gate for any image not embedded except by time budget, WARN without a
+gate; the others: WARN, CRITICAL above `max_unchecked_fraction` or with `--require-local-images`;
+counts by reason
 `remote`, `outside_root`, `unsafe_path`, `file_missing`, `not_a_regular_file`, `unreadable`,
 `file_too_large`, `content_changed`, `decode_failed`, `too_many_pixels`, `zero_vector`,
 `embedder_error`, `time_budget`), `audit_incomplete` (embedding time budget, neighbour search time
-budget, or more than 500,000 images), `embedding_cache_rejected` and `embedding_cache_mismatch`
-(WARN). `--checks all` includes the three only when an embedder is given; naming one without
+budget, or more than 500,000 images), `embedding_cache_rejected`, `embedding_cache_mismatch`, `embedding_cache_content_changed` (an
+image file no longer hashes to the digest stored with its cached vector; the cache is discarded) and
+`embedding_cache_unverified` (WARN). `leakage` also reports `images_without_group` (INFO, when only
+some images carry a `group_id`, so that clearing the id on the images that matter is visible; a
+dataset with no group ids at all cannot be told apart from one that does not use them). `--checks all` includes the three only when an embedder is given; naming one without
 `--embedder`, or gating on one that is not part of the run, is a usage error (exit 2).
 `label_noise` and `sku_confusion` are planned; `--fail-on` rejects their names as "not available
 in this version" instead of accepting a gate that can never fire.

@@ -43,6 +43,23 @@ def _group_findings(ds: Dataset, ctx: CheckContext) -> list[Finding]:
         if image.group_id:
             by_group[image.group_id].append(image)
     findings: list[Finding] = []
+    ungrouped = len(ds.images) - sum(len(v) for v in by_group.values())
+    if by_group and ungrouped:
+        # Some images carry a group and some do not: whoever clears group_id on the images that
+        # matter would otherwise make group_overlap disappear. A dataset with no groups at all
+        # cannot be told apart from one that does not use them, and gets no note.
+        findings.append(
+            make_finding(
+                ctx.run_id,
+                NAME,
+                "INFO",
+                payload={
+                    "rule": "images_without_group",
+                    "count": ungrouped,
+                    "total": len(ds.images),
+                },
+            )
+        )
     for group_id in sorted(by_group):
         members = sorted(by_group[group_id], key=lambda i: i.image_id)
         if not embedtools.spans_splits(m.split for m in members):

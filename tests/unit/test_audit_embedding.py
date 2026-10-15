@@ -48,6 +48,14 @@ def dataset(root: Path, n: int = 12, **kw: Any) -> Dataset:
     return build(root, [Img(f"i{k}.png", seed=k, **kw) for k in range(n)])
 
 
+def file_digests(ds: Dataset) -> list[str]:
+    """Real full digests of the image files, in sorted image-id order (what a key holder knows)."""
+    import hashlib
+
+    path_of = {i.image_id: i.file_path for i in ds.images}
+    return [hashlib.sha256(Path(path_of[i]).read_bytes()).hexdigest() for i in sorted(path_of)]
+
+
 def provider(emb: FakeEmbedder, **kw: Any) -> embedding.PipelineProvider:
     return embedding.PipelineProvider(emb, **kw)
 
@@ -99,11 +107,15 @@ def test_cached_vectors_that_cannot_be_verified_are_not_trusted(tmp_path: Path) 
     (tmp_path / "ds.dcp").mkdir()
     cache = ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", identity(ds), KEY.encode())
     cache.load()
-    cache.append(ids, ec.canonical_vectors(np.tile(random_unit(b"decoy"), (12, 1)), "float16"))
+    cache.append(
+        ids,
+        ec.canonical_vectors(np.tile(random_unit(b"decoy"), (12, 1)), "float16"),
+        file_digests(ds),
+    )
     for path in (tmp_path / "images").iterdir():
         path.unlink()  # a runner without the images: nothing in the cache can be checked
     es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
-    assert es.cache_unverified == "too_few_verifiable" and es.cache_hits == 0
+    assert es.cache_hits == 0  # every hit failed the file check: none is trusted
     assert es.ids == () and len(es.missing["file_missing"]) == 12  # unchecked, so it gates
 
 
@@ -114,13 +126,16 @@ def test_a_cache_is_trusted_when_at_least_half_of_the_sample_is_verifiable(
     provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
     sample = embedding.pick_sample(sorted(i.image_id for i in ds.images), RUN)
     assert len(sample) == 10
-    names = {i.image_id: i.file_path for i in ds.images}
-    for image_id in sample[:5]:
-        Path(names[image_id]).unlink()
-    es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    path_of = {i.image_id: Path(i.file_path) for i in ds.images}
+    emb = FakeEmbedder()
+    for image_id in sample[:5]:  # the model cannot decode these now: 5 of 10 are verifiable
+        emb.decode_errors[path_of[image_id].read_bytes()] = "decode_failed"
+    es = provider(emb).get(ds, make_ctx(tmp_path, None))
     assert es.cache_unverified is None and es.spot_checked == 5 and es.cache_hits == 20
-    Path(names[sample[5]]).unlink()  # now only 4 of 10 can be verified
-    es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    emb2 = FakeEmbedder()
+    for image_id in sample[:6]:  # now only 4 of 10
+        emb2.decode_errors[path_of[image_id].read_bytes()] = "decode_failed"
+    es = provider(emb2).get(ds, make_ctx(tmp_path, None))
     assert es.cache_unverified == "too_few_verifiable" and es.cache_hits == 0
 
 
@@ -137,7 +152,7 @@ def test_a_single_forged_vector_among_verifiable_ones_discards_the_whole_cache(
     cache = ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", identity(ds), KEY.encode())
     cache.load()
     cache.reset()
-    cache.append(list(good.ids), forged)  # valid MAC, one wrong vector
+    cache.append(list(good.ids), forged, file_digests(ds))  # valid MAC, one wrong vector
     emb = FakeEmbedder()
     es = provider(emb).get(ds, make_ctx(tmp_path, None))
     assert es.spot_mismatched == 1 and es.cache_hits == 0 and sum(emb.calls) >= 12
@@ -175,7 +190,11 @@ def test_a_cache_written_for_another_identity_is_never_used(
     cache = ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", other, KEY.encode())
     cache.load()
     ids = sorted(i.image_id for i in ds.images)
-    cache.append(ids, ec.canonical_vectors(np.ones((12, other.dims), np.float32), other.dtype))
+    cache.append(
+        ids,
+        ec.canonical_vectors(np.ones((12, other.dims), np.float32), other.dtype),
+        file_digests(ds),
+    )
     # a manifest of another identity placed where this run looks (the revision changes the name)
     src = tmp_path / "ds.dcp" / "embeddings" / other.directory_name
     dst = tmp_path / "ds.dcp" / "embeddings" / base.directory_name
@@ -220,6 +239,7 @@ def test_a_cache_edited_without_the_key_is_rejected_and_recomputed(tmp_path: Pat
         identity(ds),
         sorted(i.image_id for i in ds.images),
         ec.canonical_vectors(np.ones((12, DIMS), np.float32), "float16"),
+        file_digests(ds),
     )
     shard.write_bytes(forged)
     emb = FakeEmbedder()
@@ -239,7 +259,7 @@ def test_a_poisoned_cache_written_with_the_key_is_caught_by_the_spot_check(
     cache.load()
     poison = ec.canonical_vectors(np.tile(random_unit(b"decoy"), (12, 1)), "float16")
     cache.append(
-        ids, poison
+        ids, poison, file_digests(ds)
     )  # every image claims the same vector: it would "hide" nothing, but lie
     emb = FakeEmbedder()
     es = provider(emb).get(ds, make_ctx(tmp_path, None))
@@ -560,3 +580,76 @@ def test_a_package_error_message_is_shown_but_another_exceptions_text_is_not(
     (tmp_path / "b").mkdir()
     es2 = provider(emb2).get(dataset(tmp_path / "b", 3), make_ctx(tmp_path / "b", None))
     assert es2.error_detail is None
+
+
+# ------------------------------------------------------------ cache bound to the image bytes
+def swap_bytes(ds: Dataset, names: list[str], tmp: Path) -> None:
+    """Replace the files of some images by other valid PNGs; the dataset rows stay unchanged."""
+    for n, name in enumerate(names):
+        (tmp / "images" / name).write_bytes(png_bytes(64, 48, 5000 + n))
+
+
+@pytest.mark.parametrize("count", [1, 6, 12], ids=["one", "half", "all"])
+def test_swapping_image_bytes_under_unchanged_rows_invalidates_the_cached_vectors(
+    tmp_path: Path, count: int
+) -> None:
+    ds = dataset(tmp_path)
+    first = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    names = [f"i{k}.png" for k in range(count)]
+    swap_bytes(ds, names, tmp_path)
+    emb = FakeEmbedder()
+    es = provider(emb).get(ds, make_ctx(tmp_path, None))  # same rows, same manifest version
+    swapped = {i.image_id for i in ds.images if i.file_path.rsplit("/", 1)[-1] in names}
+    assert set(es.missing.get("content_changed", ())) == swapped
+    assert swapped.isdisjoint(es.ids) and len(es.ids) == 12 - count
+    assert es.cache_content_changed == count and es.cache_hits == 0
+    for image_id in es.ids:  # nothing from the old cache survived: all recomputed from the files
+        np.testing.assert_array_equal(
+            es.matrix[es.ids.index(image_id)], first.matrix[first.ids.index(image_id)]
+        )
+    assert sum(emb.calls) >= 12 - count
+
+
+def test_cached_images_that_can_no_longer_be_read_are_unchecked_not_trusted(
+    tmp_path: Path,
+) -> None:
+    ds = dataset(tmp_path, 12)
+    provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    rows = list(ds.images)
+    outside = tmp_path.parent / "elsewhere.png"
+    rows[0] = rows[0].model_copy(update={"file_path": "s3://bucket/x.png"})
+    rows[1] = rows[1].model_copy(update={"file_path": str(outside)})
+    rows[2] = rows[2].model_copy(update={"file_path": "../x.png"})
+    (tmp_path / "images" / "i3.png").unlink()
+    moved = Dataset(ds.manifest, tuple(rows), ds.annotations)
+    ctx = make_ctx(
+        tmp_path, None, config=CheckConfig(max_embed_image_bytes=len(png_bytes(64, 48, 4)) - 1)
+    )
+    es = provider(FakeEmbedder()).get(moved, ctx)
+    got = {r: len(v) for r, v in es.missing.items()}
+    assert got["remote"] == 1 and got["outside_root"] == 1 and got["unsafe_path"] == 1
+    assert got["file_missing"] == 1 and got["file_too_large"] >= 1
+    unchecked = {i for v in es.missing.values() for i in v}
+    assert unchecked.isdisjoint(es.ids)
+
+
+def test_a_full_digest_not_the_short_image_id_is_what_is_compared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two different files forced to share an image_id: the stored full digest tells them apart."""
+    a, b = png_bytes(64, 48, 1), png_bytes(64, 48, 2)
+    ds = build(tmp_path, [Img("a.png", data=a), Img("x.png", data=png_bytes(64, 48, 3))])
+    target = image_id_of(a)
+    monkeypatch.setattr(embedding, "short_id", lambda digest: target if digest else "")
+    emb = FakeEmbedder()
+    emb.plant(a, random_unit(b"A"))
+    emb.plant(b, random_unit(b"B"))
+    first = provider(emb).get(ds, make_ctx(tmp_path, None))
+    (tmp_path / "images" / "a.png").write_bytes(b)  # a 64-bit collision: same id, other bytes
+    emb2 = FakeEmbedder()
+    emb2.plant(a, random_unit(b"A"))
+    emb2.plant(b, random_unit(b"B"))
+    es = provider(emb2).get(ds, make_ctx(tmp_path, None))
+    row = es.ids.index(target)
+    assert es.cache_content_changed >= 1
+    assert not np.array_equal(es.matrix[row], first.matrix[first.ids.index(target)])

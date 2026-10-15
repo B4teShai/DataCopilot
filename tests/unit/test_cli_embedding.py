@@ -421,6 +421,7 @@ def test_a_forged_cache_cannot_hide_the_leak(
         ),
         list(rows.ids),
         ec.canonical_vectors(np.eye(len(rows.ids), 128, dtype=np.float32), "float16"),
+        list(rows.digests),
     )
     shard.write_bytes(forged)
     assert run(monkeypatch, *args) == 1  # rejected (digest and MAC), recomputed, still caught
