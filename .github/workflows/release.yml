@@ -1,0 +1,81 @@
+name: release
+
+# Publishing is irreversible and needs the maintainer's approval (docs/engineering/release.md):
+# the `pypi` environment has required reviewers. There is no token anywhere; the publish job
+# authenticates to PyPI with a short-lived OIDC identity (trusted publishing).
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          version: "0.11.7"
+          python-version: "3.12"
+          enable-cache: false
+      - name: Check the tag equals __version__
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/check_release_tag.py "$TAG"
+      - name: Install the locked environment
+        run: uv sync --locked --group release
+      - name: Gate
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+          uv run pytest --cov=datacopilot --cov-fail-under=85 -q
+      - name: Build the wheel and the sdist
+        run: |
+          mkdir -p release
+          uv build --out-dir release/dist
+      - name: Check the metadata
+        run: uv run twine check --strict release/dist/*
+      - name: Record the digests
+        run: |
+          cd release
+          sha256sum dist/* | tee SHA256SUMS
+          { echo '### Artifact digests'; echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/datacopilot/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: release
+      - name: Verify the downloaded artifact is the one that was built
+        run: |
+          cd release
+          sha256sum --check SHA256SUMS
+          ls -l dist
+      - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+        with:
+          packages-dir: release/dist

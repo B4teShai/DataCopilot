@@ -47,5 +47,5 @@ is still decoded by Pillow when you use an embedder: run untrusted datasets in a
 
 ## Reporting
 
-Report a vulnerability privately to the maintainers as described in the repository's contributing
-guide; do not open a public issue.
+Report a vulnerability privately (a security advisory on the repository, or a message to a
+maintainer); do not open a public issue.

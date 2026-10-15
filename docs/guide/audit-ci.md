@@ -53,10 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # pin third-party actions to a full commit SHA
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          python-version: "3.12"
+          persist-credentials: false
       - run: pip install datacopilot
       - run: datacopilot ingest data --format coco -o data.dcp
       - run: datacopilot audit data.dcp --no-hash-cache --fail-on critical
