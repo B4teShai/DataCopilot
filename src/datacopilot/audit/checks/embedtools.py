@@ -11,7 +11,6 @@ return "no findings" because embedding failed.
 from __future__ import annotations
 
 import hashlib
-import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -20,7 +19,7 @@ from pydantic import JsonValue
 from datacopilot.audit.context import CheckContext
 from datacopilot.audit.embedding import EmbeddingSet
 from datacopilot.audit.findings import make_finding
-from datacopilot.audit.paths import display_name, unchecked_severity
+from datacopilot.audit.paths import display_name, safe_text, unchecked_severity
 from datacopilot.core.schema import Dataset, Finding, Image
 
 MAX_MEMBERS_LISTED = 20
@@ -38,14 +37,8 @@ def short_digest(parts: Iterable[str]) -> str:
 
 
 def safe_label(value: str, limit: int = MAX_LABEL_CHARS) -> str:
-    """``value`` cut to ``limit`` characters with control, bidirectional and format characters
-    replaced, so user-chosen text (a group id) is safe to show anywhere."""
-    out = []
-    for char in value[: limit + 1]:
-        bad = unicodedata.category(char) in ("Cc", "Cf", "Cs", "Zl", "Zp") or not char.isprintable()
-        out.append("?" if bad else char)
-    text = "".join(out)
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    """User-chosen text (a group id) cut to ``limit`` characters and made safe to show."""
+    return safe_text(value, limit)
 
 
 def spans_splits(splits: Iterable[str]) -> bool:
@@ -131,6 +124,7 @@ def embedding_set(
                 payload={
                     "rule": "embedder_error",
                     "error_type": es.error,
+                    **({"detail": es.error_detail} if es.error_detail else {}),
                     "embedded": len(es.ids),
                     "total": es.total,
                 },

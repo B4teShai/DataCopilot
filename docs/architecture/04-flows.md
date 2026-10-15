@@ -1,7 +1,7 @@
 # 04 Flows
 
-Flow A is built except the embedding-based checks (the audit steps below run the four CPU checks);
-`export` is built; Flow B is planned. Exit
+Flow A is built, including the embedding checks (`--embedder`); `export` and `embed` are built;
+Flow B is planned. Exit
 codes follow [errors-and-logging.md](../engineering/errors-and-logging.md): `0` success,
 `1` the command ran and failed (including a gate or check that was asked to fail), `2`
 usage or configuration error, `130` interrupted. Every failure is logged once, at the CLI
@@ -39,9 +39,15 @@ into place and prints its path. The output directory must be absent or empty.
    `--fail-on critical`; `--fail-on none` applies no gate) validates the
    options first (colliding report paths, `--allow-external-images` in CI without
    `--allow-external-images-in-ci`, unknown check, unknown or never-firing `--fail-on` token, a `--fail-on` check that
-   is not part of the run: exit 2), reads the tables through the bounded, hash-verified store
-   reader, and runs each check in `audit/registry.py` order. Checks that need embeddings (planned)
-   would call the embedder (cache hit when `embeddings/<model>@<rev>.parquet` covers the images).
+   is not part of the run, an embedding check without `--embedder`, `--embedder` with no check that
+   uses it, a bad `--embed-batch` or `--similarity-threshold`: exit 2), creates the embedder (if `--embedder`) **before** the dataset is read, which runs the
+   license guard against `DATACOPILOT_ALLOWED_LICENSES` (no weights are touched yet), reads the tables
+   through the bounded, hash-verified store reader, and runs each check in `audit/registry.py` order.
+   The embedding checks (`near_duplicates`, `leakage`, `outliers`) share one embedding pass
+   (`audit/embedding.py`): verified cache vectors are taken from `embeddings/<model>@<rev>/`, a
+   sample is re-embedded to authenticate them, and the remaining images are read (contained in the
+   dataset root, hashed against their id), batched and embedded, one shard per 4,096 vectors.
+   `--checks all` includes these three only when `--embedder` is given.
    The `duplicates` check uses the authenticated hash cache unless `--no-hash-cache`
    (or `DATACOPILOT_HASH_CACHE=false`) is given.
 6. Findings are collected into an `AuditRun` (`run_id` is the invocation's `request_id`) and written
@@ -66,8 +72,15 @@ Failure paths:
 | `--checks` names an unknown check; `--fail-on` is unknown, empty, a check that is not built (for example `leakage`) or a check that is not in `--checks`; `--workers` out of range | one usage line on `stderr`; nothing is read or written | 2 |
 | Images that were not examined: remote URIs, real path outside the dataset's parent directory (`--allow-external-images` opts in; refused in CI without `--allow-external-images-in-ci`), unhashable files | counted in a WARN finding, CRITICAL when more than 50 percent of the images are affected or with `--require-local-images`, so a dataset cannot pass by pointing its images elsewhere | 1 with the default gate once CRITICAL |
 | Hash cache in CI (`CI` set) without `DATACOPILOT_CACHE_KEY`; directory, secret or file not private to this user; or a cached digest that fails the spot check | cache disabled (`audit_cache_untrusted`, reason `ci_without_key` and others), ignored or discarded, WARN event (and a `hash_cache_mismatch` WARN finding for a failed spot check); the audit continues | 0 unless `--fail-on` matches |
-| Embedder requested without `[embed]` | error names `pip install "datacopilot[embed]"` | 1 |
-| Model license not in `DATACOPILOT_ALLOWED_LICENSES` | `LicenseError` names model and license | 1 |
+| Embedder requested without `[embed]` | the first use fails: an `embedder_error` finding (CRITICAL) with the message that names `pip install "datacopilot[embed]"`, an `embedder_failed` log event, and every image counted as not embedded | 1 with the default gate |
+| Model license not in `DATACOPILOT_ALLOWED_LICENSES` | `LicenseError` names model, license and the variable; raised before the dataset is read and before any download or load | 1 |
+| Unknown or malformed `--embedder`; embedding check without `--embedder`; `--embedder` without an embedding check | one usage line on `stderr`; nothing is read or written | 2 |
+| Images without an embedding (remote, outside the root, missing, not regular, too large, changed since ingest, undecodable, over the pixel limit, zero vector, embedder error, time budget) | `images_not_embedded` finding of each embedding check with counts by reason: WARN, CRITICAL above 50 percent or with `--require-local-images`; any finding of the check fails `--fail-on <check>` | 1 when the gate matches |
+| Embedder raises, returns a wrong shape, NaN or infinity | `embedder_error` (CRITICAL; exception type only), the remaining images counted as not embedded | 1 with the default gate |
+| Embedding time budget or neighbour-search budget reached, or more than 500,000 images | `audit_incomplete` (CRITICAL when a gate is applied, else WARN) | 1 with the default gate |
+| Embedding cache shard or manifest fails verification, sample disagrees, or too few sampled hits are verifiable | cache ignored or discarded and recomputed; `embedding_cache_rejected`, `embedding_cache_mismatch` or `embedding_cache_unverified` (WARN) | by the gate |
+| `embed`: any image without an embedding, embedder failure, or cache not writable | `error:` lines on `stderr` | 1 |
+| `embed`: cache unusable (`CI` without key, `--no-embedding-cache`) | usage error, nothing is stored | 2 |
 | `--fail-on` matches at least one finding (default gate: CRITICAL) | report written; `audit_completed` has `passed=false` | 1 |
 | Dataset with no images | `ValidationError`: `dataset has no images`; nothing is written | 1 |
 | Plugin code raises `SystemExit` or another `BaseException` (not `KeyboardInterrupt`) | the audit fails with `check '<name>' aborted the audit`; the exit status can never be 0 | 1 |
@@ -82,13 +95,16 @@ Logged events (all `INFO` unless stated): `dataset_ingested` (`format`, `image_c
 (`format`, `image_count`, `annotation_count`, `dataset_version`, `dropped_count`, `skipped_count`,
 `strict`, `duration_ms`), `audit_check_completed` (`check_name`, `findings_count`,
 `duration_ms`), `audit_cache_unavailable`, `audit_cache_untrusted` and `audit_cache_discarded` (WARN, see
-[06-cross-cutting.md](06-cross-cutting.md)), `embeddings_computed` (`model_id`, `model_revision`, `image_count`,
-`cache_hits`), `audit_completed` (`run_id`, `dataset_version`, `critical`, `warn`, `info`,
+[06-cross-cutting.md](06-cross-cutting.md)), `embeddings_computed` (`model_id`, `model_revision`, `image_count`, `embedded_count`,
+`cache_hits`, `missing_count`, `duration_ms`), `embedder_failed` (WARN; `error_type`, `detail`
+for package errors only), `embedding_cache_disabled`, `embedding_cache_rejected`,
+`embedding_cache_unverified` and `embedding_cache_discarded` (WARN, see
+[06-cross-cutting.md](06-cross-cutting.md)), `model_loaded`, `model_license_shown`, `audit_completed` (`run_id`, `dataset_version`, `critical`, `warn`, `info`,
 `passed`), `report_written` (`format`, `path` = the file name only, never the directory), `command_failed` (`ERROR`; `command`,
 `exc_info`). Expected failures also print one `error: ...` line on `stderr`.
 
-Status: `ingest`, `export`, `audit` (CPU checks), the gate and the reports built; embedding-based
-checks planned.
+Status: `ingest`, `export`, `audit` (all checks but `label_noise` and `sku_confusion`), `embed`, the
+gate and the reports built.
 
 ## Flow B: propose → review export → apply
 

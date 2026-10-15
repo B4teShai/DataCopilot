@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "automationDetails": {
+        "correlationGuid": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+        "id": "datacopilot/audit/"
+      },
+      "originalUriBaseIds": {
+        "DATASET_IMAGES": {
+          "description": {
+            "text": "Directory of the dataset images (location not disclosed)."
+          }
+        }
+      },
+      "properties": {
+        "critical": 6,
+        "datasetVersion": "528d0b56096484cfa4ba8e06b33988d7",
+        "info": 0,
+        "passed": false,
+        "warn": 0
+      },
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Some images have no embedding and were not compared (count=13; reasons={\"embedder_error\":13}; total=13)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "aaf48d3e33183072"
+          },
+          "properties": {
+            "check": "near_duplicates",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "near_duplicates/images_not_embedded",
+          "ruleIndex": 3
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "The embedder failed; images were not compared (detail=model 'dinov2_small' needs the optional library 'huggingface_hub': pip install \"datacopilot[embed]\"; embedded=0; error_type=ModelError; total=13)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "db2fe7a003d65cd0"
+          },
+          "properties": {
+            "check": "near_duplicates",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "near_duplicates/embedder_error",
+          "ruleIndex": 2
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "The embedder failed; images were not compared (detail=model 'dinov2_small' needs the optional library 'huggingface_hub': pip install \"datacopilot[embed]\"; embedded=0; error_type=ModelError; total=13)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "93f58a42a09d9a02"
+          },
+          "properties": {
+            "check": "leakage",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "leakage/embedder_error",
+          "ruleIndex": 0
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Some images have no embedding and were not compared (count=13; reasons={\"embedder_error\":13}; total=13)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "ecf5cadb8ba0edc4"
+          },
+          "properties": {
+            "check": "leakage",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "leakage/images_not_embedded",
+          "ruleIndex": 1
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "The embedder failed; images were not compared (detail=model 'dinov2_small' needs the optional library 'huggingface_hub': pip install \"datacopilot[embed]\"; embedded=0; error_type=ModelError; total=13)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "2c330885361e2e93"
+          },
+          "properties": {
+            "check": "outliers",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "outliers/embedder_error",
+          "ruleIndex": 4
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Some images have no embedding and were not compared (count=13; reasons={\"embedder_error\":13}; total=13)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "bbb5848f27b26393"
+          },
+          "properties": {
+            "check": "outliers",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "outliers/images_not_embedded",
+          "ruleIndex": 5
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "datacopilot",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "leakage/embedder_error",
+              "shortDescription": {
+                "text": "The embedder failed; images were not compared"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "leakage/images_not_embedded",
+              "shortDescription": {
+                "text": "Some images have no embedding and were not compared"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "near_duplicates/embedder_error",
+              "shortDescription": {
+                "text": "The embedder failed; images were not compared"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "near_duplicates/images_not_embedded",
+              "shortDescription": {
+                "text": "Some images have no embedding and were not compared"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "outliers/embedder_error",
+              "shortDescription": {
+                "text": "The embedder failed; images were not compared"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "outliers/images_not_embedded",
+              "shortDescription": {
+                "text": "Some images have no embedding and were not compared"
+              }
+            }
+          ],
+          "version": "0.0.1.dev0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

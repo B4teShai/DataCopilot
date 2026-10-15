@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 import platform
+import re
 import sys
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import Annotated, Any, NoReturn
 
 import typer
 
@@ -134,6 +136,35 @@ def _split_option(value: str, option: str) -> list[str]:
     return parts
 
 
+_EMBEDDER_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+MAX_EMBED_BATCH_OPTION = 1024
+
+
+def _resolve_embedder(name: str, allowed_licenses: frozenset[str]) -> Any:
+    """Create the named embedder after the license guard; usage errors exit 2, license and
+    missing-extra errors exit 1. No weights are touched here (the model loads on first use)."""
+    from datacopilot.embed import registry as embed_registry
+
+    if not _EMBEDDER_NAME.fullmatch(name):
+        raise typer.BadParameter(
+            "use lower-case letters, digits and underscores", param_hint="--embedder"
+        )
+    available = embed_registry.embedder_names()
+    if name not in available:
+        raise typer.BadParameter(
+            f"unknown embedder; available: {', '.join(available) or 'none'}",
+            param_hint="--embedder",
+        )
+    return embed_registry.get_embedder(name, allowed_licenses)
+
+
+def _check_threshold(value: float | None) -> None:
+    if value is not None and not (math.isfinite(value) and 0.0 < value <= 1.0):
+        raise typer.BadParameter(
+            "must be above 0 and at most 1", param_hint="--similarity-threshold"
+        )
+
+
 @app.command()
 def audit(
     dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
@@ -199,16 +230,48 @@ def audit(
             help="Confirm --allow-external-images when the CI environment variable is set.",
         ),
     ] = False,
+    embedder: Annotated[
+        str | None,
+        typer.Option(
+            "--embedder",
+            help=(
+                "Embedder name (for example dinov2_base, siglip2_base; needs the [embed] extra): "
+                "adds the near_duplicates, leakage and outliers checks to `--checks all`."
+            ),
+        ),
+    ] = None,
+    embed_batch: Annotated[
+        int | None,
+        typer.Option(
+            "--embed-batch", min=1, max=MAX_EMBED_BATCH_OPTION, help="Images per embedder call."
+        ),
+    ] = None,
+    similarity_threshold: Annotated[
+        float | None,
+        typer.Option(
+            "--similarity-threshold",
+            help="Cosine similarity (above 0, at most 1) from which images are near-duplicates "
+            "and cross-split pairs are leakage (default 0.95).",
+        ),
+    ] = None,
+    embedding_cache: Annotated[
+        bool,
+        typer.Option(
+            "--embedding-cache/--no-embedding-cache",
+            help="Keep embeddings in dataset.dcp/embeddings (authenticated; default: on).",
+        ),
+    ] = True,
 ) -> None:
     """Audit a dataset.dcp, write reports and exit with the gate's verdict.
 
     Prints one line (`passed|failed critical=N warn=N info=N run_id=ID`) and stores the run as
     audits/<run_id>.json. The default gate is `--fail-on critical`; `--fail-on none` applies no
     gate. Exit codes: 0 gate passed (or no gate); 1 a --fail-on match, an empty dataset or an
-    unreadable dataset; 2 bad option or configuration (unknown check, bad --fail-on, bad value).
+    unreadable dataset, an embedder that is not allowed (DATACOPILOT_ALLOWED_LICENSES) or fails
+    to load; 2 bad option or configuration (unknown check, bad --fail-on, bad value).
     """
     from datacopilot.audit import engine
-    from datacopilot.audit.context import CheckContext
+    from datacopilot.audit.context import CheckConfig, CheckContext
     from datacopilot.core.errors import FormatError
     from datacopilot.report import render
     from datacopilot.store import DatasetStore, StoreLimits
@@ -216,13 +279,18 @@ def audit(
     settings = load_settings()
     try:
         selected = "all" if checks.strip() == "all" else _split_option(checks, "--checks")
-        names = engine.select_checks(selected)
+        names = engine.select_checks(selected, with_embedder=embedder is not None)
+        if embedder is None and (embed_batch is not None or similarity_threshold is not None):
+            raise ValueError("--embed-batch and --similarity-threshold need --embedder")
+        if embedder is not None and not set(names) & registry_embedding_checks():
+            raise ValueError("--embedder is given but no selected check uses embeddings")
+        _check_threshold(similarity_threshold)
         gate = engine.parse_fail_on(
             _split_option("critical" if fail_on is None else fail_on, "--fail-on")
         )
         for token in gate:
             if token not in ("critical", "warn", "info") and token not in names:
-                raise ValueError(f"--fail-on {token!r} is not among the checks being run")
+                raise ValueError(engine.not_in_run_message(token, embedder is not None))
     except FormatError as exc:
         raise typer.BadParameter(str(exc), param_hint="--checks") from None
     except ValueError as exc:
@@ -259,6 +327,18 @@ def audit(
     limits = StoreLimits(
         max_rows=settings.max_table_rows, max_uncompressed_bytes=settings.max_table_bytes
     )
+    provider = None
+    created = None
+    if embedder is not None:  # the license guard runs before the dataset is even read
+        from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, PipelineProvider
+
+        created = _resolve_embedder(embedder, settings.allowed_licenses)
+        provider = PipelineProvider(
+            created,
+            batch_size=embed_batch if embed_batch is not None else DEFAULT_EMBED_BATCH,
+            dtype=DEFAULT_DTYPE,
+            use_cache=embedding_cache,
+        )
     store = DatasetStore.open(dataset, limits=limits)
     ds = store.read()
     run_id = current_request_id()
@@ -274,6 +354,16 @@ def audit(
         in_ci=settings.ci,
         allow_external_images=allow_external_images,
         require_local_images=require_local_images,
+        dataset_dir=dataset.resolve(),
+        embedder=None if created is None else f"{created.model_id}@{created.revision[:12]}",
+        embeddings=provider,
+        config=(
+            CheckConfig()
+            if similarity_threshold is None
+            else CheckConfig(
+                near_duplicate_cosine=similarity_threshold, leakage_cosine=similarity_threshold
+            )
+        ),
     )
     result = engine.run_audit(ds, names, ctx, gate)
     render(result, html=targets["html"], json=targets["json"], sarif=targets["sarif"])
@@ -288,6 +378,99 @@ def audit(
         f"warn={counts.warn} info={counts.info} run_id={result.run_id}"
     )
     if not result.passed:
+        raise typer.Exit(1)
+
+
+def registry_embedding_checks() -> frozenset[str]:
+    from datacopilot.audit.registry import EMBEDDING_CHECKS
+
+    return EMBEDDING_CHECKS
+
+
+@app.command()
+def embed(
+    dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
+    embedder: Annotated[
+        str, typer.Option("--embedder", help="Embedder name (needs the [embed] extra).")
+    ],
+    embed_batch: Annotated[
+        int | None,
+        typer.Option(
+            "--embed-batch", min=1, max=MAX_EMBED_BATCH_OPTION, help="Images per embedder call."
+        ),
+    ] = None,
+    embedding_cache: Annotated[
+        bool,
+        typer.Option(
+            "--embedding-cache/--no-embedding-cache",
+            help="Store the embeddings in dataset.dcp/embeddings (default: on).",
+        ),
+    ] = True,
+) -> None:
+    """Compute and store the embeddings of every image so that `audit --embedder` can reuse them.
+
+    Resumable: shards already stored (and verified) are kept. Prints one line
+    (`embedded=N total=T cached=C missing=M model=ID@REV run_id=ID`). Exit codes: 0 every image
+    has an embedding and the cache was written; 1 any image could not be embedded, the embedder
+    failed, the budget ended the run, the cache could not be written, an embedder that is not
+    allowed or an unreadable dataset; 2 bad option, or a cache that cannot be used (for example
+    `CI` set without `DATACOPILOT_CACHE_KEY`, or `--no-embedding-cache`): nothing would be stored.
+    """
+    from datacopilot.audit.context import CheckContext
+    from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, PipelineProvider
+    from datacopilot.store import DatasetStore, StoreLimits
+
+    settings = load_settings()
+    created = _resolve_embedder(embedder, settings.allowed_licenses)
+    provider = PipelineProvider(
+        created,
+        batch_size=embed_batch if embed_batch is not None else DEFAULT_EMBED_BATCH,
+        dtype=DEFAULT_DTYPE,
+        use_cache=embedding_cache,
+    )
+    limits = StoreLimits(
+        max_rows=settings.max_table_rows, max_uncompressed_bytes=settings.max_table_bytes
+    )
+    ds = DatasetStore.open(dataset, limits=limits).read()
+    run_id = current_request_id()
+    if run_id is None:
+        raise RuntimeError("request_id is not bound")
+    ctx = CheckContext(
+        run_id=run_id,
+        root=dataset.resolve().parent,
+        cache_dir=settings.cache_dir,
+        workers=settings.workers,
+        cache_key=settings.cache_key,
+        in_ci=settings.ci,
+        dataset_dir=dataset.resolve(),
+        embedder=f"{created.model_id}@{created.revision[:12]}",
+    )
+    reason = provider.preflight(ctx)
+    if reason is not None:
+        raise typer.BadParameter(
+            f"the embedding cache cannot be used ({reason}); nothing would be stored",
+            param_hint="--embedder",
+        )
+    es = provider.get(ds, ctx)
+    typer.echo(
+        f"embedded={len(es.ids)} total={es.total} cached={es.cache_hits} "
+        f"missing={es.missing_count} model={created.model_id}@{created.revision[:12]} "
+        f"run_id={run_id}"
+    )
+    problems: list[str] = []
+    if es.error is not None:
+        problems.append(
+            f"the embedder failed ({es.error})"
+            + (f": {es.error_detail}" if es.error_detail else "")
+        )
+    if es.missing:
+        reasons = ", ".join(f"{r}={len(v)}" for r, v in sorted(es.missing.items()))
+        problems.append(f"images without an embedding: {reasons}")
+    if es.cache_unwritable:
+        problems.append("embeddings could not be stored in the dataset directory")
+    if problems:
+        for line in problems:
+            typer.echo(f"error: {line}", err=True)
         raise typer.Exit(1)
 
 

@@ -35,8 +35,8 @@ from numpy.typing import NDArray
 
 from datacopilot.audit import pool
 from datacopilot.audit.hashcache import resolve_secret
-from datacopilot.audit.paths import resolve_image_path
-from datacopilot.core.errors import FormatError
+from datacopilot.audit.paths import resolve_image_path, safe_text
+from datacopilot.core.errors import DataCopilotError, FormatError
 from datacopilot.core.schema import Dataset, Image
 from datacopilot.embed import cache as embed_cache
 from datacopilot.embed.protocol import Embedder, ImageDecodeError
@@ -99,6 +99,9 @@ class EmbeddingSet:
             ``zero_vector``, ``embedder_error``, ``time_budget``).
         incomplete: ``("time_budget", embedded, total)`` when the time budget ended the run.
         error: type name of the exception that stopped the embedder, or ``InvalidEmbedderOutput``.
+        error_detail: the message of that exception when it is a ``DataCopilotError`` (messages of
+            this package are written to be shown, for example the missing extra), cleaned and cut
+            to 300 characters; None for any other exception, whose text may hold anything.
         cache_state: ``absent``, ``ok``, ``stale``, ``rejected`` or ``disabled``.
         cache_rejected: rejected cache parts by reason (see ``embed/cache.py``).
         cache_hits: vectors taken from the cache and kept.
@@ -119,6 +122,7 @@ class EmbeddingSet:
     missing: dict[str, tuple[str, ...]] = field(default_factory=dict)
     incomplete: tuple[str, int, int] | None = None
     error: str | None = None
+    error_detail: str | None = None
     cache_state: str = "disabled"
     cache_rejected: dict[str, int] = field(default_factory=dict)
     cache_hits: int = 0
@@ -188,6 +192,7 @@ class _State:
 
     def __init__(self) -> None:
         self.error: str | None = None
+        self.detail: str | None = None
 
 
 class PipelineProvider:
@@ -337,6 +342,7 @@ class PipelineProvider:
             missing=frozen,
             incomplete=incomplete,
             error=state.error,
+            error_detail=state.detail,
             cache_state=loaded.state,
             cache_rejected=rejected,
             cache_hits=hits,
@@ -346,6 +352,8 @@ class PipelineProvider:
             cache_unwritable=unwritable,
             cache_disabled_reason=disabled_reason,
         )
+        if state.error is not None:
+            log.warning("embedder_failed", error_type=state.error, detail=state.detail)
         log.info(
             "embeddings_computed",
             model_id=result.model_id,
@@ -500,6 +508,8 @@ class PipelineProvider:
                 continue
             except Exception as exc:  # noqa: BLE001  # recorded by type only; text may hold secrets
                 state.error = type(exc).__name__
+                if isinstance(exc, DataCopilotError):
+                    state.detail = safe_text(str(exc), 300)
                 for image, _ in batch:
                     yield image.image_id, None, "embedder_error"
                 return

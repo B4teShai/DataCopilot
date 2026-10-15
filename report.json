@@ -1,0 +1,152 @@
+{
+  "checks": [
+    "integrity",
+    "duplicates",
+    "near_duplicates",
+    "leakage",
+    "imbalance",
+    "boxes",
+    "outliers"
+  ],
+  "counts": {
+    "critical": 6,
+    "info": 0,
+    "warn": 0
+  },
+  "dataset_version": "528d0b56096484cfa4ba8e06b33988d7",
+  "embedder": "dinov2_small@ed25f3a31f01",
+  "fail_on": [
+    "critical"
+  ],
+  "findings": [
+    {
+      "ann_id": null,
+      "check": "near_duplicates",
+      "finding_id": "aaf48d3e33183072",
+      "image_id": null,
+      "payload": {
+        "count": 13,
+        "reasons": {
+          "embedder_error": 13
+        },
+        "rule": "images_not_embedded",
+        "total": 13
+      },
+      "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+      "severity": "CRITICAL"
+    },
+    {
+      "ann_id": null,
+      "check": "near_duplicates",
+      "finding_id": "db2fe7a003d65cd0",
+      "image_id": null,
+      "payload": {
+        "detail": "model 'dinov2_small' needs the optional library 'huggingface_hub': pip install \"datacopilot[embed]\"",
+        "embedded": 0,
+        "error_type": "ModelError",
+        "rule": "embedder_error",
+        "total": 13
+      },
+      "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+      "severity": "CRITICAL"
+    },
+    {
+      "ann_id": null,
+      "check": "leakage",
+      "finding_id": "93f58a42a09d9a02",
+      "image_id": null,
+      "payload": {
+        "detail": "model 'dinov2_small' needs the optional library 'huggingface_hub': pip install \"datacopilot[embed]\"",
+        "embedded": 0,
+        "error_type": "ModelError",
+        "rule": "embedder_error",
+        "total": 13
+      },
+      "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+      "severity": "CRITICAL"
+    },
+    {
+      "ann_id": null,
+      "check": "leakage",
+      "finding_id": "ecf5cadb8ba0edc4",
+      "image_id": null,
+      "payload": {
+        "count": 13,
+        "reasons": {
+          "embedder_error": 13
+        },
+        "rule": "images_not_embedded",
+        "total": 13
+      },
+      "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+      "severity": "CRITICAL"
+    },
+    {
+      "ann_id": null,
+      "check": "outliers",
+      "finding_id": "2c330885361e2e93",
+      "image_id": null,
+      "payload": {
+        "detail": "model 'dinov2_small' needs the optional library 'huggingface_hub': pip install \"datacopilot[embed]\"",
+        "embedded": 0,
+        "error_type": "ModelError",
+        "rule": "embedder_error",
+        "total": 13
+      },
+      "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+      "severity": "CRITICAL"
+    },
+    {
+      "ann_id": null,
+      "check": "outliers",
+      "finding_id": "bbb5848f27b26393",
+      "image_id": null,
+      "payload": {
+        "count": 13,
+        "reasons": {
+          "embedder_error": 13
+        },
+        "rule": "images_not_embedded",
+        "total": 13
+      },
+      "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+      "severity": "CRITICAL"
+    }
+  ],
+  "passed": false,
+  "run_id": "b0fd86a7-7eb0-402d-80e3-ffc81df5692c",
+  "started_at": "2026-10-15T08:56:13.928117Z",
+  "summary": {
+    "annotation_count": 13,
+    "class_counts": {
+      "test": {
+        "1": 3
+      },
+      "train": {
+        "1": 10
+      }
+    },
+    "classes": [
+      {
+        "id": 1,
+        "name": "cat"
+      }
+    ],
+    "classes_omitted": false,
+    "image_count": 13,
+    "split_images": {
+      "test": 3,
+      "train": 10
+    },
+    "task": "detection"
+  },
+  "timings_ms": {
+    "boxes": 0,
+    "duplicates": 4,
+    "imbalance": 0,
+    "integrity": 4,
+    "leakage": 0,
+    "near_duplicates": 16,
+    "outliers": 0
+  }
+}

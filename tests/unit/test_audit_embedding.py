@@ -540,3 +540,23 @@ def test_embeddings_computed_is_logged_without_paths(tmp_path: Path) -> None:
 
 def test_decode_error_type_is_importable_for_embedders() -> None:
     assert ImageDecodeError(0, "decode_failed").reason == "decode_failed"
+
+
+def test_a_package_error_message_is_shown_but_another_exceptions_text_is_not(
+    tmp_path: Path,
+) -> None:
+    from datacopilot.core.errors import ModelError
+
+    emb = FakeEmbedder()
+    emb.fail_after, emb.error = (
+        0,
+        ModelError('needs the extra: pip install "datacopilot[embed]"\x1b[31m'),
+    )
+    es = provider(emb).get(dataset(tmp_path, 3), make_ctx(tmp_path, None))
+    assert es.error == "ModelError" and "datacopilot[embed]" in (es.error_detail or "")
+    assert "\x1b" not in (es.error_detail or "")
+    emb2 = FakeEmbedder()
+    emb2.fail_after, emb2.error = 0, RuntimeError("token=hf_SECRET")
+    (tmp_path / "b").mkdir()
+    es2 = provider(emb2).get(dataset(tmp_path / "b", 3), make_ctx(tmp_path / "b", None))
+    assert es2.error_detail is None

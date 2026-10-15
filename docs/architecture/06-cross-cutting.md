@@ -49,8 +49,8 @@ reviewer names (log `reviewer_id` only when it is an opaque id).
 
 Keys and precedence are in [05-runtime.md](05-runtime.md#configuration). Built:
 `DATACOPILOT_ENV`, `DATACOPILOT_LOG_LEVEL`, `DATACOPILOT_MAX_TABLE_ROWS`, `DATACOPILOT_MAX_TABLE_BYTES`,
-`DATACOPILOT_WORKERS`, `DATACOPILOT_CACHE_DIR`, `DATACOPILOT_HASH_CACHE` (each reaches its code path
-in a CLI test). Planned: `DATACOPILOT_ALLOWED_LICENSES`, `DATACOPILOT_VLLM_URL`, and the secret
+`DATACOPILOT_WORKERS`, `DATACOPILOT_CACHE_DIR`, `DATACOPILOT_HASH_CACHE`, `DATACOPILOT_ALLOWED_LICENSES` (each
+reaches its code path in a CLI test). Planned: `DATACOPILOT_VLLM_URL`, and the secret
 variables `DATACOPILOT_HF_TOKEN`, `DATACOPILOT_CVAT_TOKEN`, `DATACOPILOT_VLLM_API_KEY`.
 Validation happens in `settings.py` before logging is configured; an invalid value is exit
 code 2.
@@ -61,13 +61,14 @@ code 2.
 |---|---|---|---|---|
 | `--version`, `doctor` (built) | printed | internal error (`command_failed`) | bad `DATACOPILOT_*` value, unknown option | Ctrl-C |
 | `ingest`, `export` (built) | converted; `export --strict` with zero dropped fields | unreadable or malformed input, invariant violation, identical image content, non-empty output, over-limit table, `--strict` with dropped fields, unknown format | bad option (`--format` missing, output not `*.dcp`, invalid `--group-by`), bad env | Ctrl-C; no partial version left visible |
-| `audit` (built) | run completed and gate passed (or no `--fail-on`) | `--fail-on` matched; dataset unreadable; report not writable; extra missing and license refused (planned) | bad option (unknown check, bad or never-firing `--fail-on`, `--workers` out of range), bad env | Ctrl-C |
+| `audit` (built) | run completed and gate passed (or no `--fail-on`) | `--fail-on` matched; dataset unreadable; report not writable; embedder license refused; embedder missing its extra or failing (a CRITICAL finding) | bad option (unknown check, bad or never-firing `--fail-on`, `--workers` out of range, embedding check without `--embedder`, bad `--embedder`, `--embed-batch` or `--similarity-threshold`), bad env | Ctrl-C |
+| `embed` (built) | every image embedded and stored | an image without an embedding, embedder failure, license refused, cache not writable, unreadable dataset | bad option, cache unusable (`CI` without key) | Ctrl-C |
 | `split` (planned) | new version written | ratios do not sum to 1, impossible stratification, store error | bad option | Ctrl-C |
 | `propose`, `review`, `apply` (planned) | set written / exported / applied | model or integration error, license refused, stale `target_ann_id`, GPU OOM | bad option | Ctrl-C |
 
 Exception classes (all subclasses of `DataCopilotError` except `SettingsError`, which is a
 `ValueError` handled before logging starts): `SettingsError`, `FormatError`, `ValidationError`,
-`StoreError`, `ConversionLossError` (built); `LicenseError`, `ModelError`, `IntegrationError`
+`StoreError`, `ConversionLossError`, `LicenseError`, `ModelError` (built); `IntegrationError`
 (planned). Each message names the offending input (format, path, id, variable).
 
 ## Security and threat model

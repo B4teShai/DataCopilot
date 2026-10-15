@@ -10,6 +10,7 @@ images stored outside the root, which ingest records by absolute path.
 from __future__ import annotations
 
 import os
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -86,3 +87,14 @@ def unchecked_severity(
 def display_name(file_path: str) -> str:
     """Base name of ``file_path`` for findings (never the directory), at most 255 characters."""
     return file_path.replace("\\", "/").rsplit("/", 1)[-1][:MAX_NAME_CHARS]
+
+
+def safe_text(value: str, limit: int) -> str:
+    """``value`` as one printable line of at most ``limit`` characters: control, bidirectional,
+    format and surrogate characters become ``?``, longer text ends in an ellipsis."""
+    out = []
+    for char in value[: limit + 1]:
+        bad = unicodedata.category(char) in ("Cc", "Cf", "Cs", "Zl", "Zp") or not char.isprintable()
+        out.append("?" if bad else char)
+    text = "".join(out)
+    return text if len(text) <= limit else text[: limit - 1] + "…"

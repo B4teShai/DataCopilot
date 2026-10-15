@@ -62,7 +62,7 @@ file.
 | `DATACOPILOT_LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR`; `DEBUG` honoured only when `ENV=dev` | `INFO` | built |
 | `DATACOPILOT_MAX_TABLE_ROWS` | integer ≥ 1; row limit per Parquet table on read | `5000000` | built |
 | `DATACOPILOT_MAX_TABLE_BYTES` | integer ≥ 1; uncompressed-size limit per Parquet table on read | `4294967296` | built |
-| `DATACOPILOT_ALLOWED_LICENSES` | comma-separated SPDX ids and custom names, e.g. `Apache-2.0,MIT,SAM-License` | `Apache-2.0,MIT,BSD-3-Clause` | planned |
+| `DATACOPILOT_ALLOWED_LICENSES` | comma-separated SPDX ids and custom names, e.g. `Apache-2.0,MIT,SAM-License` | `Apache-2.0,MIT,BSD-3-Clause` | built (case-insensitive; empty or malformed is exit 2; reaches `audit` and `embed` through the real CLI path, tested) |
 | `DATACOPILOT_CACHE_DIR` | directory path (not empty, not `.`) | see storage table | built (hash cache) |
 | `DATACOPILOT_WORKERS` | integer 1 to 256 | `os.cpu_count()` | built (`audit`) |
 | `DATACOPILOT_CACHE_KEY` | secret, 16 to 1024 characters; out-of-band MAC key of the hash cache, never stored next to it; required to use the cache when `CI` is set | unset | built |

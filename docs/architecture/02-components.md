@@ -3,7 +3,7 @@
 ![Components by layer](../diagrams/png/components.png)
 
 Layers follow [ADR-0004](../adr/0004-layering-and-dependency-rule.md). Import package:
-`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, ImageFolder), `store/`, `logging.py`, `settings.py`. Everything else is planned.
+`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, ImageFolder), `store/`, `logging.py`, `settings.py`. Everything else is planned.
 
 | Layer | Packages |
 |---|---|
@@ -31,17 +31,19 @@ def ingest(path, format, output, group_by, name) -> None    # prints manifest.ve
 def export(dataset, format, output, strict) -> None         # prints the output directory
 def formats() -> None                                       # name, read/write, license, extra
 def audit(dataset, checks, fail_on, report, json, sarif, workers, hash_cache,
-          allow_external_images) -> None                    # prints one result line; exit 0 / 1 / 2
+          allow_external_images, embedder, embed_batch,
+          similarity_threshold, embedding_cache) -> None    # prints one result line; exit 0 / 1 / 2
+def embed(dataset, embedder, embed_batch, embedding_cache) -> None   # fills the cache; exit 0 / 1 / 2
 ```
 
-Built commands: `ingest`, `export`, `formats`, `audit` (exit codes in their `--help` and in
+Built commands: `ingest`, `export`, `formats`, `audit`, `embed` (exit codes in their `--help` and in
 [04-flows.md](04-flows.md)). Planned commands: `split`, `propose`, `review`,
 `apply`, `plugins`. Each is a thin function that validates options and calls one use case.
 Until `api.py` exists the built commands call `convert.py` directly (imported lazily so
 `--version` and `doctor` do not load `pyarrow`).
 
 Depends on: `convert.py` (planned: `api.py`), `logging.py`, `settings.py`. Status:
-**built** for `doctor`, `ingest`, `export`, `formats`, `audit`; the rest planned.
+**built** for `doctor`, `ingest`, `export`, `formats`, `audit`, `embed`; the rest planned.
 
 ### `api.py`
 

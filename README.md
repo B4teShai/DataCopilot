@@ -15,10 +15,11 @@ field a conversion cannot carry (`--strict` turns any loss into a failure). `dat
 
 `datacopilot audit` runs four CPU checks (integrity, exact duplicates, class imbalance, box sanity),
 stores the run as `audits/<run_id>.json`, writes JSON, static HTML and SARIF 2.1.0 reports, and
-exits 1 when `--fail-on` matches, so it can gate CI.
+exits 1 when `--fail-on` matches, so it can gate CI. With `--embedder` it adds three embedding
+checks: near-duplicates, split leakage (`--fail-on leakage`) and per-class outliers. `datacopilot
+embed` fills the embedding cache ahead of time.
 
-Everything under "Planned usage" below is **not implemented**: the embedding-based audit checks
-(near-duplicates, leakage, label noise, outliers), split, propose, review, apply, the Python API, CVAT XML and Label Studio formats, and all model-backed features. The
+Everything under "Planned usage" below is **not implemented**: label noise, split, propose, review, apply, the Python API, CVAT XML and Label Studio formats, and all model-backed features. The
 architecture documents mark every element as built or planned.
 
 ## Install (from source)
@@ -63,8 +64,36 @@ uv run datacopilot audit ds.dcp --fail-on critical --no-hash-cache
 uv run datacopilot audit ds.dcp --fail-on warn --no-hash-cache
 # failed critical=0 warn=2 info=1 run_id=efce5e5f-a037-4be5-b4ac-2934c2572f1b     (exit 1)
 uv run datacopilot audit ds.dcp --fail-on leakage
-# Error: Invalid value for --fail-on/--checks: check 'leakage' is not available in this version  (exit 2)
+# Error: Invalid value for --fail-on/--checks: --fail-on 'leakage' is not among the checks being run (it needs --embedder)  (exit 2)
 ```
+
+### Embeddings, near-duplicates and leakage
+
+```bash
+uv run datacopilot audit leaky.dcp --embedder hash --fail-on leakage --report leaky.html
+# failed critical=1 warn=1 info=0 run_id=e8719fda-2886-40b9-92de-cc6cc07e2062     (exit 1: a test image is a near copy of a train image)
+uv run datacopilot audit clean.dcp --embedder hash --fail-on leakage --report clean.html
+# passed critical=0 warn=0 info=0 run_id=9a0a6ae2-3447-43a9-aee8-db5ef178bdb7     (exit 0)
+DATACOPILOT_ALLOWED_LICENSES=MIT uv run datacopilot audit clean.dcp --embedder dinov2_base
+# error: model 'dinov2_base' is licensed 'Apache-2.0', which is not in DATACOPILOT_ALLOWED_LICENSES; add it there if you have accepted its terms   (exit 1, nothing downloaded or read)
+uv run datacopilot embed clean.dcp --embedder hash
+# embedded=13 total=13 cached=13 missing=0 model=hash@1 run_id=8121c71a-659f-4588-8173-222d8e8dfe20     (exit 0)
+```
+
+`--embedder` names an embedder: `dinov2_small`, `dinov2_base` and `siglip2_base` (extra `[embed]`:
+`pip install "datacopilot[embed]"`; weights are downloaded by you, pinned to a commit and verified
+against a sha256 before they are loaded) or `hash`, a dependency-free byte-level embedder meant for
+tests and demos. `--checks all` adds `near_duplicates`, `leakage` and `outliers` only when an
+embedder is given. `--embed-batch N`, `--similarity-threshold X` (default 0.95) and
+`--no-embedding-cache` tune the run. Vectors are cached in `dataset.dcp/embeddings/` as verified,
+authenticated shards (see [ADR-0007](docs/adr/0007-embedding-cache-and-index.md)); in CI the cache
+needs `DATACOPILOT_CACHE_KEY`, and a cache that cannot be checked is never trusted. The check fails
+closed: images without an embedding, an embedder error or a budget hit are findings, never silence.
+The model license must be in `DATACOPILOT_ALLOWED_LICENSES` (default `Apache-2.0,MIT,BSD-3-Clause`).
+The `hash` demo above compares file bytes, so it finds copies of the same file, not look-alike
+photographs; use a model embedder for that. Real DINOv2-small and SigLIP2 runs were verified with
+`uv run --extra embed pytest -m real_model tests/real` (DINOv2-small) and a one-off script
+(SigLIP2); they are not part of the default test run.
 
 Options: `--checks all|integrity,duplicates,imbalance,boxes`, `--fail-on` (default `critical`; `warn`,
 `info` = that severity and above; check names; `none` = no gate), `--report report.html` (JSON and SARIF are written
@@ -95,7 +124,7 @@ that the design can be reviewed against concrete calls.
 
 ```bash
 pip install datacopilot                 # core: CPU-only, no torch
-pip install "datacopilot[embed]"        # DINOv2 / SigLIP2 embeddings via torch + transformers
+pip install "datacopilot[embed]"        # DINOv2 / SigLIP2 embeddings (built)
 pip install "datacopilot[vlm]"          # Grounding DINO, Qwen3-VL (transformers or a vLLM endpoint)
 pip install "datacopilot[sam3]"         # SAM 3 loader; the user accepts the SAM License on Hugging Face
 pip install "datacopilot[cleanlab]"     # Cleanlab backend for the label-noise check (AGPL-3.0: using it puts your combined work under AGPL-3.0)
@@ -105,7 +134,7 @@ pip install "datacopilot[cleanlab]"     # Cleanlab backend for the label-noise c
 
 ```bash
 datacopilot ingest ./fridge_export --format cvat_xml --group-by "re:^(?P<g>cam\d+_\d{8})" -o fridge.dcp
-datacopilot audit fridge.dcp --checks all --embedder dinov2-b --report report.html --fail-on leakage,critical   # --embedder and leakage are planned
+datacopilot audit fridge.dcp --checks all --embedder dinov2_base --report report.html --fail-on leakage,critical
 datacopilot split fridge.dcp --by-group --ratios 0.8,0.1,0.1 --stratify category
 datacopilot propose fridge.dcp --proposer missing_boxes --models grounding-dino-base,sam3 --consensus 2
 datacopilot review fridge.dcp --proposals latest --to cvat --project 12

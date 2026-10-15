@@ -83,6 +83,12 @@ once a release is tagged.
   (sample 1 percent, 10 to 64, cosine at least 0.999) or no cached vector is trusted; the new
   `embedding_cache_unverified` finding and event report it.
 
+- `datacopilot audit --embedder NAME [--embed-batch N] [--similarity-threshold X]
+  [--no-embedding-cache]` and `datacopilot embed DATASET --embedder NAME`. `--fail-on leakage` is now
+  valid (with `--embedder`). The license guard (`DATACOPILOT_ALLOWED_LICENSES`) runs before the
+  dataset is read and before any download or load. Events `embeddings_computed`, `model_loaded`,
+  `model_license_shown`, `embedder_failed` and the `embedding_cache_*` family.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

@@ -124,7 +124,7 @@ def test_missing_image_is_critical_and_fails_a_critical_gate(
         ["--checks", "nope"],
         ["--checks", ""],
         ["--fail-on", "crit"],
-        ["--fail-on", "leakage"],  # documented but not built: must not be a gate that never fires
+        ["--fail-on", "leakage"],  # needs --embedder: must not be a gate that never fires
         ["--fail-on", ""],
         ["--checks", "boxes", "--fail-on", "integrity"],  # a check that is not part of the run
         ["--workers", "0"],
