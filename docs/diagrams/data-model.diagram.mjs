@@ -3,7 +3,7 @@ import { grid, entity, arrow, heading, note, legend, COLORS } from "../../../too
 
 const W = 300;
 const g = grid({ x: 40, y: 110, colW: W, rowH: 310, gapX: 100, gapY: 50 });
-const BUILT = new Set(["category", "manifest", "annotation", "image", "audit_run", "finding"]);
+const BUILT = new Set(["category", "manifest", "annotation", "image", "audit_run", "finding", "embedding"]);
 const E = (id, c, r, title, fields) =>
   entity(id, g(c, r).x, g(c, r).y, W, title, fields, BUILT.has(id) ? COLORS.built : COLORS.planned);
 
@@ -84,10 +84,10 @@ const proposal = E("proposal", 0, 2, "Proposal", [
 ]);
 const embedding = E("embedding", 1, 2, "Embedding", [
   "image_id: str  PK, FK->Image",
-  "model_id: str  PK",
-  "model_revision: str  PK",
-  "vector: float32[dims]",
-  "dims: int",
+  "vector: float16|float32[dims]",
+  "model_id, revision: manifest PK",
+  "dims, dtype: manifest",
+  "dataset_version, MAC: manifest",
 ]);
 
 export default {

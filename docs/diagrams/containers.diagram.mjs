@@ -12,10 +12,10 @@ const engineer = actor("engineer", g(0, 0).x, g(0, 0).y, "CV engineer", W);
 // Inside the boundary (cols 0-2, rows 1-3).
 const api = container("api", ...p(0, 1), "Python API", "import datacopilot: load, audit, propose, apply, export");
 const cli = container("cli", ...p(1, 1), "datacopilot CLI", "Typer; doctor, ingest, export, formats, audit built", true);
-const plugins = container("plugins", ...p(2, 1), "Plugin host", "formats and checks registries built; other groups planned", true);
+const plugins = container("plugins", ...p(2, 1), "Plugin host", "formats, checks, embedders built; proposers planned", true);
 const adapters = container("adapters", ...p(0, 2), "Format adapters", "io/: coco, yolo, voc, imagefolder built; integrations/ planned", true);
-const audit = container("audit", ...p(1, 2), "Audit engine", "CPU checks, gate built", true);
-const runtime = container("runtime", ...p(2, 2), "Model runtime", "extras [embed] [vlm] [sam3]; GPU optional");
+const audit = container("audit", ...p(1, 2), "Audit engine", "checks, gate built", true);
+const runtime = container("runtime", ...p(2, 2), "Model runtime", "embedders built; proposers planned", true);
 const core = container("core", ...p(0, 3), "Core library", "schema, content hash, lineage, geometry", true);
 const dcp = store("dcp", ...p(1, 3), "Dataset store", "dataset.dcp/: Parquet, manifest, audits", true);
 const report = container("report", ...p(2, 3), "Report generator", "HTML, JSON, SARIF built", true);
@@ -57,6 +57,6 @@ export default {
     arrow(report, ci, "exit code, SARIF"),
     c4Legend(40, 880),
     statusLegend(40, 920),
-    note("n1", "Built: ingest, export and audit (CLI, core library, four format adapters, registries, dataset store, four CPU checks, HTML/JSON/SARIF reports), settings, logging. Embedding checks, split, propose, review, API and models are planned.", 40, 960),
+    note("n1", "Built: ingest, export and audit (CLI, core library, four format adapters, registries, dataset store, four CPU checks and three embedding checks, DINOv2 and SigLIP2 embedders, HTML/JSON/SARIF reports), settings, logging. Split, propose, review and the API are planned.", 40, 960),
   ],
 };

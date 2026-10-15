@@ -89,6 +89,12 @@ once a release is tagged.
   dataset is read and before any download or load. Events `embeddings_computed`, `model_loaded`,
   `model_license_shown`, `embedder_failed` and the `embedding_cache_*` family.
 
+- `benchmarks/embed_checks.py`; measured on synthetic 50,000 x 768 float16 embeddings (Apple M4 Pro,
+  Python 3.10): `near_duplicates` 16.2 s, `leakage` 5.9 s, `outliers` 0.4 s, cache write 1.3 s
+  (72.8 MB), verified read 0.7 s, peak RSS 1.27 GB. GPU embedding time, the sample re-embedding of a
+  warm cache and FAISS were not measured.
+- ADR-0007 (embedding cache and index) and updated diagrams.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.
@@ -128,5 +134,6 @@ once a release is tagged.
 ### Known limitations
 
 - Two images with identical bytes cannot be ingested together (`image_id` is the primary key).
-- Embedding-based audit checks, CVAT XML and Label Studio formats, `split`, `propose`, `review`, `apply` and the
+- The embedding cache is bound to the dataset version, so a new version recomputes every embedding;
+  `label_noise`, CVAT XML and Label Studio formats, `split`, `propose`, `review`, `apply` and the
   Python API are not implemented yet.

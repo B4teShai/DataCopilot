@@ -53,6 +53,6 @@ export default {
     arrow(ciAudit, ciOut, "in-process"),
     c4Legend(40, 650),
     statusLegend(40, 690),
-    note("n1", "Everything runs in one Python process per command; no daemon, no database server.\nEnv: DATACOPILOT_ENV, LOG_LEVEL, MAX_TABLE_*, WORKERS, CACHE_DIR, HASH_CACHE (built); DATACOPILOT_ALLOWED_LICENSES, HF token (planned, env only, never logged).", 40, 730, 14),
+    note("n1", "Everything runs in one Python process per command; no daemon, no database server.\nEnv: DATACOPILOT_ENV, LOG_LEVEL, MAX_TABLE_*, WORKERS, CACHE_DIR, HASH_CACHE, ALLOWED_LICENSES, CACHE_KEY (built); HF token (planned, env only, never logged).", 40, 730, 14),
   ],
 };

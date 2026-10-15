@@ -14,6 +14,7 @@ const steps = [
   { from: "cli", to: "audit", text: "run(checks, embedder, fail_on)" },
   { from: "audit", to: "store", text: "bounded read; verify hash" },
   { from: "audit", to: "audit", text: "run checks -> Finding rows" },
+  { from: "audit", to: "audit", text: "--embedder: cache, sample check, kNN" },
   { from: "audit", to: "store", text: "write audits/<run_id>.json" },
   { from: "audit", to: "report", text: "render(AuditRun)" },
   { from: "report", to: "cli", text: "report.html / .json / .sarif", kind: "return" },
@@ -38,6 +39,6 @@ export default {
       steps,
     }),
     c4Legend(40, totalH + 20),
-    note("n1", "Ingest, the CPU audit checks, the gate and the reports are built; embedding-based checks are planned. Logged events: dataset_ingested, conversion_loss, audit_check_completed, audit_completed, report_written, command_failed.", 40, totalH + 60, 14),
+    note("n1", "Ingest, the CPU audit checks, the gate and the reports are built; the embedding checks (--embedder) are built and fail closed. Logged events: dataset_ingested, conversion_loss, audit_check_completed, audit_completed, report_written, command_failed.", 40, totalH + 60, 14),
   ],
 };

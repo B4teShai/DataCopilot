@@ -12,12 +12,15 @@
   releases the GIL on large chunks, so there is no pickling or spawn cost; the `boxes` and
   `imbalance` checks are single-threaded NumPy and counting passes. No decoding of pixels happens
   anywhere in the CPU audit.
-- Planned: image decoding for embedding steps runs in a `concurrent.futures.ProcessPoolExecutor`,
-  each worker taking a slice of `image_id`s; results returned as Arrow batches.
+- Built (differs from the first design): reading image bytes for embedding runs on the bounded
+  thread pool (at most four files ahead of the model, `audit/pool.py`), and pixel decoding and
+  preprocessing happen in the embedder, in the calling thread, one batch at a time under a
+  64-megapixel limit per image. A process pool for decoding is planned; it is not needed until
+  decoding, not the model, is the bottleneck.
 - Not planned any more for Phase 2: DuckDB table scans. The audit reads the tables through the
   bounded store reader and works on NumPy arrays ([ADR-0003](../adr/0003-repo-and-tooling.md)).
-- Planned: model inference runs in-process on the local GPU or CPU (`[embed]`, `[vlm]`,
-  `[sam3]`); Qwen3-VL may instead be called over HTTP on a vLLM endpoint, in which case no
+- Built for embedders, planned for the rest: model inference runs in-process on the local GPU
+  (CUDA when available) or CPU (`[embed]`, `[vlm]`, `[sam3]`); Qwen3-VL may instead be called over HTTP on a vLLM endpoint, in which case no
   model is loaded locally.
 - No subprocesses are spawned for external tools; CVAT and FiftyOne are reached through
   their Python SDKs in-process.
@@ -42,7 +45,7 @@
 |---|---|---|
 | Dataset | `dataset.dcp/` given on the command line | required argument; may be an `fsspec` URI |
 | Images | wherever `file_path` points | never copied |
-| Embedding cache | inside the dataset: `embeddings/<model_id>@<revision>.parquet` | always on |
+| Embedding cache | inside the dataset: `embeddings/<model_id>@<revision>/` (`manifest.json` plus `shard-*.parquet`, [ADR-0007](../adr/0007-embedding-cache-and-index.md)); its MAC secret is `DATACOPILOT_CACHE_KEY` or `secret.key` in the cache directory | on unless `--no-embedding-cache`; in CI only with `DATACOPILOT_CACHE_KEY` |
 | Model weights | Hugging Face cache (`HF_HOME`, default `~/.cache/huggingface`) | upstream default |
 | DataCopilot cache (thumbnails, evidence crops, FAISS indexes) | `DATACOPILOT_CACHE_DIR` | `$XDG_CACHE_HOME/datacopilot`, else `~/.cache/datacopilot` |
 | Reports | `--report <path>`; `.json` and `.sarif` next to it unless `--json` / `--sarif` are given | `./report.html` |
@@ -89,9 +92,9 @@ never be placed in a free-text field or an exception message.
 
 ## Optional extras
 
-| Extra | Unlocks | Dependencies (planned) | Hardware |
+| Extra | Unlocks | Dependencies | Hardware |
 |---|---|---|---|
-| `embed` | embedders `dinov2-*`, `dinov3-*` (gated; DINOv3 License), `siglip2-*`; near-duplicate, leakage, outlier and label-noise checks | `torch`, `transformers`, `faiss-cpu` | CPU works (slow); GPU with 8 GB VRAM recommended |
+| `embed` | built: embedders `dinov2_small`, `dinov2_base`, `siglip2_base` and the near-duplicate, leakage and outlier checks; planned: `dinov3-*` (gated; DINOv3 License) and the label-noise check | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, `faiss-cpu`, `torch` (declared in `pyproject.toml`; nothing is imported by the core) | CPU works (slow); GPU with 8 GB VRAM recommended |
 | `vlm` | proposers `missing_boxes` (Grounding DINO), `class_verify` (Qwen3-VL locally or via `DATACOPILOT_VLLM_URL`) | `torch`, `transformers`, an OpenAI-compatible HTTP client | 8–12 GB VRAM local; none when using a vLLM endpoint |
 | `sam3` | `box_refine` and SAM 3 agreement in `missing_boxes` | the SAM 3 package; user accepts the SAM License on the Hub | 16–24 GB VRAM; Python ≥ 3.12, PyTorch ≥ 2.7, CUDA ≥ 12.6 |
 | `fiftyone` | `review --to fiftyone`, `ProposalSet.to_fiftyone`, `from_fiftyone` | `fiftyone` (Apache-2.0; runs its own MongoDB) | CPU |

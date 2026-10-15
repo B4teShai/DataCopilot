@@ -30,12 +30,12 @@ const lInfra = lane("l_inf", laneX, laneY(4), laneW, 250, "Infrastructure");
 const lSide = lane("l_side", laneX + laneW + 30, laneY(0), 270, 770, "Cross-cutting, plugins");
 
 // Interface.
-const cli = component("cli", ...p(0, 0, 6), "cli/", "Typer commands. Built: doctor, ingest, export, formats, audit. Planned: split, propose, review, apply", true);
+const cli = component("cli", ...p(0, 0, 6), "cli/", "Typer commands. Built: doctor, ingest, export, formats, audit, embed. Planned: split, propose, review, apply", true);
 const api = component("api", ...p(0, 1, 6), "api.py", "public Python API: load, audit, split, propose, apply, export");
 
 // Application (integer columns).
 const convert = component("convert", ...p(0, 2), "convert.py", "ingest / export use case", true);
-const audit = component("audit", ...p(1, 2), "audit/", "runner, gate, 4 checks", true);
+const audit = component("audit", ...p(1, 2), "audit/", "runner, gate, 7 checks", true);
 const propose = component("propose", ...p(2, 2), "propose/", "proposers, consensus");
 const patch = component("patch", ...p(3, 2), "patch/", "review export, apply");
 const split = component("split", ...p(4, 2), "split/", "group-aware re-split");
@@ -48,10 +48,10 @@ const version = component("version", ...p(3.5, 3), "core/version.py", "content h
 
 // Infrastructure row 1 (half columns) and the store spanning all columns.
 const io = component("io", ...p(0.5, 4), "io/", "4 formats + registry", true);
-const embed = component("embed", ...p(1.5, 4), "embed/", "backends, cache, FAISS");
-const models = component("models", ...p(2.5, 4), "models/", "registry, licenses");
+const embed = component("embed", ...p(1.5, 4), "embed/", "DINOv2, SigLIP2, cache, kNN", true);
+const models = component("models", ...p(2.5, 4), "models/", "registry, license guard", true);
 const integrations = component("integrations", ...p(3.5, 4), "integrations/", "fiftyone, cvat, cleanlab, lightly");
-const store = component("store", ...p(0, 5, 6), "store/", "Parquet tables, manifest, atomic versions, audit runs built; DuckDB, embeddings, proposals planned", true);
+const store = component("store", ...p(0, 5, 6), "store/", "Parquet tables, manifest, atomic versions, audit runs, embedding cache built; DuckDB, proposals planned", true);
 
 // Side lane: cross-cutting modules (built) and plugin entry-point groups.
 const sx = laneX + laneW + 30 + 25, sw = 220, sh = 56;
@@ -60,7 +60,7 @@ const settings = component("settings", sx, 190, sw, sh, "settings.py", "DATACOPI
 const pFormats = component("p_formats", sx, 330, sw, sh, "datacopilot.formats", "-> io/ registry", true);
 const pChecks = component("p_checks", sx, 400, sw, sh, "datacopilot.checks", "-> audit/ registry", true);
 const pProposers = component("p_proposers", sx, 470, sw, sh, "datacopilot.proposers", "-> propose/ registry");
-const pEmbedders = component("p_embedders", sx, 540, sw, sh, "datacopilot.embedders", "-> embed/ registry");
+const pEmbedders = component("p_embedders", sx, 540, sw, sh, "datacopilot.embedders", "-> embed/ registry", true);
 
 const useCases = [convert, audit, propose, patch, split, report];
 

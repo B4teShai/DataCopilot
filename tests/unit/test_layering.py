@@ -117,3 +117,11 @@ def test_model_runtime_never_imports_the_application_layers_or_other_adapters(pa
 @pytest.mark.parametrize("path", modules("models"), ids=lambda p: p.name)
 def test_models_does_not_depend_on_embed(path: Path) -> None:
     assert not any(n.startswith("datacopilot.embed") for n in imports(path))
+
+
+@pytest.mark.parametrize("path", modules("audit") + modules("cli"), ids=lambda p: p.name)
+def test_application_reaches_model_backends_only_through_the_embedder_registry(path: Path) -> None:
+    for name in imports(path):
+        assert not allowed(name, {"datacopilot.embed.backends", "datacopilot.embed.hashembed"}), (
+            f"{path.name} imports backend {name}"
+        )
