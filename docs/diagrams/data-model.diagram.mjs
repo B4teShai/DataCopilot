@@ -85,8 +85,8 @@ const proposal = E("proposal", 0, 2, "Proposal", [
 const embedding = E("embedding", 1, 2, "Embedding", [
   "image_id: str  PK, FK->Image",
   "vector: float16|float32[dims]",
-  "model_id, revision: manifest PK",
-  "dims, dtype: manifest",
+  "model_id, revision, dims: manifest",
+  "content_sha256: str  (file digest)",
   "dataset_version, MAC: manifest",
 ]);
 

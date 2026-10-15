@@ -295,11 +295,11 @@ def hostile_manifest(tmp_path: Path, text: bytes | str) -> ec.LoadResult:
         "[]",
         "null",
         "{",
-        '{"format": 1}',
+        '{"format": 2}',
         "[" * 10_000 + "]" * 10_000,  # nesting bomb
         '{"a":' * 5_000 + "1" + "}" * 5_000,
         "\x00" * 100,
-        '{"format": 1, "extra": 1}',
+        '{"format": 2, "extra": 1}',
     ],
 )
 def test_malformed_or_hostile_manifests_are_rejected_not_crashed_on(
@@ -759,3 +759,45 @@ def test_a_cache_for_another_preprocessing_version_is_stale(tmp_path: Path) -> N
     assert got.state == "stale" and len(got.ids) == 0
     with pytest.raises(ValueError):
         ident(preprocess=0)
+
+
+# ------------------------------------------------------------ N-relative bounds, wanted ids
+def test_only_the_wanted_ids_are_returned_but_the_whole_cache_stays_known(tmp_path: Path) -> None:
+    c = open_cache(tmp_path)
+    c.load()
+    c.append(ids(6), unit(6), dg(6))
+    c2 = open_cache(tmp_path)
+    got = c2.load(wanted=frozenset(ids(6)[1:3]))
+    assert list(got.ids) == ids(6)[1:3] and got.matrix.shape == (2, DIMS)
+    assert list(got.digests) == dg(6)[1:3]
+    with pytest.raises(ValueError, match="already cached"):  # unwanted ids are still cached ids
+        c2.append(ids(1, 5), unit(1), dg(1))
+
+
+def test_the_row_cap_follows_the_dataset_not_a_global_constant(tmp_path: Path) -> None:
+    c = open_cache(tmp_path)
+    c.load()
+    c.append(ids(20), unit(20), dg(20))
+    small = ec.EmbeddingCache.open(tmp_path / "embeddings", ident(), SECRET, max_rows=10)
+    got = small.load()
+    assert got.rejected == {"too_many_rows": 1} and len(got.ids) == 0
+    with pytest.raises(ec.CacheFullError):
+        ec.EmbeddingCache.open(tmp_path / "x", ident(), SECRET, max_rows=3).append(
+            ids(4), unit(4), dg(4)
+        )
+
+
+def test_a_cache_in_an_older_format_is_stale_not_rejected_and_is_replaced(tmp_path: Path) -> None:
+    fill(tmp_path)
+    path = cache_dir(tmp_path) / "manifest.json"
+    legacy = json.loads(path.read_text())
+    legacy["format"] = 1
+    del legacy["preprocess"]  # the shape of the previous format
+    path.write_text(json.dumps(legacy))
+    c = open_cache(tmp_path)
+    got = c.load()
+    assert got.state == "stale" and got.rejected == {} and len(got.ids) == 0
+    c.append(ids(2, 30), unit(2), dg(2))  # the next write replaces it
+    again = open_cache(tmp_path).load()
+    assert again.state == "ok" and list(again.ids) == ids(2, 30)
+    assert len(shard_files(tmp_path)) == 1

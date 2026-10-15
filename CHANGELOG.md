@@ -116,6 +116,22 @@ once a release is tagged.
 - The index re-normalises its working copies and callers compare with an epsilon, so a threshold of
   1.0 or 0.9995 holds for identical embeddings.
 
+- Model loading pins `config.json` (sha256, part of the cache identity) and the size of each weight
+  file (checked before hashing); `HF_HUB_DISABLE_TELEMETRY=1` by default; a custom `HF_ENDPOINT` is
+  refused in CI unless `DATACOPILOT_ALLOW_HF_ENDPOINT=1`. The `[embed]` floors are the versions the
+  suite and the real-model runs used.
+- Embedding pipeline: a dataset over the neighbour-search cap is refused before the cache or the
+  model is touched; the cache keeps only the rows of the dataset's ids and its row cap follows the
+  dataset size; every undecodable image of a batch is dropped in one pass; plugin `model_id` and
+  `revision` are validated and `AuditRun.embedder` is bounded.
+- `leakage`: group labels are compared after NFKC, case folding and trimming; findings show a hashed
+  `group_ref` and the label only with `--show-group-labels`.
+- `--allow-test-embedder` (the `hash` embedder is test-only: warned about, labelled
+  `hash@1-test-only` in reports and refused for any gate without it), `--require-cache-key`, and a
+  symlinked dataset directory is refused. A cache written in an older format is stale, not rejected.
+- On macOS the exact NumPy index is used when the tensor library is already loaded, because importing
+  `faiss` after it aborts the interpreter (two OpenMP runtimes).
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

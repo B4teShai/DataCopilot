@@ -37,13 +37,16 @@ from numpy.typing import NDArray
 from datacopilot.core.errors import ModelError
 from datacopilot.core.schema import PluginSpec
 from datacopilot.embed import imaging
-from datacopilot.embed.protocol import Embedder
+from datacopilot.embed.protocol import Embedder, ImageDecodeError
 from datacopilot.logging import get_logger
 from datacopilot.models import registry as models
 from datacopilot.models.registry import ModelCard
 
 TENSOR_LIB = "to" + "rch"
 """Import name of the tensor library, spelled indirectly (see the module docstring)."""
+DEFAULT_ENDPOINT = "https://huggingface.co"
+MAX_FILE_BYTES = 64 * 1024**3
+"""No pinned file may be larger than this, whatever the card says."""
 HUB_TIMEOUT_SECONDS = 60
 """Per-request download timeout handed to the hub library (``HF_HUB_DOWNLOAD_TIMEOUT``)."""
 HUB_ETAG_TIMEOUT_SECONDS = 30
@@ -71,20 +74,59 @@ def _require(name: str, card: ModelCard) -> Any:
         ) from None
 
 
-def _verify_weights(local_dir: Path, card: ModelCard) -> None:
-    for name, expected in card.weights_sha256.items():
+def _verify_files(local_dir: Path, card: ModelCard) -> None:
+    """Check every pinned file (weights and configuration) before anything is deserialised.
+
+    The size is compared first (from the file's own ``stat``), so a file of the wrong length is
+    never hashed; then the sha256 is compared with the card.
+    """
+    pinned = {**card.weights_sha256, "config.json": card.config_sha256}
+    sizes: dict[str, int | None] = {**card.weights_bytes, "config.json": None}
+    for name, expected in pinned.items():
         resolved = Path(os.path.realpath(local_dir / name))  # the hub cache links to a blob
+        try:
+            actual_size = resolved.stat().st_size
+        except OSError:
+            raise ModelError(
+                f"file {name!r} of model {card.model_id!r} is missing or unreadable"
+            ) from None
+        wanted_size = sizes[name]
+        if (wanted_size is not None and actual_size != wanted_size) or actual_size > MAX_FILE_BYTES:
+            raise ModelError(
+                f"file {name!r} of model {card.model_id!r} has the wrong size; the download is not "
+                "trusted and was not loaded"
+            )
         try:
             actual = models.weight_hash(resolved)
         except ModelError:
             raise ModelError(
-                f"weight file {name!r} of model {card.model_id!r} is missing or unreadable"
+                f"file {name!r} of model {card.model_id!r} is missing or unreadable"
             ) from None
         if not hmac.compare_digest(actual, expected):
             raise ModelError(
-                f"weight file {name!r} of model {card.model_id!r} does not match the pinned "
-                "sha256; the download is not trusted and was not loaded"
+                f"file {name!r} of model {card.model_id!r} does not match the pinned sha256; the "
+                "download is not trusted and was not loaded"
             )
+
+
+def _refuse_foreign_endpoint(card: ModelCard) -> None:
+    """In CI a model hub other than the default must be confirmed.
+
+    The hub token travels to whatever ``HF_ENDPOINT`` names, so a workflow that sets it (or a
+    pull request that changes the workflow) could send the token elsewhere. The pinned hashes
+    still protect the weights; this protects the credential.
+    """
+    endpoint = os.environ.get("HF_ENDPOINT", "").strip().rstrip("/")
+    if not endpoint or endpoint == DEFAULT_ENDPOINT:
+        return
+    if os.environ.get("CI", "").strip().lower() in ("", "0", "false", "no"):
+        return
+    if os.environ.get("DATACOPILOT_ALLOW_HF_ENDPOINT", "").strip().lower() in ("1", "true", "yes"):
+        return
+    raise ModelError(
+        f"model {card.model_id!r}: HF_ENDPOINT names a model hub other than {DEFAULT_ENDPOINT} "
+        "while CI is set; set DATACOPILOT_ALLOW_HF_ENDPOINT=1 to confirm it"
+    )
 
 
 class HFEmbedder:
@@ -96,7 +138,8 @@ class HFEmbedder:
         self.model_id = card.model_id
         self.revision = card.revision
         self.dims = card.dims
-        self.weights = dict(card.weights_sha256)
+        # the cache identity covers the weights and the configuration
+        self.weights = {**card.weights_sha256, "config.json": card.config_sha256}
         self._model: Any = None
         self._lib: Any = None
         self._device = "cpu"
@@ -104,6 +147,8 @@ class HFEmbedder:
     def _load(self) -> None:
         card, log = self._card, get_logger(__name__)
         started = time.perf_counter()
+        _refuse_foreign_endpoint(card)
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
         os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", str(HUB_TIMEOUT_SECONDS))
         os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", str(HUB_ETAG_TIMEOUT_SECONDS))
         hub = _require("huggingface_hub", card)
@@ -124,7 +169,7 @@ class HFEmbedder:
                 f"({type(exc).__name__}); check network access and, for gated models, the "
                 "access token in the environment"
             ) from None
-        _verify_weights(local, card)
+        _verify_files(local, card)
         try:
             model = transformers.AutoModel.from_pretrained(
                 str(local),
@@ -152,7 +197,7 @@ class HFEmbedder:
             model_id=card.model_id,
             model_revision=card.revision,
             device=device,
-            weights_sha256=dict(card.weights_sha256),
+            weights_sha256=dict(self.weights),
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
 
@@ -176,12 +221,20 @@ class HFEmbedder:
         if not images:
             return np.zeros((0, self.dims), dtype=np.float32)
         pre = _PREPROCESS[self._card.family]
-        batch = np.stack(
-            [
-                imaging.preprocess(imaging.decode_rgb(data, i, max_pixels=self._max_pixels), pre)
-                for i, data in enumerate(images)
-            ]
-        )
+        decoded: list[Any] = []
+        failures: list[tuple[int, str]] = []
+        for i, data in enumerate(images):  # each image is decoded exactly once
+            try:
+                decoded.append(
+                    imaging.preprocess(
+                        imaging.decode_rgb(data, i, max_pixels=self._max_pixels), pre
+                    )
+                )
+            except ImageDecodeError as exc:
+                failures.append((exc.index, exc.reason))
+        if failures:
+            raise ImageDecodeError(failures[0][0], failures[0][1], tuple(failures))
+        batch = np.stack(decoded)
         if self._model is None:
             self._load()
         try:

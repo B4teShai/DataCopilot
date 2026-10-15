@@ -22,6 +22,9 @@ def test_every_card_pins_a_full_revision_and_weight_hashes() -> None:
             assert name.endswith(".safetensors"), (card.model_id, name)  # never pickle
             assert re.fullmatch(r"[0-9a-f]{64}", digest)
         assert card.dims > 0 and card.license
+        assert re.fullmatch(r"[0-9a-f]{64}", card.config_sha256), card.model_id
+        assert set(card.weights_bytes) == set(card.weights_sha256)
+        assert all(n > 0 for n in card.weights_bytes.values())
 
 
 def test_cards_are_listed_in_a_stable_order() -> None:
@@ -74,6 +77,8 @@ def test_card_rejects_unpinned_or_malformed_fields() -> None:
         dims=8,
         family="dinov2",
         weights_sha256={"model.safetensors": "0" * 64},
+        weights_bytes={"model.safetensors": 10},
+        config_sha256="1" * 64,
     )
     with pytest.raises(ValueError):
         registry.ModelCard(**base)  # type: ignore[arg-type]  # a branch name is not a pin
@@ -103,3 +108,28 @@ def test_weight_hash_refuses_symlinks_and_directories(tmp_path) -> None:  # type
         registry.weight_hash(link)
     with pytest.raises(ModelError):
         registry.weight_hash(tmp_path)
+
+
+def test_card_rejects_a_malformed_config_digest_or_missing_sizes() -> None:
+    base = dict(
+        model_id="m",
+        repo="a/b",
+        revision="0" * 40,
+        license="MIT",
+        gated=False,
+        gpu_memory_gb=None,
+        dims=8,
+        family="dinov2",
+        weights_sha256={"model.safetensors": "0" * 64},
+        weights_bytes={"model.safetensors": 10},
+        config_sha256="1" * 64,
+    )
+    registry.ModelCard(**base)  # type: ignore[arg-type]
+    for change in (
+        dict(config_sha256="zz"),
+        dict(weights_bytes={}),
+        dict(weights_bytes={"model.safetensors": 0}),
+        dict(weights_bytes={"other.safetensors": 5}),
+    ):
+        with pytest.raises(ValueError):
+            registry.ModelCard(**{**base, **change})  # type: ignore[arg-type]

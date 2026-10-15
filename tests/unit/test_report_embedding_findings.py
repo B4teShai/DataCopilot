@@ -40,12 +40,9 @@ def test_a_run_with_leakage_renders_in_all_three_formats(tmp_path: Path) -> None
         Row("b.png", "test", near(BASE, 0.1), group="g<script>"),
         *[Row(f"c{k}.png", "train") for k in range(8)],
     ]
-    ds, _, ctx = (
-        scene(tmp_path / "data", rows)
-        if (tmp_path / "data").mkdir() is None
-        else (None, None, None)
-    )  # type: ignore[misc]
-    run = engine.run_audit(ds, "all", ctx, ["leakage"])  # type: ignore[arg-type]
+    (tmp_path / "data").mkdir()
+    ds, _, ctx = scene(tmp_path / "data", rows, show_group_labels=True)
+    run = engine.run_audit(ds, "all", ctx, ["leakage"])
     out = tmp_path / "out"
     out.mkdir()
     render(run, html=out / "r.html", json=out / "r.json", sarif=out / "r.sarif")

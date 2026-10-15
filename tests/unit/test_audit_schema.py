@@ -143,3 +143,21 @@ def test_run_round_trips_through_json() -> None:
     run = run_of(finding("INFO"), finding("WARN", image_id="1" * 16))
     again = AuditRun.model_validate_json(run.model_dump_json())
     assert again == run
+
+
+@pytest.mark.parametrize("value", ["../x", "a b", "", "x" * 300, "a\nb", "name\u202e"])
+def test_audit_run_bounds_the_embedder_label(value: str) -> None:
+    from datetime import datetime, timezone
+
+    from datacopilot.core.schema import AuditRun, Counts
+
+    with pytest.raises(ValueError):
+        AuditRun(
+            run_id=RUN,
+            dataset_version="a" * 32,
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            checks=(),
+            embedder=value,
+            counts=Counts(critical=0, warn=0, info=0),
+            passed=True,
+        )

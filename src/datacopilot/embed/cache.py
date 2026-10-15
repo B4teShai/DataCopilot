@@ -60,6 +60,7 @@ import re
 import stat
 import uuid
 from collections import Counter
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -533,24 +534,35 @@ class EmbeddingCache:
         identity: CacheIdentity | None,
         secret: bytes | None,
         disabled_reason: str | None = None,
+        max_rows: int = MAX_CACHE_ROWS,
     ) -> None:
         self._root = root
         self._identity = identity
         self._secret = secret
         self.disabled_reason = disabled_reason
+        self._max_rows = min(max_rows, MAX_CACHE_ROWS)
         self._shards: list[_ShardEntry] = []
         self._ids: set[str] = set()
         self._loaded = False
 
     @classmethod
-    def open(cls, root: Path, identity: CacheIdentity, secret: bytes | None) -> EmbeddingCache:
+    def open(
+        cls,
+        root: Path,
+        identity: CacheIdentity,
+        secret: bytes | None,
+        *,
+        max_rows: int = MAX_CACHE_ROWS,
+    ) -> EmbeddingCache:
         """Cache of ``identity`` below ``root`` (``<dataset>/embeddings``); nothing is touched yet.
 
         Without a ``secret`` the cache is disabled: unauthenticated vectors are never trusted.
+        ``max_rows`` bounds the rows a cache may list (at most ``MAX_CACHE_ROWS``); the audit passes
+        a multiple of the dataset size, so a cache far larger than its dataset is rejected.
         """
         if secret is None:
             return cls.disabled("no_key")
-        return cls(root, identity, secret)
+        return cls(root, identity, secret, max_rows=max_rows)
 
     @classmethod
     def disabled(cls, reason: str) -> EmbeddingCache:
@@ -568,8 +580,13 @@ class EmbeddingCache:
         dims = self._identity.dims if self._identity else 1
         return LoadResult((), (), np.zeros((0, dims), dtype=np.float32), rejected or {}, state)
 
-    def load(self) -> LoadResult:
-        """Verify the cache and return every vector that passed (see the module docstring)."""
+    def load(self, wanted: AbstractSet[str] | None = None) -> LoadResult:
+        """Verify the cache and return the vectors that passed (see the module docstring).
+
+        Every shard is verified in full, but with ``wanted`` only the rows of those ids are kept in
+        the result, so a cache larger than the dataset costs no more memory than the dataset. All
+        cached ids stay known to :meth:`append` either way.
+        """
         self._shards, self._ids, self._loaded = [], set(), True
         if self._root is None or self._identity is None or self._secret is None:
             return self._empty("disabled")
@@ -597,6 +614,13 @@ class EmbeddingCache:
             return self._empty("rejected", {exc.reason: 1})
         try:
             doc = json.loads(raw, object_pairs_hook=_no_duplicate_keys)
+            version = doc.get("format") if isinstance(doc, dict) else None
+            if (
+                isinstance(version, int)
+                and not isinstance(version, bool)
+                and version != FORMAT_VERSION
+            ):
+                return self._empty("stale")  # another format generation: ignored, then replaced
             manifest = _Manifest.model_validate(doc)
         except (ValidationError, ValueError, RecursionError, TypeError):
             return self._empty("rejected", {"manifest_invalid": 1})
@@ -614,9 +638,11 @@ class EmbeddingCache:
         expected_mac = mac_for(doc, self._secret, identity)
         if manifest.mac is None or not hmac.compare_digest(manifest.mac, expected_mac):
             return self._empty("rejected", {"bad_mac": 1})
-        return self._load_shards(directory, manifest)
+        return self._load_shards(directory, manifest, wanted)
 
-    def _load_shards(self, directory: Path, manifest: _Manifest) -> LoadResult:
+    def _load_shards(
+        self, directory: Path, manifest: _Manifest, wanted: AbstractSet[str] | None
+    ) -> LoadResult:
         assert self._identity is not None  # noqa: S101
         identity = self._identity
         rejected: Counter[str] = Counter()
@@ -627,7 +653,7 @@ class EmbeddingCache:
         total = 0
         for entry in manifest.shards:
             total += entry.rows
-            if total > MAX_CACHE_ROWS:
+            if total > self._max_rows:
                 rejected["too_many_rows"] += 1
                 break
             try:
@@ -649,6 +675,14 @@ class EmbeddingCache:
                 rejected[exc.reason] += 1
                 continue
             seen.update(shard_ids)
+            if wanted is not None:
+                keep = [n for n, image_id in enumerate(shard_ids) if image_id in wanted]
+                if not keep:
+                    self._shards.append(entry)
+                    continue
+                shard_ids = [shard_ids[n] for n in keep]
+                shard_digests = [shard_digests[n] for n in keep]
+                matrix = matrix[keep]
             all_ids.extend(shard_ids)
             all_digests.extend(shard_digests)
             blocks.append(matrix)
@@ -702,7 +736,7 @@ class EmbeddingCache:
             raise ValueError("digests must be one sha256 hex digest per image")
         if not self._ids.isdisjoint(image_ids):
             raise ValueError("image id is already cached")
-        if len(self._ids) + n > MAX_CACHE_ROWS or len(self._shards) >= MAX_SHARDS:
+        if len(self._ids) + n > self._max_rows or len(self._shards) >= MAX_SHARDS:
             raise CacheFullError
         data = encode_shard(identity, image_ids, vectors, digests)
         if len(data) > MAX_SHARD_BYTES:

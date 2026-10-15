@@ -1,7 +1,10 @@
 # Third-party models
 
 Models are never vendored or redistributed. Users download weights themselves; the registry
-(`models/registry.py`, Phase 5+) shows each license on first use.
+(`models/registry.py`) logs each license on first use (`model_license_shown`), pins each model to
+a full commit hash and to the size and sha256 of its `.safetensors` weights and of `config.json`,
+and refuses a model whose license is outside `DATACOPILOT_ALLOWED_LICENSES` before anything is
+downloaded.
 
 | Model | Source | License | Commercial use | Notes |
 |---|---|---|---|---|

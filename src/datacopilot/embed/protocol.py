@@ -22,14 +22,20 @@ class ImageDecodeError(ModelError):
     """One image could not be decoded (corrupt, unsupported, or over the pixel limit).
 
     Attributes:
-        index: position of the offending image in the batch given to ``embed``.
-        reason: short constant code (``decode_failed`` or ``too_many_pixels``), never file text.
+        index: position of the (first) offending image in the batch given to ``embed``.
+        reason: short constant code (``decode_failed``, ``too_many_pixels`` or ``multi_frame``),
+            never file text.
+        failures: ``(index, reason)`` of every offending image the embedder found, in order, so the
+            caller drops them all and retries once instead of once per bad image.
     """
 
-    def __init__(self, index: int, reason: str) -> None:
+    def __init__(
+        self, index: int, reason: str, failures: tuple[tuple[int, str], ...] | None = None
+    ) -> None:
         super().__init__(f"image {index} cannot be decoded ({reason})")
         self.index = index
         self.reason = reason
+        self.failures = failures if failures else ((index, reason),)
 
 
 @runtime_checkable

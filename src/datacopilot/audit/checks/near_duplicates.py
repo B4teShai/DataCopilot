@@ -13,7 +13,9 @@ Rules (``payload["rule"]``): ``near_duplicate`` (``group_id`` = 12-hex digest of
 ``count``, ``cross_split``, ``splits``, ``min_cosine``, ``max_cosine``, up to 20 ``members`` as
 short id, split and base name); and the shared fail-closed rules of ``embedtools.embedding_set``:
 ``embedder_missing``, ``embedder_error``, ``images_not_embedded``, ``audit_incomplete``,
-``embedding_cache_rejected``, ``embedding_cache_mismatch``. ``phash_not_applied`` (WARN) counts
+``embedding_cache_rejected``, ``embedding_cache_mismatch``,
+``embedding_cache_content_changed``, ``embedding_cache_unverified``,
+``embedding_pair_contradicted``. ``phash_not_applied`` (WARN) counts
 the images the optional perceptual-hash prefilter could not hash; their pairs are kept.
 ``audit_incomplete`` also reports a neighbour search that ended at ``max_check_seconds``
 (``checked`` rows of ``total``) or a dataset over ``MAX_KNN_ROWS`` images (``too_many_images``):

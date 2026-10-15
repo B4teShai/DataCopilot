@@ -127,6 +127,7 @@ def test_planted_leakage_fails_the_leakage_gate_with_exit_1(
         leaky,
         "--embedder",
         "hash",
+        "--allow-test-embedder",
         "--fail-on",
         "leakage",
         *reports(tmp_path),
@@ -156,6 +157,7 @@ def test_clean_data_passes_the_same_gate_with_exit_0(
         clean,
         "--embedder",
         "hash",
+        "--allow-test-embedder",
         "--fail-on",
         "leakage",
         *reports(tmp_path),
@@ -167,14 +169,33 @@ def test_clean_data_passes_the_same_gate_with_exit_0(
 def test_the_default_gate_catches_the_leak_too(
     leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert run(monkeypatch, "audit", leaky, "--embedder", "hash", *reports(tmp_path)) == 1
+    assert (
+        run(
+            monkeypatch,
+            "audit",
+            leaky,
+            "--embedder",
+            "hash",
+            "--allow-test-embedder",
+            *reports(tmp_path),
+        )
+        == 1
+    )
 
 
 def test_without_a_gate_the_leak_is_reported_but_the_exit_is_0(
     leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     code = run(
-        monkeypatch, "audit", leaky, "--embedder", "hash", "--fail-on", "none", *reports(tmp_path)
+        monkeypatch,
+        "audit",
+        leaky,
+        "--embedder",
+        "hash",
+        "--allow-test-embedder",
+        "--fail-on",
+        "none",
+        *reports(tmp_path),
     )
     assert code == 0
     assert any(f["check"] == "leakage" for f in findings(tmp_path))
@@ -189,6 +210,7 @@ def test_the_similarity_threshold_option_reaches_the_checks(
         leaky,
         "--embedder",
         "hash",
+        "--allow-test-embedder",
         "--similarity-threshold",
         "0.999",
         "--fail-on",
@@ -210,7 +232,18 @@ def test_all_includes_the_embedding_checks_only_when_an_embedder_is_given(
         "boxes",
     ]
     assert json.loads((tmp_path / "r.json").read_text())["embedder"] is None
-    assert run(monkeypatch, "audit", clean, "--embedder", "hash", *reports(tmp_path)) == 0
+    assert (
+        run(
+            monkeypatch,
+            "audit",
+            clean,
+            "--embedder",
+            "hash",
+            "--allow-test-embedder",
+            *reports(tmp_path),
+        )
+        == 0
+    )
     assert set(json.loads((tmp_path / "r.json").read_text())["checks"]) >= {
         "near_duplicates",
         "leakage",
@@ -329,7 +362,7 @@ def test_an_invalid_allow_list_exits_2_naming_the_variable(
     clean: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], value: str
 ) -> None:
     monkeypatch.setenv("DATACOPILOT_ALLOWED_LICENSES", value)
-    assert run(monkeypatch, "audit", clean, "--embedder", "hash") == 2
+    assert run(monkeypatch, "audit", clean, "--embedder", "hash", "--allow-test-embedder") == 2
     assert "DATACOPILOT_ALLOWED_LICENSES" in capsys.readouterr().err
 
 
@@ -361,7 +394,16 @@ def test_the_second_audit_uses_the_cache_and_the_dataset_is_untouched(
     leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     version = DatasetStore.open(leaky).manifest().version
-    args = ["audit", leaky, "--embedder", "hash", "--fail-on", "leakage", *reports(tmp_path)]
+    args = [
+        "audit",
+        leaky,
+        "--embedder",
+        "hash",
+        "--allow-test-embedder",
+        "--fail-on",
+        "leakage",
+        *reports(tmp_path),
+    ]
     assert run(monkeypatch, *args) == 1
     first = [r for r in logs(capsys.readouterr().err) if r["message"] == "embeddings_computed"]
     assert first[0]["cache_hits"] == 0 and (leaky / "embeddings").is_dir()
@@ -375,7 +417,16 @@ def test_in_ci_without_a_key_nothing_is_cached_and_the_verdict_is_unchanged(
     leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("CI", "true")
-    args = ["audit", leaky, "--embedder", "hash", "--fail-on", "leakage", *reports(tmp_path)]
+    args = [
+        "audit",
+        leaky,
+        "--embedder",
+        "hash",
+        "--allow-test-embedder",
+        "--fail-on",
+        "leakage",
+        *reports(tmp_path),
+    ]
     assert run(monkeypatch, *args) == 1
     assert not (leaky / "embeddings").exists()
     monkeypatch.setenv("DATACOPILOT_CACHE_KEY", "k" * 32)
@@ -392,6 +443,7 @@ def test_no_embedding_cache_never_touches_the_dataset_directory(
         leaky,
         "--embedder",
         "hash",
+        "--allow-test-embedder",
         "--no-embedding-cache",
         "--fail-on",
         "leakage",
@@ -407,7 +459,16 @@ def test_a_forged_cache_cannot_hide_the_leak(
     from datacopilot.embed import cache as ec
 
     monkeypatch.setenv("DATACOPILOT_CACHE_KEY", "k" * 32)
-    args = ["audit", leaky, "--embedder", "hash", "--fail-on", "leakage", *reports(tmp_path)]
+    args = [
+        "audit",
+        leaky,
+        "--embedder",
+        "hash",
+        "--allow-test-embedder",
+        "--fail-on",
+        "leakage",
+        *reports(tmp_path),
+    ]
     assert run(monkeypatch, *args) == 1
     shard = next((leaky / "embeddings").rglob("shard-*.parquet"))
     rows = ec.EmbeddingCache.open(
@@ -513,6 +574,7 @@ def test_images_that_cannot_be_embedded_fail_a_gate_on_the_check(
         clean,
         "--embedder",
         "hash",
+        "--allow-test-embedder",
         "--checks",
         "leakage",
         "--fail-on",
@@ -623,3 +685,106 @@ def test_embed_on_an_unreadable_dataset_exits_1(
 
 def test_synth_fixture_is_still_importable() -> None:
     assert synth.CATEGORIES
+
+
+# ------------------------------------------------------------ the test-only embedder
+def test_the_hash_embedder_is_refused_for_gating_unless_confirmed(
+    leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for gate in ([], ["--fail-on", "leakage"], ["--fail-on", "near_duplicates"]):
+        code = run(
+            monkeypatch,
+            "audit",
+            leaky,
+            "--embedder",
+            "hash",
+            *gate,
+            *reports(tmp_path),
+        )
+        err = capsys.readouterr().err
+        assert code == 2 and "--allow-test-embedder" in err, gate
+    assert not (tmp_path / "r.html").exists() and not (leaky / "audits").exists()
+
+
+def test_the_hash_embedder_without_a_gate_runs_and_the_report_carries_a_warning(
+    leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = run(
+        monkeypatch,
+        "audit",
+        leaky,
+        "--embedder",
+        "hash",
+        "--allow-test-embedder",
+        "--fail-on",
+        "none",
+        *reports(tmp_path),
+    )
+    err = capsys.readouterr().err
+    assert code == 0 and "warning:" in err and "test" in err
+    report = json.loads((tmp_path / "r.json").read_text())
+    assert report["embedder"] == "hash@1-test-only"
+    assert "test-only" in (tmp_path / "r.html").read_text()
+
+
+def test_the_allow_flag_lets_the_hash_embedder_gate(
+    leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code = run(
+        monkeypatch, "audit", leaky, "--embedder", "hash", "--allow-test-embedder",
+        "--fail-on", "leakage", *reports(tmp_path),
+    )  # fmt: skip
+    assert code == 1
+
+
+def test_a_model_embedder_needs_no_confirmation(
+    clean: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install(monkeypatch, FakeEmbedder())
+    assert run(monkeypatch, "audit", clean, "--embedder", "broken", *reports(tmp_path)) == 0
+
+
+# ------------------------------------------------ cache key, group labels, symlinks
+def test_require_cache_key_is_a_usage_error_without_the_key(
+    clean: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = ["audit", clean, "--embedder", "hash", "--allow-test-embedder", "--require-cache-key"]
+    assert run(monkeypatch, *args, *reports(tmp_path)) == 2
+    assert "DATACOPILOT_CACHE_KEY" in capsys.readouterr().err
+    assert not (clean / "embeddings").exists()
+    monkeypatch.setenv("DATACOPILOT_CACHE_KEY", "k" * 32)
+    assert run(monkeypatch, *args, *reports(tmp_path)) == 0
+    assert run(monkeypatch, "embed", clean, "--embedder", "hash", "--require-cache-key") == 0
+
+
+def test_a_symlinked_dataset_directory_is_refused(
+    clean: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    link = tmp_path / "link.dcp"
+    link.symlink_to(clean, target_is_directory=True)
+    for argv in (("audit", link, *reports(tmp_path)), ("embed", link, "--embedder", "hash")):
+        assert run(monkeypatch, *argv) == 1
+        assert "symlink" in capsys.readouterr().err
+    assert not (clean / "audits").exists() and not (clean / "embeddings").exists()
+
+
+def test_group_labels_are_hidden_unless_asked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "grp-src"
+    write_coco(src, leak=False)
+    out = tmp_path / "grp.dcp"
+    pattern = r"re:^images/[a-z]+(?P<g>\d)"
+    assert (
+        run(monkeypatch, "ingest", src, "--format", "coco", "-o", out, "--group-by", pattern) == 0
+    )
+    args = ["audit", out, "--embedder", "hash", "--allow-test-embedder", "--fail-on", "none"]
+    assert run(monkeypatch, *args, *reports(tmp_path)) == 0
+    text = (tmp_path / "r.json").read_text()
+    overlap = [f for f in findings(tmp_path) if f["payload"]["rule"] == "group_overlap"]
+    assert overlap and all(
+        "group" not in f["payload"] and "group_ref" in f["payload"] for f in overlap
+    )
+    assert run(monkeypatch, *args, "--show-group-labels", *reports(tmp_path)) == 0
+    shown = [f for f in findings(tmp_path) if f["payload"]["rule"] == "group_overlap"]
+    assert all("group" in f["payload"] for f in shown) and text != (tmp_path / "r.json").read_text()

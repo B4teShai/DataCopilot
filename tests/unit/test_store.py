@@ -196,3 +196,17 @@ def test_empty_annotation_table_round_trips(tmp_path: Path, tables: Tables) -> N
     store = DatasetStore.create(tmp_path / "e.dcp", images, [], cats, name="d", task="detection")
     ds = store.read()
     assert ds.annotations == () and len(ds.images) == 3
+
+
+def test_a_symlinked_dataset_directory_is_refused(tmp_path: Path) -> None:
+    import pytest as _pytest
+
+    from datacopilot.core.errors import StoreError
+    from datacopilot.store import DatasetStore
+
+    real = tmp_path / "real.dcp"
+    real.mkdir()
+    link = tmp_path / "link.dcp"
+    link.symlink_to(real, target_is_directory=True)
+    with _pytest.raises(StoreError, match="symlink"):
+        DatasetStore.open(link)

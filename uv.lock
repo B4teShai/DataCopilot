@@ -378,17 +378,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
-    { name = "faiss-cpu", marker = "extra == 'embed'", specifier = ">=1.8" },
-    { name = "huggingface-hub", marker = "extra == 'embed'", specifier = ">=0.24" },
+    { name = "faiss-cpu", marker = "extra == 'embed'", specifier = ">=1.15" },
+    { name = "huggingface-hub", marker = "extra == 'embed'", specifier = ">=2.2" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pillow", marker = "extra == 'embed'", specifier = ">=10.3" },
+    { name = "pillow", marker = "extra == 'embed'", specifier = ">=12.3" },
     { name = "pyarrow", specifier = ">=16" },
     { name = "pydantic", specifier = ">=2.7" },
-    { name = "safetensors", marker = "extra == 'embed'", specifier = ">=0.4" },
+    { name = "safetensors", marker = "extra == 'embed'", specifier = ">=0.8" },
     { name = "structlog", specifier = ">=24.1" },
-    { name = "torch", marker = "extra == 'embed'", specifier = ">=2.2" },
-    { name = "transformers", marker = "extra == 'embed'", specifier = ">=4.49" },
+    { name = "torch", marker = "extra == 'embed'", specifier = ">=2.14" },
+    { name = "transformers", marker = "extra == 'embed'", specifier = ">=5.19" },
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["cleanlab", "cvat", "embed", "fiftyone", "sam3", "vlm"]
@@ -397,7 +397,7 @@ provides-extras = ["cleanlab", "cvat", "embed", "fiftyone", "sam3", "vlm"]
 dev = [
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "mypy", specifier = ">=1.11" },
-    { name = "pillow", specifier = ">=10.3" },
+    { name = "pillow", specifier = ">=12.3" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov", specifier = ">=5" },
     { name = "ruff", specifier = ">=0.6" },

@@ -229,6 +229,8 @@ def embedding_set(
         ]
     es = provider.get(ds, ctx)
     findings: list[Finding] = []
+    if es.refused is not None:
+        findings.append(incomplete_finding(ctx, name, es.refused, 0, es.total))
     if es.error is not None:
         findings.append(
             make_finding(

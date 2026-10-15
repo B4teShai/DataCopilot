@@ -22,12 +22,13 @@ dependencies = [
 
 [project.optional-dependencies]
 embed = [
-  "pillow>=10.3",
-  "safetensors>=0.4",
-  "huggingface-hub>=0.24",
-  "transformers>=4.49",
-  "faiss-cpu>=1.8",
-  "torch>=2.2",
+  # floors are the versions the suite and the real-model smoke tests were run with
+  "pillow>=12.3",
+  "safetensors>=0.8",
+  "huggingface-hub>=2.2",
+  "transformers>=5.19",
+  "faiss-cpu>=1.15",
+  "torch>=2.14",
 ]
 vlm = []
 sam3 = []
@@ -72,7 +73,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "hypothesis>=6.100",
-    "pillow>=10.3",
+    "pillow>=12.3",
 ]
 
 [tool.ruff]

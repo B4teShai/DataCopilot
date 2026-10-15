@@ -12,8 +12,10 @@ Findings are INFO: an outlier is a lead for review (label error, odd capture), n
 
 Rules: ``outlier`` (``category_id``, ``category`` cut to 64 characters, ``score``, ``class_median``,
 ``z``), ``classes_skipped`` (classes too small to score), ``images_without_class``, and the shared
-fail-closed rules of ``embedtools.embedding_set``; ``audit_incomplete`` also reports a neighbour
-search that ended at ``max_check_seconds`` or a dataset over ``MAX_KNN_ROWS`` images.
+fail-closed rules of ``embedtools.embedding_set`` (including ``embedding_cache_unverified``,
+``embedding_cache_content_changed`` and ``embedding_pair_contradicted``); ``audit_incomplete``
+also reports a neighbour search that ended at ``max_check_seconds`` or a dataset over
+``MAX_KNN_ROWS`` images.
 """
 
 from __future__ import annotations

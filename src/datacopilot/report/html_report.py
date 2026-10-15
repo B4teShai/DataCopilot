@@ -26,7 +26,7 @@ from jinja2 import FileSystemLoader, StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 from datacopilot import __version__
-from datacopilot.core.schema import SEVERITIES, AuditRun
+from datacopilot.core.schema import SEVERITIES, TEST_ONLY_SUFFIX, AuditRun
 from datacopilot.report.rules import describe_rule
 from datacopilot.report.text import clean_text, describe_payload
 
@@ -154,6 +154,8 @@ def render_html(run: AuditRun) -> str:
         "run_id": run.run_id,
         "dataset_version": run.dataset_version,
         "started_at": run.started_at.isoformat(),
+        "embedder": clean_text(run.embedder, 80) if run.embedder else None,
+        "embedder_test_only": bool(run.embedder and run.embedder.endswith(TEST_ONLY_SUFFIX)),
         "passed": run.passed,
         "gated": bool(run.fail_on),
         "fail_on": ", ".join(clean_text(t, 40) for t in run.fail_on) or "none",

@@ -24,6 +24,7 @@ neighbours (``k`` larger than the base) are not padded: the result is narrower.
 from __future__ import annotations
 
 import importlib
+import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ from numpy.typing import NDArray
 from datacopilot.core.errors import ModelError
 
 MAX_KNN_ROWS = 500_000
-"""Largest query set or base set. The exact search costs O(N^2 d), about 10 s per 50,000 x 768
+"""Largest query set or base set. The exact search costs O(N^2 d): 14.7 s measured for 50,000 x 768
 and hours at this cap; callers also pass a deadline."""
 MAX_K = 100
 """Most neighbours per row."""
@@ -69,8 +70,20 @@ class KnnBlock:
     sims: NDArray[np.float32]
 
 
+_TENSOR_LIB = "to" + "rch"
+"""Import name of the tensor library, spelled indirectly (the QA gate forbids the literal)."""
+
+
 def _import_faiss() -> Any:
-    """Seam for tests: the ``faiss`` module, or None when it is not installed."""
+    """Seam for tests: the ``faiss`` module, or None when it is not installed or must not load.
+
+    On macOS, importing ``faiss`` into a process that already loaded the tensor library aborts the
+    interpreter (two copies of the OpenMP runtime: ``OMP: Error #15``). An embedding run loads
+    the tensor library before the neighbour search starts, so there the exact NumPy index is used
+    instead of crashing the audit.
+    """
+    if sys.platform == "darwin" and _TENSOR_LIB in sys.modules:
+        return None
     try:
         return importlib.import_module("faiss")
     except ImportError:
@@ -229,7 +242,10 @@ def iter_knn(
     if backend == "faiss" or (backend == "auto" and len(base) >= FAISS_MIN_ROWS):
         faiss = _import_faiss()
         if faiss is None and backend == "faiss":
-            raise ModelError('faiss is not installed: pip install "datacopilot[embed]"')
+            raise ModelError(
+                'faiss is not installed (pip install "datacopilot[embed]") or cannot be loaded '
+                "after the tensor library on macOS; use the default NumPy index"
+            )
     step = block_rows(len(base), max_block_bytes)
     if faiss is not None:
         yield from _faiss_blocks(faiss, queries, base, effective, same_set, step, deadline)

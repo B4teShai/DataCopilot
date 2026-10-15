@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import re
 import time
 from collections import defaultdict
 from collections.abc import Iterator
@@ -39,6 +40,7 @@ from datacopilot.audit.paths import resolve_image_path, safe_text
 from datacopilot.core.errors import DataCopilotError, FormatError
 from datacopilot.core.schema import Dataset, Image
 from datacopilot.embed import cache as embed_cache
+from datacopilot.embed import knn
 from datacopilot.embed.protocol import Embedder, ImageDecodeError
 from datacopilot.io import files
 from datacopilot.logging import get_logger
@@ -87,6 +89,7 @@ forged vector is far from this bound: the cosine of two unrelated images is belo
 disagreeing sample discards the whole cache for the run."""
 Result = tuple[str, NDArray[np.float32] | None, str | None, str | None]
 """``(image_id, vector, reason, full sha256)``: a vector and a digest, or a reason."""
+_PLAIN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _DECODE_REASONS = frozenset({"decode_failed", "too_many_pixels", "multi_frame"})
 
 
@@ -115,6 +118,10 @@ class EmbeddingSet:
         spot_mismatched: of those, how many disagreed (the cache was then discarded).
         cached_ids: images whose vector came from the (verified) cache rather than from the model
             in this run; the checks re-embed the members of the pairs they report or nearly report.
+        refused: ``too_many_images`` when the dataset is over the neighbour-search cap; nothing was
+            read, embedded or cached.
+        test_only: the embedder declares itself a test double (``test_only = True``); its verdicts
+            say nothing about pictures.
         cache_content_changed: cached hits whose image file no longer hashes to the digest stored
             with the vector (the whole cache was then discarded and recomputed).
         cache_unverified: reason code (``too_few_verifiable``) when too few sampled hits could be
@@ -139,6 +146,8 @@ class EmbeddingSet:
     spot_checked: int = 0
     spot_mismatched: int = 0
     cached_ids: frozenset[str] = frozenset()
+    refused: str | None = None
+    test_only: bool = False
     cache_content_changed: int = 0
     cache_unverified: str | None = None
     cache_unwritable: bool = False
@@ -289,6 +298,10 @@ class PipelineProvider:
             raise ValueError("dtype must be float16 or float32")
         if not 1 <= embedder.dims <= embed_cache.MAX_DIMS:
             raise ValueError(f"embedder dims must be between 1 and {embed_cache.MAX_DIMS}")
+        if not _PLAIN_NAME.fullmatch(str(embedder.model_id)) or not _PLAIN_NAME.fullmatch(
+            str(embedder.revision)
+        ):
+            raise ValueError("embedder model_id and revision must be plain names")
         self._embedder = embedder
         self._batch = batch_size
         self._dtype: embed_cache.Dtype = dtype
@@ -341,6 +354,17 @@ class PipelineProvider:
         log = get_logger(__name__)
         deadline = time.monotonic() + ctx.config.max_check_seconds
         dims = self._embedder.dims
+        if len(ds.images) > knn.MAX_KNN_ROWS:  # decided before the cache or the model is touched
+            return EmbeddingSet(
+                ids=(),
+                matrix=np.zeros((0, dims), dtype=np.float32),
+                total=len(ds.images),
+                model_id=self._embedder.model_id,
+                revision=self._embedder.revision,
+                dims=dims,
+                refused="too_many_images",
+                test_only=bool(getattr(self._embedder, "test_only", False)),
+            )
         ids_sorted = sorted(image.image_id for image in ds.images)
         by_id = {image.image_id: image for image in ds.images}
         position = {image_id: n for n, image_id in enumerate(ids_sorted)}
@@ -352,12 +376,15 @@ class PipelineProvider:
         secret, disabled_reason = self._secret(ctx)
         cache = (
             embed_cache.EmbeddingCache.open(
-                (ctx.dataset_dir or Path()) / "embeddings", self._identity(ds), secret
+                (ctx.dataset_dir or Path()) / "embeddings",
+                self._identity(ds),
+                secret,
+                max_rows=2 * len(ds.images) + embed_cache.WRITE_SHARD_ROWS,
             )
             if secret is not None
             else embed_cache.EmbeddingCache.disabled(disabled_reason or "no_key")
         )
-        loaded = cache.load()
+        loaded = cache.load(wanted=frozenset(ids_sorted))
         hits = 0
         stored: dict[int, str] = {}
         for row, image_id in enumerate(loaded.ids):
@@ -432,6 +459,7 @@ class PipelineProvider:
             spot_checked=sampled,
             spot_mismatched=mismatched,
             cached_ids=cached_ids,
+            test_only=bool(getattr(self._embedder, "test_only", False)),
             cache_content_changed=changed,
             cache_unverified=unverified,
             cache_unwritable=unwritable,
@@ -650,14 +678,16 @@ class PipelineProvider:
             try:
                 raw = self._embedder.embed([data for _, data, _ in batch])
             except ImageDecodeError as exc:
-                if not 0 <= exc.index < len(batch):
+                bad = {i: r for i, r in exc.failures if 0 <= i < len(batch)}
+                if not bad:
                     state.error = "InvalidEmbedderOutput"
                     for image, _, _ in batch:
                         yield image.image_id, None, "embedder_error", None
                     return
-                image, _, _ = batch.pop(exc.index)
-                reason = exc.reason if exc.reason in _DECODE_REASONS else "decode_failed"
-                yield image.image_id, None, reason, None
+                for i in sorted(bad):  # every reported failure is dropped; one retry for the rest
+                    reason = bad[i] if bad[i] in _DECODE_REASONS else "decode_failed"
+                    yield batch[i][0].image_id, None, reason, None
+                batch = [item for i, item in enumerate(batch) if i not in bad]
                 continue
             except Exception as exc:  # noqa: BLE001  # recorded by type only; text may hold secrets
                 state.error = type(exc).__name__

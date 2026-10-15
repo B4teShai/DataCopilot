@@ -82,6 +82,9 @@ class CheckContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
         embedder: embedder registry id, if the run uses one (none in the CPU checks).
         embeddings: the provider of image embeddings for the embedding checks (computes once per
             audit and caches in memory); None when no embedder was requested.
+        show_group_labels: include the (cleaned, cut) group label in ``group_overlap`` findings;
+            by default only the hashed ``group_ref`` is shown, because group ids come from file
+            paths and can carry names.
         dataset_dir: the ``dataset.dcp`` directory, where the embedding cache lives; None means no
             persistent embedding cache.
         require_local_images: any image that a check could not examine is CRITICAL.
@@ -103,6 +106,7 @@ class CheckContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
     embedder: str | None = None
     embeddings: EmbeddingProvider | None = Field(default=None, exclude=True)
     dataset_dir: Path | None = None
+    show_group_labels: bool = False
     require_local_images: bool = False
     cache_key: SecretStr | None = None
     in_ci: bool = False

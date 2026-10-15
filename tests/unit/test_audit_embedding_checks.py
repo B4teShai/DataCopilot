@@ -212,9 +212,11 @@ def test_a_group_spanning_two_splits_is_critical_leakage_without_any_similarity(
     ]
     ds, _, ctx = scene(tmp_path, rows)
     (f,) = of(leakage.plugin.run(ds, ctx), "group_overlap")
-    assert (
-        f.severity == "CRITICAL" and f.payload["group"] == "cam1_day2" and f.payload["count"] == 2
-    )
+    assert f.severity == "CRITICAL" and f.payload["count"] == 2
+    assert "group" not in f.payload  # labels are shown only on request
+    shown_ctx = ctx.model_copy(update={"show_group_labels": True})
+    (shown,) = of(leakage.plugin.run(ds, shown_ctx), "group_overlap")
+    assert shown.payload["group"] == "cam1_day2"
     assert len(str(f.payload["group_ref"])) == 12 and f.payload["splits"] == {"test": 1, "train": 1}
 
 
@@ -231,7 +233,8 @@ def test_group_ids_are_cut_and_unicode_safe(tmp_path: Path) -> None:
     gid = "g‮" + "x" * 400
     rows = [Row("a.png", "train", group=gid), Row("b.png", "val", group=gid), *clean_rows()]
     ds, _, ctx = scene(tmp_path, rows)
-    (f,) = of(leakage.plugin.run(ds, ctx), "group_overlap")
+    shown_ctx = ctx.model_copy(update={"show_group_labels": True})
+    (f,) = of(leakage.plugin.run(ds, shown_ctx), "group_overlap")
     assert len(str(f.payload["group"])) <= 64 and "‮" not in str(f.payload["group"])
 
 
@@ -664,3 +667,17 @@ def test_without_cached_vectors_nothing_is_re_embedded(tmp_path: Path) -> None:
     found = leakage.plugin.run(ds, ctx)
     assert len(of(found, "cross_split_near_duplicate")) == 1
     assert sum(emb.calls) == len(ds.images)  # one pass, no verification pass
+
+
+def test_group_labels_are_normalised_before_they_are_compared(tmp_path: Path) -> None:
+    """Case, spacing and compatibility forms of one label are one group."""
+    rows = [
+        Row("a.png", "train", group="Cam1_Day2"),
+        Row("b.png", "test", group="  cam1_day2 "),
+        Row("c.png", "val", group="\uff23am1_day2"),  # fullwidth C
+        Row("d.png", "train", group="other"),
+        *clean_rows(3, "val"),
+    ]
+    ds, _, ctx = scene(tmp_path, rows)
+    (f,) = of(leakage.plugin.run(ds, ctx), "group_overlap")
+    assert f.payload["count"] == 3 and f.payload["splits"] == {"test": 1, "train": 1, "val": 1}

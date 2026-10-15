@@ -671,3 +671,33 @@ def test_a_missing_pillow_reaches_the_user_with_its_install_hint(
     monkeypatch.setitem(sys.modules, "PIL.Image", None)
     es = provider(NeedsPillow()).get(dataset(tmp_path, 3), make_ctx(tmp_path, None))
     assert es.error == "ModelError" and "datacopilot[embed]" in (es.error_detail or "")
+
+
+def test_a_dataset_over_the_knn_cap_is_refused_before_the_cache_or_the_embedder_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datacopilot.embed import knn
+
+    monkeypatch.setattr(knn, "MAX_KNN_ROWS", 5)
+    emb = FakeEmbedder()
+    es = provider(emb).get(dataset(tmp_path, 8), make_ctx(tmp_path, None))
+    assert es.refused == "too_many_images" and es.ids == () and es.total == 8
+    assert emb.calls == [] and not (tmp_path / "ds.dcp" / "embeddings").exists()
+
+
+def test_every_bad_image_of_a_batch_is_dropped_in_one_pass(tmp_path: Path) -> None:
+    ds = dataset(tmp_path, 8)
+    emb = FakeEmbedder()
+    for k in (1, 3, 6):
+        emb.decode_errors[png_bytes(64, 48, k)] = "decode_failed"
+    es = provider(emb, batch_size=8).get(ds, make_ctx(tmp_path, None))
+    assert len(es.ids) == 5 and len(es.missing["decode_failed"]) == 3
+    assert len(emb.calls) <= 2  # the failing call and one retry, not one retry per bad image
+
+
+def test_plugin_names_and_revisions_are_validated_up_front() -> None:
+    for model_id, revision in (("../x", "1"), ("ok", "a/b"), ("", "1"), ("ok", "x" * 100)):
+        emb = FakeEmbedder()
+        emb.model_id, emb.revision = model_id, revision
+        with pytest.raises(ValueError, match="model_id and revision"):
+            embedding.PipelineProvider(emb)

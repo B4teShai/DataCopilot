@@ -56,12 +56,15 @@ class HashEmbedder:
     revision = "1"
     dims = DIMS
     weights: dict[str, str] = {}  # noqa: RUF012  # nothing to download, nothing to verify
+    test_only = True
+    """It compares file bytes, not pictures: a re-encoded copy of an image is a stranger to it."""
 
     def embed(self, images: Sequence[bytes]) -> NDArray[np.float32]:
         out = np.zeros((len(images), DIMS), dtype=np.float32)
+        empty = tuple((row, "decode_failed") for row, data in enumerate(images) if not data)
+        if empty:
+            raise ImageDecodeError(empty[0][0], empty[0][1], empty)
         for row, data in enumerate(images):
-            if not data:
-                raise ImageDecodeError(row, "decode_failed")
             shingles = _shingles(data)
             votes = np.zeros(DIMS, dtype=np.int64)
             for start in range(0, len(shingles), _CHUNK):

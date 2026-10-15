@@ -11,7 +11,7 @@
 <body>
 <main>
 <h1>DataCopilot audit {% if gated %}<span class="{{ 'pass' if passed else 'fail' }}">{{ 'PASSED' if passed else 'FAILED' }}</span>{% else %}<span class="muted">no gate applied</span>{% endif %}</h1>
-<p class="muted">Run <code>{{ run_id }}</code> on dataset version <code>{{ dataset_version }}</code>, started {{ started_at }}. Gate (--fail-on): {{ fail_on }}. datacopilot {{ version }}.</p>
+<p class="muted">Run <code>{{ run_id }}</code> on dataset version <code>{{ dataset_version }}</code>, started {{ started_at }}. Gate (--fail-on): {{ fail_on }}. datacopilot {{ version }}.{% if embedder %} Embedder: <code>{{ embedder }}</code>{% if embedder_test_only %} <strong>(test-only: it compares file bytes, not pictures)</strong>{% endif %}.{% endif %}</p>
 
 <h2>Score card</h2>
 <div class="cards">

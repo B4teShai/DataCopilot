@@ -42,7 +42,7 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
 
 1. **Exact blocked cosine in NumPy.** Multiplies a block of rows by the full matrix and keeps the
    top k per row. Exact, deterministic, no extra dependency; cost is O(N^2 d) and memory is one
-   block. About 10 s per 50,000 x 768 on a laptop CPU.
+   block. About 15 s per 50,000 x 768 on a laptop CPU (14.7 s measured).
 2. **FAISS** (`IndexFlatIP`, or an approximate index). Faster on large N and GPU, but a heavy
    dependency, and approximate indexes miss neighbours, which for a leakage gate means missed leakage.
 3. **A graph index (HNSW).** Sub-linear queries, approximate, and needs tuning and storage.
@@ -61,7 +61,11 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
 4. The manifest carries an HMAC-SHA256 over its canonical JSON, keyed by a secret (the same
    `DATACOPILOT_CACHE_KEY` mechanism as the hash cache) and bound to model, revision, dimensions,
    dtype, weight hashes and **dataset version**. Without a key outside CI the secret is generated
-   beside the cache directory; in CI without a key the cache is not read and not written. A forged
+   in `DATACOPILOT_CACHE_DIR` (`secret.key`, private to the user); in CI (the `CI` variable only)
+   without a key the cache is not read and not written; `--require-cache-key` makes a missing key
+   an error everywhere. The MAC key is derived with a domain label, so the hash cache and this cache
+   never share a key. The preprocessing version and the weight and config digests are part of the
+   identity. A forged
    shard cannot verify without the key; a shard from another dataset version fails the binding.
 4a. The dataset version in the binding comes from the table rows, which do not see the image
    files, so each vector also carries the full sha256 of the bytes it came from. The audit hashes

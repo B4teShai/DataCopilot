@@ -21,6 +21,7 @@ import argparse
 import json
 import platform
 import resource
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -111,18 +112,33 @@ def main() -> None:
     ap.add_argument("--images", type=int, default=50_000)
     ap.add_argument("--dims", type=int, default=768)
     ap.add_argument("--classes", type=int, default=200)
+    ap.add_argument(
+        "--backend",
+        choices=("numpy", "auto"),
+        default="numpy",
+        help="numpy pins the exact NumPy index for every phase; auto lets FAISS take over above "
+        f"{knn.FAISS_MIN_ROWS} rows when it is installed",
+    )
+    ap.add_argument("--no-assert", action="store_true", help="report only; skip recall and budgets")
     args = ap.parse_args()
+    if args.backend == "numpy":
+        knn.FAISS_MIN_ROWS = 10**12  # the checks call the index with backend="auto"
+    faiss_used = args.backend == "auto" and knn._import_faiss() is not None  # noqa: SLF001
     out: dict[str, object] = {
         "images": args.images,
         "dims": args.dims,
         "python": platform.python_version(),
         "machine": platform.machine(),
         "cpus": __import__("os").cpu_count(),
+        "platform": sys.platform,
+        "knn_backend": "faiss" if faiss_used and args.images >= knn.FAISS_MIN_ROWS else "numpy",
     }
     ds, raw = build(args.images, args.dims, args.classes, pairs=min(400, args.images // 4))
     canonical = cache.canonical_vectors(raw, "float16")
     ids = tuple(sorted(i.image_id for i in ds.images))
-    (_, out["knn_k10_s"]) = timed(lambda: knn.knn(canonical, canonical, 10, same_set=True))
+    (_, out["knn_k10_s"]) = timed(
+        lambda: knn.knn(canonical, canonical, 10, same_set=True, backend=args.backend)
+    )
     with tempfile.TemporaryDirectory() as tmp:
         ident = cache.CacheIdentity("bench", "1", args.dims, "float16", ds.manifest.version, {})
         root = Path(tmp) / "embeddings"
@@ -135,6 +151,10 @@ def main() -> None:
                 store.append(
                     list(ids[start : start + cache.WRITE_SHARD_ROWS]),
                     canonical[start : start + cache.WRITE_SHARD_ROWS],
+                    [
+                        f"{n:064x}"
+                        for n in range(start, min(start + cache.WRITE_SHARD_ROWS, len(ids)))
+                    ],
                 )
 
         _, out["cache_write_s"] = timed(write)
@@ -157,8 +177,33 @@ def main() -> None:
         findings, seconds = timed(lambda c=check: c.plugin.run(ds, ctx))
         out[f"{name}_s"] = seconds
         out[f"{name}_findings"] = len(findings)
-    out["peak_rss_gb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9, 2)
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB on Linux
+    out["peak_rss_gb"] = round(peak / (1e9 if sys.platform == "darwin" else 1024**2), 2)
+    out["check_total_s"] = round(
+        float(out["near_duplicates_s"]) + float(out["leakage_s"]) + float(out["outliers_s"]),  # type: ignore[arg-type]
+        2,
+    )
+    planted = min(400, args.images // 4)
+    out["planted_pairs"] = planted
+    out["near_duplicate_recall"] = round(
+        min(1.0, float(out["near_duplicates_findings"]) / planted), 3
+    )  # type: ignore[arg-type]
+    out["leakage_recall"] = round(
+        min(1.0, float(out["leakage_findings"]) / max(planted // 2, 1)), 3
+    )  # type: ignore[arg-type]
     print(json.dumps(out, indent=2))
+    if not args.no_assert:
+        failures = []
+        if out["near_duplicate_recall"] < 0.95:  # type: ignore[operator]
+            failures.append("near-duplicate recall below 0.95 of the planted pairs")
+        if out["leakage_recall"] < 0.95:  # type: ignore[operator]
+            failures.append("leakage recall below 0.95 of the planted cross-split pairs")
+        if args.images >= 50_000 and out["check_total_s"] > 600:  # type: ignore[operator]
+            failures.append("the three checks took more than the 10 minute budget")
+        if args.images >= 50_000 and out["peak_rss_gb"] > 4:  # type: ignore[operator]
+            failures.append("peak RSS above the 4 GB budget")
+        if failures:
+            raise SystemExit("; ".join(failures))
 
 
 if __name__ == "__main__":

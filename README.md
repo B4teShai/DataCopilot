@@ -70,14 +70,14 @@ uv run datacopilot audit ds.dcp --fail-on leakage
 ### Embeddings, near-duplicates and leakage
 
 ```bash
-uv run datacopilot audit leaky.dcp --embedder hash --fail-on leakage --report leaky.html
-# failed critical=1 warn=1 info=0 run_id=e8719fda-2886-40b9-92de-cc6cc07e2062     (exit 1: a test image is a near copy of a train image)
-uv run datacopilot audit clean.dcp --embedder hash --fail-on leakage --report clean.html
-# passed critical=0 warn=0 info=0 run_id=9a0a6ae2-3447-43a9-aee8-db5ef178bdb7     (exit 0)
+uv run datacopilot audit leaky.dcp --embedder hash --allow-test-embedder --fail-on leakage --report leaky.html
+# failed critical=2 warn=0 info=0 run_id=6eb90a83-1b80-450e-8157-3b32a58f0381     (exit 1: a test image is a near copy of a train image; one CRITICAL from `near_duplicates`, one from `leakage`)
+uv run datacopilot audit clean.dcp --embedder hash --allow-test-embedder --fail-on leakage --report clean.html
+# passed critical=0 warn=0 info=0 run_id=2b5901d5-ada0-44e7-b96f-f8cd27b274eb     (exit 0)
 DATACOPILOT_ALLOWED_LICENSES=MIT uv run datacopilot audit clean.dcp --embedder dinov2_base
 # error: model 'dinov2_base' is licensed 'Apache-2.0', which is not in DATACOPILOT_ALLOWED_LICENSES; add it there if you have accepted its terms   (exit 1, nothing downloaded or read)
 uv run datacopilot embed clean.dcp --embedder hash
-# embedded=13 total=13 cached=13 missing=0 model=hash@1 run_id=8121c71a-659f-4588-8173-222d8e8dfe20     (exit 0)
+# embedded=13 total=13 cached=13 missing=0 model=hash@1 run_id=dae7e437-0bc3-4465-9869-02e23534d11d     (exit 0)
 ```
 
 `--embedder` names an embedder: `dinov2_small`, `dinov2_base` and `siglip2_base` (extra `[embed]`:
@@ -91,9 +91,12 @@ needs `DATACOPILOT_CACHE_KEY`, and a cache that cannot be checked is never trust
 closed: images without an embedding, an embedder error or a budget hit are findings, never silence.
 The model license must be in `DATACOPILOT_ALLOWED_LICENSES` (default `Apache-2.0,MIT,BSD-3-Clause`).
 The `hash` demo above compares file bytes, so it finds copies of the same file, not look-alike
-photographs; use a model embedder for that. Real DINOv2-small and SigLIP2 runs were verified with
-`uv run --extra embed pytest -m real_model tests/real` (DINOv2-small) and a one-off script
-(SigLIP2); they are not part of the default test run.
+photographs; it is test-only (reports label it `hash@1-test-only`, it prints a warning and is
+refused for any gate without `--allow-test-embedder`). Use a model embedder for real audits. Real
+DINOv2-small and SigLIP2 runs and real FAISS are covered by
+`uv run --extra embed pytest -m real_model tests/real` (downloads about 1.6 GB; not part of the
+default test run). `--show-group-labels` shows group ids in leakage findings (default: a hashed
+reference); `--require-cache-key` fails unless `DATACOPILOT_CACHE_KEY` is set.
 
 Options: `--checks all|integrity,duplicates,imbalance,boxes`, `--fail-on` (default `critical`; `warn`,
 `info` = that severity and above; check names; `none` = no gate), `--report report.html` (JSON and SARIF are written

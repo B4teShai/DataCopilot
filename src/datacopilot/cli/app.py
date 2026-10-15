@@ -261,6 +261,31 @@ def audit(
             help="Keep embeddings in dataset.dcp/embeddings (authenticated; default: on).",
         ),
     ] = True,
+    allow_test_embedder: Annotated[
+        bool,
+        typer.Option(
+            "--allow-test-embedder",
+            help="Allow a test-only embedder such as `hash` (it compares file bytes, not pictures) "
+            "to drive a gate. Without it such an embedder is refused unless `--fail-on none`.",
+        ),
+    ] = False,
+    require_cache_key: Annotated[
+        bool,
+        typer.Option(
+            "--require-cache-key",
+            help="Fail (exit 2) unless DATACOPILOT_CACHE_KEY is set, whether or not CI is "
+            "detected (only the CI variable is looked at). Use it where the cache directory is "
+            "shared or restored from elsewhere.",
+        ),
+    ] = False,
+    show_group_labels: Annotated[
+        bool,
+        typer.Option(
+            "--show-group-labels",
+            help="Show group ids in leakage findings (default: only a hashed reference; group ids "
+            "come from file paths and can carry names).",
+        ),
+    ] = False,
 ) -> None:
     """Audit a dataset.dcp, write reports and exit with the gate's verdict.
 
@@ -274,6 +299,7 @@ def audit(
     from datacopilot.audit import engine
     from datacopilot.audit.context import CheckConfig, CheckContext
     from datacopilot.core.errors import FormatError
+    from datacopilot.core.schema import TEST_ONLY_SUFFIX
     from datacopilot.report import render
     from datacopilot.store import DatasetStore, StoreLimits
 
@@ -286,6 +312,8 @@ def audit(
         if embedder is not None and not set(names) & registry_embedding_checks():
             raise ValueError("--embedder is given but no selected check uses embeddings")
         _check_threshold(similarity_threshold)
+        if require_cache_key and (embedder is None or settings.cache_key is None):
+            raise ValueError("--require-cache-key needs --embedder and DATACOPILOT_CACHE_KEY")
         gate = engine.parse_fail_on(
             _split_option("critical" if fail_on is None else fail_on, "--fail-on")
         )
@@ -334,6 +362,18 @@ def audit(
         from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, PipelineProvider
 
         created = _resolve_embedder(embedder, settings.allowed_licenses)
+        if getattr(created, "test_only", False):
+            typer.echo(
+                f"warning: embedder {embedder!r} is a test double that compares file bytes, not "
+                "pictures; its verdicts say nothing about look-alike images",
+                err=True,
+            )
+            if gate and not allow_test_embedder:
+                raise typer.BadParameter(
+                    f"{embedder!r} is test-only and is refused for gating; pass "
+                    "--allow-test-embedder or use --fail-on none",
+                    param_hint="--embedder",
+                )
         provider = PipelineProvider(
             created,
             batch_size=embed_batch if embed_batch is not None else DEFAULT_EMBED_BATCH,
@@ -356,7 +396,13 @@ def audit(
         allow_external_images=allow_external_images,
         require_local_images=require_local_images,
         dataset_dir=dataset.resolve(),
-        embedder=None if created is None else f"{created.model_id}@{created.revision[:12]}",
+        show_group_labels=show_group_labels,
+        embedder=None
+        if created is None
+        else (
+            f"{created.model_id}@{created.revision[:12]}"
+            + (TEST_ONLY_SUFFIX if getattr(created, "test_only", False) else "")
+        ),
         embeddings=provider,
         config=(
             CheckConfig()
@@ -407,6 +453,13 @@ def embed(
             help="Store the embeddings in dataset.dcp/embeddings (default: on).",
         ),
     ] = True,
+    require_cache_key: Annotated[
+        bool,
+        typer.Option(
+            "--require-cache-key",
+            help="Fail (exit 2) unless DATACOPILOT_CACHE_KEY is set.",
+        ),
+    ] = False,
 ) -> None:
     """Compute and store the embeddings of every image so that `audit --embedder` can reuse them.
 
@@ -422,7 +475,17 @@ def embed(
     from datacopilot.store import DatasetStore, StoreLimits
 
     settings = load_settings()
+    if require_cache_key and settings.cache_key is None:
+        raise typer.BadParameter(
+            "DATACOPILOT_CACHE_KEY is not set", param_hint="--require-cache-key"
+        )
     created = _resolve_embedder(embedder, settings.allowed_licenses)
+    if getattr(created, "test_only", False):
+        typer.echo(
+            f"warning: embedder {embedder!r} is a test double that compares file bytes, not "
+            "pictures",
+            err=True,
+        )
     provider = PipelineProvider(
         created,
         batch_size=embed_batch if embed_batch is not None else DEFAULT_EMBED_BATCH,

@@ -18,7 +18,7 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from datacopilot.core.errors import FormatError, LicenseError, ModelError
 from datacopilot.io import files
@@ -49,6 +49,11 @@ class ModelCard(BaseModel, frozen=True, extra="forbid"):
         dims: width of the embedding this model produces.
         family: selects the preprocessing and the feature head in ``embed/backends.py``.
         weights_sha256: ``file name -> sha256`` of every weight file; verified after download.
+        weights_bytes: ``file name -> size`` of the same files; checked before they are hashed, so
+            a hostile endpoint cannot make the audit hash an endless stream.
+        config_sha256: sha256 of ``config.json`` at the pinned revision; a changed configuration
+            (``auto_map`` entries, architecture) is refused, and the digest is part of the cache
+            identity.
     """
 
     model_id: str = Field(pattern=_ID.pattern)
@@ -60,6 +65,16 @@ class ModelCard(BaseModel, frozen=True, extra="forbid"):
     dims: int = Field(ge=1, le=MAX_DIMS)
     family: Family
     weights_sha256: dict[str, str] = Field(min_length=1, max_length=16)
+    weights_bytes: dict[str, int] = Field(min_length=1, max_length=16)
+    config_sha256: str = Field(pattern=_SHA256.pattern)
+
+    @model_validator(mode="after")
+    def _sizes_match_files(self) -> ModelCard:
+        if set(self.weights_bytes) != set(self.weights_sha256) or not all(
+            0 < n <= 64 * 1024**3 for n in self.weights_bytes.values()
+        ):
+            raise ValueError("weights_bytes must give a positive size for every weight file")
+        return self
 
     @field_validator("repo")
     @classmethod
@@ -92,6 +107,8 @@ _CARDS: tuple[ModelCard, ...] = (
         weights_sha256={
             "model.safetensors": "d73036b56966966d07975d696bde331762f37297e2f095de8cea0040c3aa0841"
         },
+        weights_bytes={"model.safetensors": 346345912},
+        config_sha256="f7ff4cfa73d2f70647dbf6950541ad25d73082d54c2e7e9bded160c7656b2a70",
     ),
     ModelCard(
         model_id="dinov2_small",
@@ -105,6 +122,8 @@ _CARDS: tuple[ModelCard, ...] = (
         weights_sha256={
             "model.safetensors": "ae1e99fcefd534ed978cdeb8326f08030c96e28b7a81ffcbc98a857c84d14be1"
         },
+        weights_bytes={"model.safetensors": 88249960},
+        config_sha256="1809f83e3bdb1609a501a610ad4a742f4fd8ae44d72ca4aa0df52d1f2ac8628d",
     ),
     ModelCard(
         model_id="siglip2_base",
@@ -118,6 +137,8 @@ _CARDS: tuple[ModelCard, ...] = (
         weights_sha256={
             "model.safetensors": "612923381c76ec5a9bed335d1c48827e3f2e506ac31b044b63b2031fadee6a0b"
         },
+        weights_bytes={"model.safetensors": 1500800904},
+        config_sha256="fe8b5fe6d5734360678fd71c11c21e1ea3364bd8598d34295d9206335973ffd7",
     ),
 )
 _BY_ID = {card.model_id: card for card in _CARDS}

@@ -112,17 +112,14 @@ def test_iter_knn_yields_ordered_blocks_that_cover_every_query() -> None:
     assert sum(len(b.indices) for b in blocks) == 100
 
 
-def test_a_passed_deadline_stops_before_the_next_block() -> None:
+def test_a_passed_deadline_yields_nothing_and_a_distant_one_changes_nothing() -> None:
     v = unit(100, seed=8)
     assert list(knn.iter_knn(v, v, 3, same_set=True, deadline=time.monotonic() - 1)) == []
-    seen = []
-    deadline = time.monotonic() + 3600
-    for block in knn.iter_knn(
-        v, v, 3, same_set=True, max_block_bytes=100 * 8 * 10, deadline=deadline
-    ):
-        seen.append(block.start)
-        deadline = 0.0  # no effect: the deadline was captured; just proves iteration works
-    assert seen == list(range(0, 100, 10))
+    far = time.monotonic() + 3600
+    blocks = list(knn.iter_knn(v, v, 3, same_set=True, max_block_bytes=100 * 8 * 10, deadline=far))
+    assert [b.start for b in blocks] == list(range(0, 100, 10))
+    expected = knn.knn(v, v, 3, same_set=True)
+    np.testing.assert_array_equal(np.concatenate([b.indices for b in blocks]), expected[0])
 
 
 def test_deadline_is_checked_between_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,7 +196,9 @@ class FakeIndexFlatIP:
     def search(self, x: np.ndarray, k: int):  # type: ignore[no-untyped-def,type-arg]
         with np.errstate(all="ignore"):
             sims = x @ self.data.T
-        order = np.argsort(-sims, axis=1, kind="stable")[:, :k][:, ::-1][:, ::-1]
+        # like the real library, break exact ties arbitrarily: here, the *higher* column first
+        flipped = np.argsort(-sims[:, ::-1], axis=1, kind="stable")[:, :k]
+        order = (sims.shape[1] - 1) - flipped
         return np.take_along_axis(sims, order, axis=1), order.astype(np.int64)
 
 
@@ -224,12 +223,19 @@ def test_faiss_results_equal_the_numpy_results_within_the_stated_tolerance(
     assert fast[0].dtype == np.int64 and fast[1].dtype == np.float32
 
 
-def test_faiss_self_exclusion_and_tie_order(fake_faiss: types.ModuleType) -> None:
+def test_faiss_self_exclusion_and_the_documented_tie_caveat(fake_faiss: types.ModuleType) -> None:
+    """The fake breaks ties the opposite way to NumPy. Rows are re-sorted by (similarity, index),
+    so within the returned set the order is the documented one; *which* tied columns make it into
+    the k-th place may differ from the NumPy backend, and the similarities do not."""
     basis = np.zeros((6, 4), dtype=np.float32)
-    basis[:, 0] = 1.0
-    idx, _ = knn.knn(basis, basis, 2, same_set=True, backend="faiss")
-    np.testing.assert_array_equal(idx[0], [1, 2])
-    np.testing.assert_array_equal(idx[4], [0, 1])
+    basis[:, 0] = 1.0  # every similarity is exactly 1.0: all columns tie
+    idx, sims = knn.knn(basis, basis, 2, same_set=True, backend="faiss")
+    exact_idx, exact_sims = knn.knn(basis, basis, 2, same_set=True, backend="numpy")
+    for row in range(6):
+        assert row not in idx[row]
+        assert list(idx[row]) == sorted(idx[row])  # re-sorted: lower index first among ties
+    np.testing.assert_allclose(sims, exact_sims, atol=knn.BACKEND_TOLERANCE)
+    assert not np.array_equal(idx, exact_idx)  # the caveat is real: the tied choice differs
 
 
 def test_auto_uses_faiss_only_for_large_inputs_when_it_is_installed(
@@ -294,3 +300,38 @@ def test_the_callers_arrays_are_not_modified_by_normalisation() -> None:
     before = v.copy()
     knn.knn(v, v, 2, same_set=True)
     np.testing.assert_array_equal(v, before)
+
+
+@pytest.mark.parametrize("extra", [1, 2, 7])
+def test_a_base_one_row_over_a_block_and_a_partial_last_block_match_the_reference(
+    extra: int,
+) -> None:
+    block = 16
+    n = block + extra
+    v = unit(n, d=12, seed=30 + extra)
+    budget = block * knn.BYTES_PER_CELL * n  # exactly `block` query rows per block
+    assert knn.block_rows(n, budget) == block
+    idx, sims = knn.knn(v, v, 4, same_set=True, max_block_bytes=budget)
+    ref_i, ref_s = reference(v, v, 4, True)
+    np.testing.assert_array_equal(idx, ref_i)
+    np.testing.assert_allclose(sims, ref_s, atol=1e-5)
+    blocks = list(knn.iter_knn(v, v, 4, same_set=True, max_block_bytes=budget))
+    assert [len(b.indices) for b in blocks] == [block, extra]
+
+
+def test_faiss_is_not_imported_after_the_tensor_library_on_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two OpenMP runtimes abort the process on macOS, so the NumPy index is used there."""
+    import sys
+
+    sentinel = types.ModuleType("faiss")
+    monkeypatch.setitem(sys.modules, "faiss", sentinel)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setitem(sys.modules, knn._TENSOR_LIB, types.ModuleType(knn._TENSOR_LIB))
+    assert knn._import_faiss() is None
+    v = unit(5)
+    with pytest.raises(ModelError, match="macOS"):
+        knn.knn(v, v, 1, same_set=True, backend="faiss")
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert knn._import_faiss() is sentinel

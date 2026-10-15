@@ -15,8 +15,12 @@
 - Built (differs from the first design): reading image bytes for embedding runs on the bounded
   thread pool (at most four files ahead of the model, `audit/pool.py`), and pixel decoding and
   preprocessing happen in the embedder, in the calling thread, one batch at a time under a
-  64-megapixel limit per image. A process pool for decoding is planned; it is not needed until
-  decoding, not the model, is the bottleneck.
+  64-megapixel limit per image. Memory of one embedding batch is the encoded bytes of the batch
+  (at most 256 MiB) plus one decoded image at a time (at most about 200 MB of pixels at the limit,
+  freed once the 224-pixel tensor exists) plus the model; images ahead of the model are at most four
+  files of at most 32 MiB. Every undecodable image of a batch is reported by one failing call and the
+  rest is retried once. A process pool for decoding is planned; it is not needed until decoding,
+  not the model, is the bottleneck.
 - Not planned any more for Phase 2: DuckDB table scans. The audit reads the tables through the
   bounded store reader and works on NumPy arrays ([ADR-0003](../adr/0003-repo-and-tooling.md)).
 - Built for embedders, planned for the rest: model inference runs in-process on the local GPU
@@ -69,8 +73,9 @@ file.
 | `DATACOPILOT_CACHE_DIR` | directory path (not empty, not `.`) | see storage table | built (hash cache) |
 | `DATACOPILOT_WORKERS` | integer 1 to 256 | `os.cpu_count()` | built (`audit`) |
 | `DATACOPILOT_CACHE_KEY` | secret, 16 to 1024 characters; out-of-band MAC key of the hash cache, never stored next to it; required to use the cache when `CI` is set | unset | built |
-| `CI` | any value except empty, `0`, `false`, `no`: marks a CI environment (cache needs the key; `--allow-external-images` needs `--allow-external-images-in-ci`) | unset | built (read, not prefixed) |
+| `CI` | any value except empty, `0`, `false`, `no`: marks a CI environment (cache needs the key; `--allow-external-images` needs `--allow-external-images-in-ci`). Only this variable is looked at: a runner that does not set it (a self-hosted job, a container without the variable) is treated as a laptop, where a private local secret beside the cache directory is used. Use `--require-cache-key` where the cache directory is shared or restored from elsewhere | unset | built (read, not prefixed) |
 | `DATACOPILOT_HASH_CACHE` | `true` or `false` | `true`; CI gates should set `false` | built (`audit`; `--hash-cache/--no-hash-cache` override it) |
+| `HF_ENDPOINT` (read by the Hub library), `DATACOPILOT_ALLOW_HF_ENDPOINT` | a model hub other than `https://huggingface.co` is refused while `CI` is set unless `DATACOPILOT_ALLOW_HF_ENDPOINT=1` confirms it (the Hub token travels to that host); `HF_HUB_DISABLE_TELEMETRY=1` is set by default | unset | built |
 | `DATACOPILOT_VLLM_URL` | `http(s)://host:port/v1` | unset (local inference) | planned |
 
 An invalid value exits with code 2 and one line on `stderr` before logging is configured

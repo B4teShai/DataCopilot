@@ -55,8 +55,13 @@ class FakeEmbedder:
         if self.fail_after is not None and len(self.calls) > self.fail_after:
             raise self.error or RuntimeError("boom")
         out = np.zeros((len(images), self.dims), dtype=np.float32)
+        bad = tuple(
+            (row, self.decode_errors[data])
+            for row, data in enumerate(images)
+            if data in self.decode_errors
+        )
+        if bad:
+            raise ImageDecodeError(bad[0][0], bad[0][1], bad)
         for row, data in enumerate(images):
-            if data in self.decode_errors:
-                raise ImageDecodeError(row, self.decode_errors[data])
             out[row] = self.vectors.get(data, random_unit(data, self.dims))
         return self.mangle(out) if self.mangle else out

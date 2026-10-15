@@ -176,6 +176,9 @@ class DatasetManifest(_Row):
     created_at: AwareDatetime
 
 
+TEST_ONLY_SUFFIX = "-test-only"
+"""Appended to ``AuditRun.embedder`` when the embedder is a test double, so every report format
+says so (the JSON and SARIF carry the label, the HTML header spells it out)."""
 _CHECK_NAME = r"^[a-z][a-z0-9_]{0,63}$"
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
@@ -249,7 +252,7 @@ class AuditRun(_Row):
     dataset_version: str = Field(pattern=r"^[0-9a-f]{32}$")
     started_at: AwareDatetime
     checks: tuple[str, ...]
-    embedder: str | None = None
+    embedder: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
     counts: Counts
     passed: bool
     fail_on: tuple[str, ...] = ()

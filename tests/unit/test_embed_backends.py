@@ -30,6 +30,8 @@ pytest.importorskip("PIL")
 PERMISSIVE = frozenset({"apache-2.0", "mit", "bsd-3-clause"})
 WEIGHTS = b"fake safetensors payload"
 WEIGHTS_SHA = hashlib.sha256(WEIGHTS).hexdigest()
+CONFIG_TEXT = "{}"
+CONFIG_SHA = hashlib.sha256(CONFIG_TEXT.encode()).hexdigest()
 
 
 def card(family: str = "dinov2", dims: int = 16, sha: str = WEIGHTS_SHA, **kw: Any) -> ModelCard:
@@ -43,6 +45,8 @@ def card(family: str = "dinov2", dims: int = 16, sha: str = WEIGHTS_SHA, **kw: A
         dims=dims,
         family=family,
         weights_sha256={"model.safetensors": sha},
+        weights_bytes={"model.safetensors": len(WEIGHTS)},
+        config_sha256=CONFIG_SHA,
     )
     base.update(kw)
     return ModelCard(**base)
@@ -79,6 +83,7 @@ class Fakes:
     snapshot_root: Path
     weights: bytes = WEIGHTS
     use_symlink = False
+    config: str = CONFIG_TEXT
     download_error: Exception | None = None
     feature_dims = 16
     output_style = "pooler"
@@ -125,6 +130,7 @@ def _captured_logs() -> Iterator[None]:
 def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> type[Fakes]:
     Fakes.cuda = Fakes.cuda_breaks = Fakes.use_symlink = False
     Fakes.calls, Fakes.weights, Fakes.download_error = [], WEIGHTS, None
+    Fakes.config = CONFIG_TEXT
     Fakes.snapshot_root, Fakes.feature_dims, Fakes.output_style = tmp_path / "hub", 16, "pooler"
 
     def snapshot_download(**kw: Any) -> str:
@@ -142,7 +148,7 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> type[Fakes]:
                 target.symlink_to(blob)  # the layout of the real Hugging Face cache
             else:
                 target.write_bytes(Fakes.weights)
-        (snap / "config.json").write_text("{}")
+        (snap / "config.json").write_text(Fakes.config)
         return str(snap)
 
     class AutoModel:
@@ -170,7 +176,15 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> type[Fakes]:
         (backends.TENSOR_LIB, lib),
     ):
         monkeypatch.setitem(sys.modules, name, module)
-    for var in ("HF_HUB_DOWNLOAD_TIMEOUT", "HF_HUB_ETAG_TIMEOUT", "HF_HUB_OFFLINE"):
+    for var in (
+        "HF_HUB_DOWNLOAD_TIMEOUT",
+        "HF_HUB_ETAG_TIMEOUT",
+        "HF_HUB_OFFLINE",
+        "HF_HUB_DISABLE_TELEMETRY",
+        "HF_ENDPOINT",
+        "CI",
+        "DATACOPILOT_ALLOW_HF_ENDPOINT",
+    ):
         monkeypatch.delenv(var, raising=False)
     return Fakes
 
@@ -198,7 +212,8 @@ def test_first_party_plugins_describe_their_cards() -> None:
 def test_create_touches_nothing_until_the_first_embed(fakes: type[Fakes]) -> None:
     emb = make()
     assert Fakes.calls == [] and emb.dims == 16 and emb.revision == "a" * 40
-    assert emb.weights == {"model.safetensors": WEIGHTS_SHA}
+    # the identity of the cache covers the weights and the configuration
+    assert emb.weights == {"model.safetensors": WEIGHTS_SHA, "config.json": CONFIG_SHA}
 
 
 def test_a_disallowed_license_is_refused_before_any_library_is_touched(
@@ -250,7 +265,7 @@ def test_the_model_loads_once_for_many_batches(fakes: type[Fakes]) -> None:
 def test_weights_that_do_not_match_the_pinned_hash_are_refused_before_loading(
     fakes: type[Fakes],
 ) -> None:
-    Fakes.weights = b"tampered"
+    Fakes.weights = b"X" * len(WEIGHTS)  # same size, other bytes: only the hash can tell
     with pytest.raises(ModelError, match="does not match") as err:
         make().embed([IMG])
     assert "model.safetensors" in str(err.value)
@@ -314,7 +329,8 @@ def test_loading_logs_the_weight_hashes_and_the_license(fakes: type[Fakes]) -> N
         make().embed([IMG])
     loaded = [e for e in logs if e["event"] == "model_loaded"][0]
     assert loaded["model_id"] == "fake_model" and loaded["weights_sha256"] == {
-        "model.safetensors": WEIGHTS_SHA
+        "model.safetensors": WEIGHTS_SHA,
+        "config.json": CONFIG_SHA,
     }
     shown = [e for e in logs if e["event"] == "model_license_shown"][0]
     assert shown["license"] == "Apache-2.0" and shown["gated"] is False
@@ -391,3 +407,58 @@ def test_png_fixture_helper_is_a_real_image() -> None:
 
     with Image.open(io.BytesIO(IMG)) as img:
         assert img.size == (40, 30)
+
+
+def test_a_changed_config_is_refused_before_loading(fakes: type[Fakes]) -> None:
+    Fakes.config = '{"auto_map": {"AutoModel": "evil.Model"}}'
+    with pytest.raises(ModelError, match=r"config\.json.*does not match"):
+        make().embed([IMG])
+    assert calls("from_pretrained") == []
+
+
+def test_a_weight_file_of_the_wrong_size_is_refused_before_it_is_hashed(
+    fakes: type[Fakes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Fakes.weights = WEIGHTS + b"x" * 1000
+    hashed: list[object] = []
+    monkeypatch.setattr(backends.models, "weight_hash", lambda p: hashed.append(p) or "x")
+    with pytest.raises(ModelError, match="size"):
+        make().embed([IMG])
+    assert hashed == [] and calls("from_pretrained") == []
+
+
+def test_telemetry_is_switched_off_for_the_hub_library(fakes: type[Fakes]) -> None:
+    make().embed([IMG])
+    assert os.environ["HF_HUB_DISABLE_TELEMETRY"] == "1"
+
+
+def test_a_user_who_already_set_telemetry_keeps_their_choice(
+    fakes: type[Fakes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HF_HUB_DISABLE_TELEMETRY", "0")
+    make().embed([IMG])
+    assert os.environ["HF_HUB_DISABLE_TELEMETRY"] == "0"
+
+
+@pytest.mark.parametrize("endpoint", ["https://hub.example.test", "http://localhost:9999"])
+def test_a_custom_hub_endpoint_is_refused_in_ci_unless_confirmed(
+    fakes: type[Fakes], monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("HF_ENDPOINT", endpoint)
+    with pytest.raises(ModelError, match="HF_ENDPOINT"):
+        make().embed([IMG])
+    assert calls("snapshot_download") == []
+    monkeypatch.setenv("DATACOPILOT_ALLOW_HF_ENDPOINT", "1")
+    assert make().embed([IMG]).shape == (1, 16)
+
+
+def test_the_default_endpoint_is_fine_in_ci_and_a_custom_one_is_fine_locally(
+    fakes: type[Fakes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("HF_ENDPOINT", "https://huggingface.co/")
+    assert make().embed([IMG]).shape == (1, 16)
+    monkeypatch.delenv("CI")
+    monkeypatch.setenv("HF_ENDPOINT", "https://hub.example.test")
+    assert make().embed([IMG]).shape == (1, 16)

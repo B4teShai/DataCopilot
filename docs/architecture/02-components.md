@@ -31,9 +31,11 @@ def ingest(path, format, output, group_by, name) -> None    # prints manifest.ve
 def export(dataset, format, output, strict) -> None         # prints the output directory
 def formats() -> None                                       # name, read/write, license, extra
 def audit(dataset, checks, fail_on, report, json, sarif, workers, hash_cache,
-          allow_external_images, embedder, embed_batch,
-          similarity_threshold, embedding_cache) -> None    # prints one result line; exit 0 / 1 / 2
-def embed(dataset, embedder, embed_batch, embedding_cache) -> None   # fills the cache; exit 0 / 1 / 2
+          allow_external_images, embedder, embed_batch, similarity_threshold, embedding_cache,
+          allow_test_embedder, require_cache_key,
+          show_group_labels) -> None                        # prints one result line; exit 0 / 1 / 2
+def embed(dataset, embedder, embed_batch, embedding_cache,
+          require_cache_key) -> None                        # fills the cache; exit 0 / 1 / 2
 ```
 
 Built commands: `ingest`, `export`, `formats`, `audit`, `embed` (exit codes in their `--help` and in

@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -219,7 +220,15 @@ class DatasetStore:
     def open(cls, path: str | Path, *, limits: StoreLimits | None = None) -> DatasetStore:
         """Open an existing dataset and validate its manifest (tables are read lazily)."""
         root = Path(path)
-        if not root.is_dir():
+        try:
+            info = os.lstat(root)
+        except OSError:
+            raise StoreError(f"{root} is not a dataset directory") from None
+        if stat.S_ISLNK(info.st_mode):
+            # a link can be re-pointed (or point outside the checkout) between runs; callers
+            # resolve the dataset's parent to find the images, so only a real directory is opened
+            raise StoreError(f"{root} is a symlink; pass the dataset directory itself")
+        if not stat.S_ISDIR(info.st_mode):
             raise StoreError(f"{root} is not a dataset directory")
         return cls(root, _read_manifest(root), limits)
 

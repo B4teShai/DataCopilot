@@ -15,14 +15,20 @@ Two independent signals, both CRITICAL because they make validation and test met
 
 Findings carry short ids, splits and base names only. Rules also include the shared fail-closed
 rules of ``embedtools.embedding_set`` (``embedder_missing``, ``embedder_error``,
-``images_not_embedded``, ``audit_incomplete``, ``embedding_cache_rejected``,
-``embedding_cache_mismatch``): images that could not be compared are never silently clean.
+``images_not_embedded`` (CRITICAL under a gate for any image not embedded except by time budget),
+``audit_incomplete``, ``embedding_cache_rejected``, ``embedding_cache_mismatch``,
+``embedding_cache_content_changed``, ``embedding_cache_unverified``,
+``embedding_pair_contradicted``): images that could not be compared are never silently clean.
+``images_without_group`` (INFO) counts images that cannot take part in ``group_overlap`` when only
+some images carry a ``group_id``; ``group_overlap`` shows a hashed ``group_ref`` and, only with
+``show_group_labels``, the cleaned label.
 ``k`` bounds the neighbours examined, so ``count`` of a cluster can understate a very large one.
 """
 
 from __future__ import annotations
 
 import time
+import unicodedata
 from collections import defaultdict
 
 import numpy as np
@@ -37,11 +43,17 @@ NAME = "leakage"
 _SPLIT_CODE = {"train": 0, "val": 1, "test": 2, "unassigned": 3}
 
 
+def group_key(label: str) -> str:
+    """Group labels compared case-insensitively, without surrounding space and in NFKC form, so
+    ``Cam1``, ``" cam1 "`` and a fullwidth ``Ｃam1`` are one group."""
+    return unicodedata.normalize("NFKC", label).casefold().strip()
+
+
 def _group_findings(ds: Dataset, ctx: CheckContext) -> list[Finding]:
     by_group: dict[str, list[Image]] = defaultdict(list)
     for image in ds.images:
-        if image.group_id:
-            by_group[image.group_id].append(image)
+        if image.group_id and group_key(image.group_id):
+            by_group[group_key(image.group_id)].append(image)
     findings: list[Finding] = []
     ungrouped = len(ds.images) - sum(len(v) for v in by_group.values())
     if by_group and ungrouped:
@@ -72,7 +84,11 @@ def _group_findings(ds: Dataset, ctx: CheckContext) -> list[Finding]:
                 image_id=members[0].image_id,
                 payload={
                     "rule": "group_overlap",
-                    "group": embedtools.safe_label(group_id),
+                    **(
+                        {"group": embedtools.safe_label(min(m.group_id or "" for m in members))}
+                        if ctx.show_group_labels
+                        else {}
+                    ),
                     "group_ref": embedtools.short_digest([group_id]),
                     "count": len(members),
                     "splits": embedtools.split_counts(members),
