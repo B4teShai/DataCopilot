@@ -21,9 +21,11 @@ BUILD: dict[str, Callable[[Path], Path]] = {
     "yolo": synth.build_yolo,
     "voc": synth.build_voc,
     "cvat_xml": synth.build_cvat_xml,
+    "label_studio": synth.build_label_studio,
     "imagefolder": synth.build_imagefolder,
 }
-DETECTION = ("coco", "yolo", "voc", "cvat_xml")
+DETECTION_ONLY = ("coco", "yolo", "voc", "cvat_xml")  # refuse classification datasets
+DETECTION = (*DETECTION_ONLY, "label_studio")  # detection sources
 
 _COCO_LOSS = {
     "annotations.is_crowd": 1,
@@ -50,16 +52,27 @@ _CVAT_LOSS = {
     "categories.attributes": 3,
     "images.source.id": 4,
 }
+_LS_LOSS = {
+    "annotations.source.from_name": 4,
+    "annotations.source.id": 4,
+    "annotations.source.to_name": 4,
+    "images.source.annotation": 4,
+    "images.source.id": 4,
+}
 # (source format, target format) -> dropped column counts for the synthetic fixtures
 MATRIX: dict[tuple[str, str], dict[str, int]] = {
     ("coco", "coco"): {},
     ("coco", "yolo"): _COCO_LOSS,
     ("coco", "voc"): _COCO_LOSS,
     ("coco", "cvat_xml"): _COCO_LOSS,
+    # Label Studio has no category ids: classes are numbered by sorted name, so only a COCO
+    # category that is not at its sorted position counts (bird is 3, but sorts first)
+    ("coco", "label_studio"): {**_COCO_LOSS, "categories.id": 1},
     ("yolo", "coco"): {},
     ("yolo", "yolo"): {},
     ("yolo", "voc"): {},
     ("yolo", "cvat_xml"): {},
+    ("yolo", "label_studio"): {"categories.id": 3},
     ("voc", "coco"): _VOC_LOSS,
     ("voc", "yolo"): _VOC_LOSS,
     ("voc", "voc"): {},
@@ -72,6 +85,17 @@ MATRIX: dict[tuple[str, str], dict[str, int]] = {
     ("cvat_xml", "yolo"): {**_CVAT_LOSS, "annotations.occluded": 4},
     ("cvat_xml", "voc"): _CVAT_LOSS,
     ("cvat_xml", "cvat_xml"): {},
+    ("cvat_xml", "label_studio"): {
+        **_CVAT_LOSS,
+        "annotations.occluded": 4,
+        "categories.id": 3,
+    },
+    ("voc", "label_studio"): {**_VOC_LOSS, "categories.id": 3},
+    ("label_studio", "coco"): _LS_LOSS,
+    ("label_studio", "yolo"): _LS_LOSS,
+    ("label_studio", "voc"): _LS_LOSS,
+    ("label_studio", "cvat_xml"): _LS_LOSS,
+    ("label_studio", "label_studio"): {},
 }
 
 
@@ -125,7 +149,7 @@ def test_cross_format_dropped_field_matrix(source: str, target: str, tmp_path: P
         assert box_a == pytest.approx(box_b, abs=1e-3)
 
 
-@pytest.mark.parametrize("target", DETECTION)
+@pytest.mark.parametrize("target", DETECTION_ONLY)
 def test_classification_data_cannot_be_written_as_detection_formats(
     target: str, tmp_path: Path
 ) -> None:

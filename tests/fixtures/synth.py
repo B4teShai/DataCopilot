@@ -173,6 +173,63 @@ def build_cvat_xml(root: Path) -> Path:
     return root
 
 
+def ls_rect(
+    label: str, box: tuple[float, float, float, float], size: tuple[int, int], rid: str
+) -> dict[str, object]:
+    """A Label Studio ``rectanglelabels`` result for a pixel box (percent of the original size)."""
+    x1, y1, x2, y2 = box
+    w, h = size
+    return {
+        "original_width": w,
+        "original_height": h,
+        "image_rotation": 0,
+        "value": {
+            "x": x1 * 100 / w,
+            "y": y1 * 100 / h,
+            "width": (x2 - x1) * 100 / w,
+            "height": (y2 - y1) * 100 / h,
+            "rotation": 0,
+            "rectanglelabels": [label],
+        },
+        "id": rid,
+        "from_name": "label",
+        "to_name": "image",
+        "type": "rectanglelabels",
+    }
+
+
+def build_label_studio(root: Path) -> Path:
+    """Label Studio JSON export: annotations/<split>.json (one task per image) plus
+    ``images/<name>``. Every task has one annotation with an ``id``, ``completed_by`` (user id) and
+    ``lead_time``; every result has an ``id``."""
+    by_split: dict[str, list[int]] = {}
+    for n, (_, _, _, split, _) in enumerate(IMAGES):
+        by_split.setdefault(split, []).append(n)
+    for split, members in by_split.items():
+        tasks = []
+        for n in members:
+            name, w, h, _, boxes = IMAGES[n]
+            write_png(root / "images" / name, w, h, n)
+            results = [
+                ls_rect(CATEGORIES[cat], (x1, y1, x2, y2), (w, h), f"r{n}_{i}")
+                for i, (cat, x1, y1, x2, y2) in enumerate(boxes)
+            ]
+            tasks.append(
+                {
+                    "id": n + 1,
+                    "data": {"image": f"images/{name}"},
+                    "annotations": [
+                        {"id": n + 10, "completed_by": 1, "lead_time": 1.5, "result": results}
+                    ],
+                    "predictions": [],
+                }
+            )
+        out = root / "annotations" / f"{split}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(tasks))
+    return root
+
+
 # ImageFolder fixture: split -> class -> image names
 FOLDER_IMAGES = [
     ("train", "cat", "c1.png", 40, 30),

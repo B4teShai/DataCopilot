@@ -42,6 +42,7 @@ yolo = "datacopilot.io.yolo:plugin"
 voc = "datacopilot.io.voc:plugin"
 imagefolder = "datacopilot.io.imagefolder:plugin"
 cvat_xml = "datacopilot.io.cvat:plugin"
+label_studio = "datacopilot.io.labelstudio:plugin"
 
 [project.entry-points."datacopilot.checks"]
 boxes = "datacopilot.audit.checks.boxes:plugin"

@@ -75,14 +75,28 @@ def require_task(ds_task: str, wanted: str, fmt: str) -> None:
         )
 
 
-def parse_json(data: bytes, name: str) -> object:
-    """Strict JSON: UTF-8, and no NaN/Infinity literals."""
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
+def parse_json(data: bytes, name: str, *, unique_keys: bool = False) -> object:
+    """Strict JSON: UTF-8, no NaN/Infinity literals and, with ``unique_keys``, no repeated keys
+    in one object (a repeated key would otherwise let the last value win silently)."""
 
     def reject(token: str) -> object:
         raise ValueError(token)
 
     try:
-        return json.loads(data.decode("utf-8"), parse_constant=reject)
+        return json.loads(
+            data.decode("utf-8"),
+            parse_constant=reject,
+            object_pairs_hook=_no_duplicate_keys if unique_keys else None,
+        )
     except (ValueError, UnicodeDecodeError):
         raise FormatError(f"{name} is not valid JSON") from None
     except RecursionError:

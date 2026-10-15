@@ -359,7 +359,14 @@ def test_formats_lists_every_builtin_format_with_capabilities(
     assert run(monkeypatch, "formats") == 0
     out, err = capsys.readouterr()
     rows = [line.split("\t") for line in out.splitlines()]
-    assert [r[0] for r in rows] == ["coco", "cvat_xml", "imagefolder", "voc", "yolo"]
+    assert [r[0] for r in rows] == [
+        "coco",
+        "cvat_xml",
+        "imagefolder",
+        "label_studio",
+        "voc",
+        "yolo",
+    ]
     assert all(r[1] == "read,write" and r[2] == "Apache-2.0" for r in rows)
     assert logs(err) == []
 
