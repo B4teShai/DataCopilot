@@ -48,6 +48,12 @@ once a release is tagged.
 - `[embed]` extra declared (`pillow`, `safetensors`, `huggingface-hub`, `transformers`, `faiss-cpu`
   and the tensor library); the core install is unchanged. `THIRD_PARTY_MODELS.md` lists the three models.
 
+- Embedding cache (`embed/cache.py`): per-model directory of Parquet shards plus a manifest
+  (identity, dataset version, weight hashes, shard sha256 and an HMAC); bounded from the Parquet
+  footer before any row is decoded, digest verified on the bytes that are parsed, atomic and
+  resumable, `float16` or `float32` storage with a documented rounding. A forged, truncated, stale or
+  malformed shard is ignored and counted by reason, never trusted.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

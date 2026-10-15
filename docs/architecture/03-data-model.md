@@ -2,8 +2,8 @@
 
 ![Data model](../diagrams/png/data-model.png)
 
-`Category`, `Image`, `Annotation`, `DatasetManifest`, `AuditRun` and `Finding` are built; `Proposal`
-and `Embedding` are planned. Models are Pydantic v2 in `core/schema.py`; tables are Parquet with explicit Arrow schemas
+`Category`, `Image`, `Annotation`, `DatasetManifest`, `AuditRun` and `Finding` are built, and the
+embedding cache (`Embedding`) is built as a store of verified shards; `Proposal` is planned. Models are Pydantic v2 in `core/schema.py`; tables are Parquet with explicit Arrow schemas
 ([ADR-0006](../adr/0006-dataset-format.md)). `?` after a type means nullable.
 
 ## Entities
@@ -127,16 +127,28 @@ AuditRun`, `image_id → Image` (nullable), `ann_id → Annotation` (nullable).
 
 ### Embedding
 
-Table `embeddings/<model_id>@<model_revision>.parquet`. Composite primary key:
-(`image_id`, `model_id`, `model_revision`). Foreign key: `image_id → Image`.
+Cache directory `embeddings/<model_id>@<model_revision>/` holding `manifest.json` and one or more
+`shard-<32 hex>.parquet` files ([ADR-0007](../adr/0007-embedding-cache-and-index.md)). The logical
+key is (`image_id`, `model_id`, `model_revision`); the model identity lives in the manifest, so a
+shard row has only two columns. Foreign key: `image_id → Image`.
+
+Shard columns (Parquet, zstd, one row group):
 
 | Field | Type | Nullable | Meaning |
 |---|---|---|---|
-| `image_id` | str | no | Image |
-| `model_id` | str | no | Embedder registry id |
-| `model_revision` | str | no | Weight revision |
-| `vector` | fixed-size list[float32] | no | Length `dims`, L2-normalised |
-| `dims` | int | no | Vector length |
+| `image_id` | str (16 hex) | no | Image; unique within the cache |
+| `vector` | list<float16 \| float32> | no | Exactly `dims` finite values, L2 norm 1 (within 1e-3 for float16, rounding documented in ADR-0007) |
+
+Manifest (`manifest.json`, at most 4 MiB, strict schema):
+
+| Field | Meaning |
+|---|---|
+| `format` | `1` |
+| `model_id`, `revision`, `dims`, `dtype` | The identity the vectors belong to; `dtype` is `float16` or `float32` |
+| `dataset_version` | `manifest.version` the vectors were computed for; a cache for another version is ignored (stale) |
+| `weights` | `file -> sha256` of the model weights, recorded for provenance (empty for a model without weights) |
+| `shards` | `[{name, rows, bytes, sha256}]`, at most 2,048 entries, at most 16,384 rows each, at most 2,000,000 rows in all |
+| `mac` | HMAC-SHA256 over the canonical JSON of the other fields (covers every shard digest), keyed by a secret and bound to the identity and the dataset version |
 
 ## Relations
 
@@ -157,10 +169,10 @@ Table `embeddings/<model_id>@<model_revision>.parquet`. Composite primary key:
 
 ## Invariants
 
-Invariants 1 to 6, 9, 10, 13 and 15 are built and tested (`tests/unit/test_schema_invariants.py`,
+Invariants 1 to 6, 9, 10, 13, 14 and 15 are built and tested (`tests/unit/test_schema_invariants.py`, `tests/unit/test_embed_cache.py`,
 `tests/unit/test_store.py`, `tests/unit/test_audit_schema.py`, `tests/unit/test_cli_audit.py`,
 `tests/golden/`); invariant 1 is established by the readers, which
-compute `image_id` from file bytes. Invariants 7, 8, 11, 12 and 14 belong to planned entities.
+compute `image_id` from file bytes. Invariants 7, 8, 11 and 12 belong to planned entities.
 
 1. `Image.image_id == sha256(file bytes).hexdigest()[:16]` for every row; moving or
    renaming the file does not change it.
@@ -186,7 +198,9 @@ compute `image_id` from file bytes. Invariants 7, 8, 11, 12 and 14 belong to pla
 12. With `split --by-group`, no `group_id` value occurs in more than one split.
 13. `Finding.severity` is one of `CRITICAL`, `WARN`, `INFO`; `AuditRun.counts` equals the
     count of findings per severity.
-14. An `Embedding` row's `vector` has length `dims` and L2 norm 1 ± 1e-5.
+14. An embedding's `vector` has length `dims`, only finite values and L2 norm 1 (± 1e-3 stored,
+    checked to ± 1e-2 on read); a shard that violates this, whose digest differs from the manifest or
+    whose manifest fails its MAC is ignored and counted, never used.
 15. `AuditRun.run_id` equals the `request_id` of the log records emitted by that run.
 
 ## On-disk layout
@@ -204,7 +218,7 @@ dataset.dcp/
       annotations.parquet
       categories.parquet
   embeddings/
-    <model_id>@<model_revision>.parquet     # Embedding rows; cache across versions
+    <model_id>@<model_revision>/            # embedding cache (built): manifest.json + shard-*.parquet
   audits/
     <run_id>.json                           # AuditRun with findings
   proposals/
@@ -225,7 +239,8 @@ dataset.dcp/
   uncompressed size exceeds `DATACOPILOT_MAX_TABLE_BYTES` (default 4 GiB), or its schema
   differs from the expected Arrow schema ([06-cross-cutting.md](06-cross-cutting.md)).
 - Embeddings, audits and proposals are not part of the version and are not copied into
-  `versions/`. `audits/<run_id>.json` (built) is written atomically (temporary file, fsync,
+  `versions/`. Embeddings are nevertheless bound to the dataset version they were computed for (see
+  the manifest), because the cache can be edited by whoever can edit the dataset directory. `audits/<run_id>.json` (built) is written atomically (temporary file, fsync,
   rename), never overwritten, named by a lowercase UUID only, read back with a 256 MiB cap, and
   refused if `audits/` is a symlink.
 - The JSON report is the same document: sorted keys, ASCII only. Determinism contract: two audits of
