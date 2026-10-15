@@ -27,21 +27,30 @@ architecture documents mark every element as built or planned.
 
 ## Install
 
-Requires Python 3.10 or newer. The package is not published yet; until it is, install from source with
-[`uv`](https://docs.astral.sh/uv/) or from a wheel you built (see the
-[release runbook](docs/engineering/release.md)).
+Requires Python 3.10 or newer.
 
 ```bash
-git clone <repository-url> datacopilot
-cd datacopilot
+pip install datacopilot
+datacopilot --version
+datacopilot doctor
+```
+
+> **Release status:** not yet published to PyPI. Until it is, build a wheel from a checkout and install that
+> (see the [release runbook](https://github.com/B4teShai/DataCopilot/blob/main/docs/engineering/release.md)), or work from source as below.
+
+From a checkout, with [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+git clone https://github.com/B4teShai/DataCopilot.git
+cd DataCopilot
 uv sync
-uv run datacopilot --version
 uv run datacopilot formats
 uv run datacopilot doctor
 ```
 
-`uv sync` installs the core dependencies only (`typer`, `click`, `pydantic`, `structlog`,
-`pyarrow`). No PyTorch, no CUDA, no database server.
+The package itself depends on `click`, `jinja2`, `numpy`, `pyarrow`, `pydantic`, `structlog` and
+`typer`; `uv sync` also installs the development group (test, lint and type-check tools). No PyTorch, no
+CUDA, no database server; the embedding extra (`pip install "datacopilot[embed]"`) adds the models.
 
 ## Usage (built)
 
@@ -60,7 +69,7 @@ are counted when a CVAT or Label Studio export is read (`ingest --strict` fails 
 validated: paths cannot leave the dataset directory, XML with a
 DOCTYPE is rejected, boxes must lie inside their image, and identical image content is
 reported by file name. What each conversion loses is listed in
-[the loss matrix](docs/architecture/03-data-model.md#format-mapping-and-loss-matrix).
+[the loss matrix](https://github.com/B4teShai/DataCopilot/blob/main/docs/architecture/03-data-model.md#format-mapping-and-loss-matrix).
 
 Exit codes: `0` success, `1` the command ran and failed (unreadable or invalid input, unknown
 format, output exists, `--strict` with dropped fields), `2` usage or configuration error.
@@ -76,7 +85,7 @@ report = dc.export(ds, "label_studio", "shop_ls")
 print(ds.manifest.image_count, run.passed, sorted(report.dropped))
 ```
 
-The [tutorial](docs/tutorial.md) runs every command and script above against a generated dataset (it is
+The [tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md) runs every command and script above against a generated dataset (it is
 executed by `tests/docs/test_tutorial.py`); the documentation site (`uv run --group docs mkdocs build
 --strict`) has a user guide, the generated CLI reference and the design documents.
 
@@ -110,7 +119,7 @@ against a sha256 before they are loaded) or `hash`, a dependency-free byte-level
 tests and demos. `--checks all` adds `near_duplicates`, `leakage` and `outliers` only when an
 embedder is given. `--embed-batch N`, `--similarity-threshold X` (default 0.95) and
 `--no-embedding-cache` tune the run. Vectors are cached in `dataset.dcp/embeddings/` as verified,
-authenticated shards (see [ADR-0007](docs/adr/0007-embedding-cache-and-index.md)); in CI the cache
+authenticated shards (see [ADR-0007](https://github.com/B4teShai/DataCopilot/blob/main/docs/adr/0007-embedding-cache-and-index.md)); in CI the cache
 needs `DATACOPILOT_CACHE_KEY`, and a cache that cannot be checked is never trusted. The check fails
 closed: images without an embedding, an embedder error or a budget hit are findings, never silence.
 The model license must be in `DATACOPILOT_ALLOWED_LICENSES` (default `Apache-2.0,MIT,BSD-3-Clause`).
@@ -137,25 +146,20 @@ an untrusted ref; when `CI` is set the cache is disabled unless an out-of-band `
 is provided. Settings: `DATACOPILOT_CACHE_KEY`, `DATACOPILOT_WORKERS`, `DATACOPILOT_CACHE_DIR`,
 `DATACOPILOT_HASH_CACHE`. Images whose real path is outside the dataset's parent directory are
 not opened unless `--allow-external-images` is given. The HTML report has no script and no remote
-resources; see [the security table](docs/architecture/06-cross-cutting.md#security-and-threat-model).
+resources; see [the security table](https://github.com/B4teShai/DataCopilot/blob/main/docs/architecture/06-cross-cutting.md#security-and-threat-model).
 
 Benchmark (`benchmarks/audit_cpu.py`, 50,000 images and 500,000 boxes, 64 KiB files, 12 cores): 37.6 s
-end to end, 1.35 GB peak RSS; details in [the overview](docs/architecture/01-overview.md).
+end to end, 1.35 GB peak RSS; details in [the overview](https://github.com/B4teShai/DataCopilot/blob/main/docs/architecture/01-overview.md).
 
 ## Planned usage
 
 Nothing in this section runs today. It shows the intended command line and Python API so
 that the design can be reviewed against concrete calls.
 
-### Planned: install extras
+### Planned: more extras
 
-```bash
-pip install datacopilot                 # core: CPU-only, no torch
-pip install "datacopilot[embed]"        # DINOv2 / SigLIP2 embeddings (built)
-pip install "datacopilot[vlm]"          # Grounding DINO, Qwen3-VL (transformers or a vLLM endpoint)
-pip install "datacopilot[sam3]"         # SAM 3 loader; the user accepts the SAM License on Hugging Face
-pip install "datacopilot[cleanlab]"     # Cleanlab backend for the label-noise check (AGPL-3.0: using it puts your combined work under AGPL-3.0)
-```
+Extras for the proposal workflow (vision-language models, SAM 3, the Cleanlab label-noise backend) will be
+published when those features exist; today the only extra is `embed`.
 
 ### Planned: command line
 
@@ -183,22 +187,22 @@ ds2 = props.apply(ds, status="accepted")  # a new dataset version with lineage; 
 ## Architecture
 
 DataCopilot is a CLI and a Python library over one on-disk dataset format (`dataset.dcp/`,
-Parquet plus DuckDB, images referenced by path or URI and never copied). Model-backed
+Parquet tables and a manifest, images referenced by path or URI and never copied). Model-backed
 features live behind optional extras and plugins so the core stays CPU-only and
 Apache-2.0 clean.
 
 The diagrams (system context, containers, components, data model, flows) are in
-[docs/diagrams/png/](docs/diagrams/png/).
+[docs/diagrams/png/](https://github.com/B4teShai/DataCopilot/blob/main/docs/diagrams/png/).
 
 - Architecture documents (C4 views, data model, flows, runtime, cross-cutting concerns):
-  [docs/architecture/README.md](docs/architecture/README.md)
+  [docs/architecture/README.md](https://github.com/B4teShai/DataCopilot/blob/main/docs/architecture/README.md)
 - Engineering guide (standards, testing, errors and logging, dependencies and licensing,
-  workflow): [docs/engineering/README.md](docs/engineering/README.md)
-- Decision records: [docs/adr/](docs/adr/)
-- Third-party model licenses: [THIRD_PARTY_MODELS.md](THIRD_PARTY_MODELS.md)
+  workflow): [docs/engineering/README.md](https://github.com/B4teShai/DataCopilot/blob/main/docs/engineering/README.md)
+- Decision records: [docs/adr/](https://github.com/B4teShai/DataCopilot/blob/main/docs/adr/)
+- Third-party model licenses: [THIRD_PARTY_MODELS.md](https://github.com/B4teShai/DataCopilot/blob/main/THIRD_PARTY_MODELS.md)
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Model weights are never
+Apache-2.0. See [LICENSE](https://github.com/B4teShai/DataCopilot/blob/main/LICENSE) and [NOTICE](https://github.com/B4teShai/DataCopilot/blob/main/NOTICE). Model weights are never
 redistributed; each model's license is listed in `THIRD_PARTY_MODELS.md` and shown by the
 model registry before first use.

@@ -773,7 +773,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'embed'", specifier = ">=5.19" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["cleanlab", "cvat", "embed", "fiftyone", "sam3", "vlm"]
+provides-extras = ["embed"]
 
 [package.metadata.requires-dev]
 dev = [

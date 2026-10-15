@@ -78,8 +78,8 @@ file.
 | `HF_ENDPOINT` (read by the Hub library), `DATACOPILOT_ALLOW_HF_ENDPOINT` | a model hub other than `https://huggingface.co` is refused while `CI` is set unless `DATACOPILOT_ALLOW_HF_ENDPOINT=1` confirms it (the Hub token travels to that host); `HF_HUB_DISABLE_TELEMETRY=1` is set by default | unset | built |
 | `DATACOPILOT_VLLM_URL` | `http(s)://host:port/v1` | unset (local inference) | planned |
 
-An invalid value exits with code 2 and one line on `stderr` before logging is configured
-(built behaviour for the two existing variables).
+An invalid value of any `DATACOPILOT_*` variable exits with code 2 and one line on `stderr` before logging
+is configured, for every command except `doctor`, which reports the problem in its own output (exit 2).
 
 ## Secrets
 

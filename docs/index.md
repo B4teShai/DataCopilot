@@ -6,7 +6,7 @@ they touch a label.
 
 **Built and tested in 0.1:** `ingest` and `export` between COCO, YOLO, Pascal VOC, CVAT for images
 1.1 XML, Label Studio JSON and ImageFolder, with a count of every field a conversion cannot carry;
-`audit` with eight checks (integrity, exact duplicates, class imbalance, box sanity, and with an
+`audit` with seven checks (integrity, exact duplicates, class imbalance, box sanity, and with an
 embedder near-duplicates, split leakage and outliers) and reports in HTML, JSON and SARIF; `embed`;
 `doctor`; and a three-function Python API. Label noise, split, propose, review and apply are not
 implemented yet: see the [architecture](architecture/README.md) for what is planned.

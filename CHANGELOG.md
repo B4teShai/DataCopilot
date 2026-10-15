@@ -172,6 +172,13 @@ First release candidate. Before 1.0 a minor version may break the public API.
 
 ### Changed
 
+- Release readiness: the empty extras (`vlm`, `sam3`, `cleanlab`, `fiftyone`, `cvat`) are no longer published
+  (`embed` is the only extra); the README is correct on the package index (absolute links, `pip install
+  datacopilot`, one marked `Release status` line that the release commit removes and that
+  `scripts/check_release_tag.py` refuses to tag with), and tests keep it that way; the tag checker rejects
+  leading zeros; the runbook verifies the published files with `pip download` and the recorded digests; docs
+  drift fixed (seven checks, the core packages, `uv sync`, the settings error behaviour) and the shared
+  system-context diagram is generated from a source in this repository.
 - `audit` leaves rows whose provenance is `model` out of every check unless `--include-model-annotations` (API:
   `include_model_annotations=True`) is given, and reports the number in the summary, the HTML report and a
   note on standard error. `AuditRun.raise_for_gate()` and `GateFailedError` let API callers turn a failed

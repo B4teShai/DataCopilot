@@ -8,14 +8,14 @@ framework: `click`, `jinja2`, `numpy`, `pyarrow`, `pydantic`, `structlog` and `t
 pip install datacopilot
 ```
 
-Until a release is published, install a wheel you built yourself (see the
-[release runbook](../engineering/release.md)) or work from a checkout with
-[`uv`](https://docs.astral.sh/uv/):
+> **Release status:** not yet published to PyPI. Until it is, install a wheel you built yourself (see the
+> [release runbook](../engineering/release.md)) or work from a checkout with
+> [`uv`](https://docs.astral.sh/uv/):
 
 <!-- skip: needs a checkout and network access -->
 ```bash
-git clone <repository-url> datacopilot
-cd datacopilot
+git clone https://github.com/B4teShai/DataCopilot.git
+cd DataCopilot
 uv sync
 uv run datacopilot --version
 ```
@@ -31,8 +31,8 @@ uv run datacopilot --version
 pip install "datacopilot[embed]"
 ```
 
-The extras `vlm`, `sam3`, `cleanlab`, `fiftyone` and `cvat` are declared but empty: the features
-behind them are not built yet.
+`embed` is the only extra. Extras for the proposal workflow (vision-language models, SAM 3, the Cleanlab
+backend) will be published when those features exist.
 
 ## Check the installation
 

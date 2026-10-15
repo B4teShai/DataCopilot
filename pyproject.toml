@@ -63,11 +63,6 @@ embed = [
   "faiss-cpu>=1.15",
   "torch>=2.14",
 ]
-vlm = []
-sam3 = []
-cleanlab = []
-fiftyone = []
-cvat = []
 
 [project.entry-points."datacopilot.formats"]
 coco = "datacopilot.io.coco:plugin"

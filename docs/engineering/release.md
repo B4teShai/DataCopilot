@@ -77,8 +77,12 @@ benchmarks, plans, assistant or editor configuration directories, `.env` files, 
 
 ## Cut the release
 
-1. Update `CHANGELOG.md` (move the entries of `Unreleased` under the new version and date) and set
-   `__version__` in `src/datacopilot/__init__.py`. Commit as `chore(release): X.Y.Z`.
+1. Update `CHANGELOG.md` (move the entries of `Unreleased` under the new version and date), set
+   `__version__` in `src/datacopilot/__init__.py` and **remove the `> **Release status:**` line from
+   `README.md` and `docs/guide/install.md`** (they say the package is not published; the README is the
+   package's long description, so the tagged commit must not carry the line, and
+   `scripts/check_release_tag.py` refuses a tag while the README still does). Commit as
+   `chore(release): X.Y.Z`.
 2. Wait for CI (`ci.yml`) to be green on that commit.
 3. **Ask for approval to publish.** Then tag the commit: `git tag -s vX.Y.Z` and push the tag. The
    tag must equal `__version__` (the workflow refuses a mismatch).
@@ -86,8 +90,11 @@ benchmarks, plans, assistant or editor configuration directories, `.env` files, 
    prints their SHA-256 digests, and uploads them as one artifact. The `publish` job, which alone has
    `id-token: write`, runs in the `pypi` environment, waits for a reviewer, downloads that exact
    artifact and publishes it with trusted publishing.
-5. Verify from a clean environment: `pip install datacopilot==X.Y.Z` then `datacopilot doctor`.
-   Compare the installed files' digests with the recorded ones.
+5. Verify from a clean environment: `pip install datacopilot==X.Y.Z` then `datacopilot doctor`. Download
+   what the index serves and compare it with the digests recorded in the build summary:
+   `pip download datacopilot==X.Y.Z --no-deps --only-binary :all: -d check/` (the wheel) and
+   `pip download datacopilot==X.Y.Z --no-deps --no-binary :all: -d check/` (the sdist), then
+   `shasum -a 256 check/*`; both must equal the recorded wheel and sdist digests.
 
 ## If something is wrong
 
