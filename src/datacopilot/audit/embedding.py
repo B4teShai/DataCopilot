@@ -87,7 +87,7 @@ forged vector is far from this bound: the cosine of two unrelated images is belo
 disagreeing sample discards the whole cache for the run."""
 Result = tuple[str, NDArray[np.float32] | None, str | None, str | None]
 """``(image_id, vector, reason, full sha256)``: a vector and a digest, or a reason."""
-_DECODE_REASONS = frozenset({"decode_failed", "too_many_pixels"})
+_DECODE_REASONS = frozenset({"decode_failed", "too_many_pixels", "multi_frame"})
 
 
 @dataclass(frozen=True)
@@ -101,6 +101,7 @@ class EmbeddingSet:
         missing: ``reason -> sorted image ids`` without a vector (``remote``, ``outside_root``,
             ``unsafe_path``, ``file_missing``, ``not_a_regular_file``, ``unreadable``,
             ``file_too_large``, ``content_changed``, ``decode_failed``, ``too_many_pixels``,
+            ``multi_frame``,
             ``zero_vector``, ``embedder_error``, ``time_budget``).
         incomplete: ``("time_budget", embedded, total)`` when the time budget ended the run.
         error: type name of the exception that stopped the embedder, or ``InvalidEmbedderOutput``.
@@ -112,6 +113,8 @@ class EmbeddingSet:
         cache_hits: vectors taken from the cache and kept.
         spot_checked: cache hits that were re-embedded and compared.
         spot_mismatched: of those, how many disagreed (the cache was then discarded).
+        cached_ids: images whose vector came from the (verified) cache rather than from the model
+            in this run; the checks re-embed the members of the pairs they report or nearly report.
         cache_content_changed: cached hits whose image file no longer hashes to the digest stored
             with the vector (the whole cache was then discarded and recomputed).
         cache_unverified: reason code (``too_few_verifiable``) when too few sampled hits could be
@@ -135,6 +138,7 @@ class EmbeddingSet:
     cache_hits: int = 0
     spot_checked: int = 0
     spot_mismatched: int = 0
+    cached_ids: frozenset[str] = frozenset()
     cache_content_changed: int = 0
     cache_unverified: str | None = None
     cache_unwritable: bool = False
@@ -147,7 +151,11 @@ class EmbeddingSet:
 
 @runtime_checkable
 class EmbeddingProvider(Protocol):
-    """What a check needs: the embeddings of the audited dataset, computed at most once."""
+    """What a check needs: the embeddings of the audited dataset, computed at most once.
+
+    A provider may also offer ``fresh_vectors(ds, ctx, image_ids)``, which embeds the named
+    images again without the cache (see ``PipelineProvider``); checks use it when it exists.
+    """
 
     def get(self, ds: Dataset, ctx: CheckContext) -> EmbeddingSet: ...
 
@@ -399,6 +407,7 @@ class PipelineProvider:
                 matrix[:] = 0.0
                 hits = 0
 
+        cached_ids = frozenset(ids_sorted[int(s)] for s in np.flatnonzero(have))
         unwritable = self._embed_missing(
             ctx, cache, by_id, ids_sorted, matrix, have, missing, state, deadline
         )
@@ -422,6 +431,7 @@ class PipelineProvider:
             cache_hits=hits,
             spot_checked=sampled,
             spot_mismatched=mismatched,
+            cached_ids=cached_ids,
             cache_content_changed=changed,
             cache_unverified=unverified,
             cache_unwritable=unwritable,
@@ -440,6 +450,24 @@ class PipelineProvider:
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
         return result
+
+    def fresh_vectors(
+        self, ds: Dataset, ctx: CheckContext, image_ids: list[str]
+    ) -> dict[str, NDArray[np.float32]]:
+        """Canonical vectors of the named images computed now, bypassing the cache.
+
+        Used to re-check the pairs a check reports or nearly reports. Images that cannot be read
+        or embedded are left out (the caller keeps the cached decision for those); an embedder
+        failure returns what was computed so far. Bounded by the caller (a few hundred images).
+        """
+        by_id = {image.image_id: image for image in ds.images}
+        images = [by_id[i] for i in image_ids if i in by_id]
+        deadline = time.monotonic() + ctx.config.max_check_seconds
+        out: dict[str, NDArray[np.float32]] = {}
+        for image_id, vector, _reason, _digest in self._stream(images, ctx, deadline, _State()):
+            if vector is not None:
+                out[image_id] = vector
+        return out
 
     def _verify_files(
         self,

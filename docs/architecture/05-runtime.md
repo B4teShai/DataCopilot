@@ -33,7 +33,7 @@
 |---|---|---|
 | Developer laptop (CPU) | the CLI, core library, format adapters, CPU checks, report generator, a local `dataset.dcp/` | Python ≥ 3.10, core wheel |
 | GPU machine | the same plus `[embed]`, `[vlm]`, `[sam3]`; embedders, proposers; model cache | 8 GB VRAM for ViT-B embeddings and Grounding DINO base; 16–24 GB for SAM 3; Qwen3-VL-8B ~16 GB F16 or ~5 GB Q4; `[sam3]` needs Python ≥ 3.12, PyTorch ≥ 2.7, CUDA ≥ 12.6 |
-| CI runner | `datacopilot audit --fail-on …` as a gate, `report.sarif` uploaded to code scanning; no extras unless embeddings are precomputed | core wheel, read access to `dataset.dcp/` and images |
+| CI runner | `datacopilot audit --fail-on …` as a gate, `report.sarif` uploaded to code scanning; the embedding checks need `[embed]` and the model even with a precomputed cache, because every run re-embeds a sample to verify the cache (without the images or the model the cache is not trusted and the gate fails closed) | core wheel, read access to `dataset.dcp/` and images; `DATACOPILOT_CACHE_KEY` for the cache |
 | Object storage (S3, GCS, Azure) | image files referenced by URI; optionally the `dataset.dcp/` directory itself | `fsspec` with the matching filesystem package |
 | vLLM endpoint (optional) | Qwen3-VL served by vLLM; receives image crops, returns text | network reachability; an API key if the server requires one |
 | Hugging Face Hub | source of weights; gated repos require the user's token | outbound HTTPS |
@@ -80,7 +80,7 @@ An invalid value exits with code 2 and one line on `stderr` before logging is co
 
 | Secret | Where it may live | Where it must never appear |
 |---|---|---|
-| Hugging Face token (gated weights) | `HF_TOKEN` or `DATACOPILOT_HF_TOKEN` in the environment; the Hub's own credential store | command-line arguments, `manifest.json`, reports, logs, proposals, `source` dicts |
+| Hugging Face token (gated weights) | `HF_TOKEN` in the environment, read by the Hub library itself (datacopilot never reads or logs it); `DATACOPILOT_HF_TOKEN` is planned | command-line arguments, `manifest.json`, reports, logs, proposals, `source` dicts |
 | CVAT credentials | `DATACOPILOT_CVAT_TOKEN` (or the SDK's own auth) | same |
 | vLLM API key | `DATACOPILOT_VLLM_API_KEY` | same |
 | Object storage credentials | the cloud SDK's standard environment or instance role | same |

@@ -17,11 +17,12 @@ from __future__ import annotations
 import io
 import warnings
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
+from datacopilot.core.errors import ModelError
 from datacopilot.embed.protocol import ImageDecodeError
 
 MAX_DECODE_PIXELS = 64_000_000
@@ -34,15 +35,83 @@ _FORMATS = ("JPEG", "PNG", "GIF", "BMP")
 _EXIF_ORIENTATION = 0x0112
 
 
+_INSTALL = 'pip install "datacopilot[embed]"'
+_BACKGROUND = (255, 255, 255)
+"""Colour under transparent pixels: alpha is composited on white, so what an image hides under
+alpha 0 can neither change nor carry an embedding."""
+_MODES = frozenset(
+    {
+        "1",
+        "L",
+        "P",
+        "RGB",
+        "RGBA",
+        "LA",
+        "PA",
+        "RGBa",
+        "La",
+        "CMYK",
+        "YCbCr",
+        "I",
+        "I;16",
+        "I;16L",
+        "I;16B",
+        "F",
+    }
+)
+_SIXTEEN_BIT = frozenset({"I", "I;16", "I;16L", "I;16B"})
+_ALPHA_MODES = frozenset({"RGBA", "LA", "PA", "RGBa", "La"})
+
+
+def _pil() -> Any:
+    """The ``PIL`` package, or a ``ModelError`` that names the extra (never a bare ImportError)."""
+    try:
+        import PIL.Image
+        import PIL.ImageOps
+    except ImportError:
+        raise ModelError(f"image decoding needs Pillow: {_INSTALL}") from None
+    return PIL
+
+
+def _to_rgb(img: Any, index: int) -> NDArray[np.uint8]:
+    """Pixels of a loaded image as ``(h, w, 3)`` uint8 without silent clipping or lost alpha.
+
+    16-bit integer images (Pillow's ``I;16`` and ``I``) are divided by 257 so 65535 maps to 255
+    instead of saturating; float images are taken as 0 to 255 and clipped; alpha (including palette
+    and colour-key transparency) is composited on a fixed white background.
+    """
+    from PIL import Image
+
+    mode = img.mode
+    if mode not in _MODES:
+        raise ImageDecodeError(index, "decode_failed")
+    if mode in _SIXTEEN_BIT or mode == "F":
+        raw = np.asarray(img, dtype=np.float64)
+        gray = np.clip(raw, 0, 65535) / 257.0 if mode in _SIXTEEN_BIT else np.clip(raw, 0, 255)
+        plane = np.rint(gray).astype(np.uint8)
+        return np.stack([plane, plane, plane], axis=-1)
+    if mode in _ALPHA_MODES or "transparency" in img.info:
+        rgba = img.convert("RGBA")
+        base = Image.new("RGBA", rgba.size, (*_BACKGROUND, 255))
+        return np.array(Image.alpha_composite(base, rgba).convert("RGB"), dtype=np.uint8)
+    return np.array(img.convert("RGB"), dtype=np.uint8)
+
+
 def decode_rgb(
     data: bytes, index: int, *, max_pixels: int = MAX_DECODE_PIXELS
 ) -> NDArray[np.uint8]:
     """Decode ``data`` to an ``(h, w, 3)`` uint8 array, EXIF orientation applied.
 
+    Only known pixel modes are accepted (see ``_to_rgb`` for the scaling and compositing rules) and
+    only single-frame images: an animation has no single picture to embed, so it is refused
+    (``multi_frame``) and reported as not embedded.
+
     Raises:
-        ImageDecodeError: ``too_many_pixels`` (declared size over ``max_pixels``) or
-            ``decode_failed`` (anything else); ``index`` is echoed back for the caller.
+        ImageDecodeError: ``too_many_pixels`` (declared size over ``max_pixels``), ``multi_frame``
+            or ``decode_failed`` (anything else); ``index`` is echoed back for the caller.
+        ModelError: Pillow is not installed (the message names the extra).
     """
+    _pil()
     from PIL import Image, ImageOps
 
     if not data:
@@ -56,10 +125,10 @@ def decode_rgb(
                 width, height = img.size
                 if width * height > max_pixels:
                     raise ImageDecodeError(index, "too_many_pixels")
+                if getattr(img, "n_frames", 1) > 1:
+                    raise ImageDecodeError(index, "multi_frame")
                 img.load()
-                oriented = ImageOps.exif_transpose(img)
-                rgb = oriented.convert("RGB")
-                return np.array(rgb, dtype=np.uint8)
+                return _to_rgb(ImageOps.exif_transpose(img), index)
     except ImageDecodeError:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
@@ -93,6 +162,7 @@ class Preprocess:
 
 def preprocess(rgb: NDArray[np.uint8], pre: Preprocess) -> NDArray[np.float32]:
     """``(h, w, 3)`` uint8 to a ``(3, size, size)`` float32 array; the input is not modified."""
+    _pil()
     from PIL import Image
 
     method = Image.Resampling.BICUBIC if pre.resample == "bicubic" else Image.Resampling.BILINEAR
@@ -122,6 +192,7 @@ def dhash(data: bytes, index: int, *, max_pixels: int = MAX_DECODE_PIXELS) -> in
     Decoding is as bounded as :func:`decode_rgb`, whose errors it raises. Two pictures that differ
     by recompression, small brightness changes or mild resizing differ in few bits.
     """
+    _pil()
     from PIL import Image
 
     rgb = decode_rgb(data, index, max_pixels=max_pixels)

@@ -653,3 +653,21 @@ def test_a_full_digest_not_the_short_image_id_is_what_is_compared(
     row = es.ids.index(target)
     assert es.cache_content_changed >= 1
     assert not np.array_equal(es.matrix[row], first.matrix[first.ids.index(target)])
+
+
+def test_a_missing_pillow_reaches_the_user_with_its_install_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from datacopilot.embed import imaging
+
+    class NeedsPillow(FakeEmbedder):
+        def embed(self, images: Any) -> Any:
+            imaging.decode_rgb(images[0], 0)
+            return super().embed(images)
+
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    monkeypatch.setitem(sys.modules, "PIL.Image", None)
+    es = provider(NeedsPillow()).get(dataset(tmp_path, 3), make_ctx(tmp_path, None))
+    assert es.error == "ModelError" and "datacopilot[embed]" in (es.error_detail or "")

@@ -10,6 +10,7 @@ import random
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from fixtures.embedfakes import FakeEmbedder, near, random_unit
 from fixtures.embedscene import Row, scene
@@ -72,13 +73,13 @@ def test_a_planted_near_duplicate_pair_is_one_warn_cluster_with_names_and_short_
     assert f.image_id == min(m["image_id"] for m in p["members"])  # type: ignore[union-attr,index]
 
 
-def test_a_cross_split_pair_is_flagged_here_as_warn_and_as_critical_by_leakage(
+def test_a_cross_split_pair_is_critical_in_both_checks(
     tmp_path: Path,
 ) -> None:
     rows = [Row("a.png", "train", BASE), Row("b.png", "test", TWIN), *clean_rows()]
     ds, _, ctx = scene(tmp_path, rows)
-    (f,) = near_duplicates.plugin.run(ds, ctx)
-    assert f.severity == "WARN" and f.payload["cross_split"] is True
+    (f,) = near_duplicates.plugin.run(ds, ctx)  # alone, it still gates like exact duplicates do
+    assert f.severity == "CRITICAL" and f.payload["cross_split"] is True
     assert f.payload["splits"] == {"test": 1, "train": 1}
     (g,) = leakage.plugin.run(ds, ctx)
     assert g.severity == "CRITICAL"
@@ -473,3 +474,193 @@ def test_a_dataset_without_groups_or_with_all_grouped_has_no_missing_group_note(
     rows = [Row(f"g{k}.png", "train" if k % 2 else "test", group=f"s{k}") for k in range(6)]
     ds2, _, ctx2 = scene(tmp_path / "b", rows)
     assert of(leakage.plugin.run(ds2, ctx2), "images_without_group") == []
+
+
+def test_a_near_duplicate_cluster_inside_one_split_stays_warn(tmp_path: Path) -> None:
+    ds, _, ctx = scene(tmp_path, [Row("a.png", vec=BASE), Row("b.png", vec=TWIN), *clean_rows()])
+    (f,) = near_duplicates.plugin.run(ds, ctx)
+    assert f.severity == "WARN" and f.payload["cross_split"] is False
+
+
+def test_the_default_gate_alone_catches_a_cross_split_near_duplicate(tmp_path: Path) -> None:
+    from datacopilot.audit import engine
+
+    rows = [Row("a.png", "train", BASE), Row("b.png", "test", TWIN), *clean_rows()]
+    ds, _, ctx = scene(tmp_path, rows)
+    assert engine.run_audit(ds, ["near_duplicates"], ctx, ["critical"]).passed is False
+
+
+@pytest.mark.parametrize("threshold", [1.0, 0.9995])
+def test_identical_pixels_in_two_files_are_found_at_thresholds_near_one(
+    tmp_path: Path, threshold: float
+) -> None:
+    """Two encodings of the same pixels give identical vectors (float16 norm is not exactly 1)."""
+    import io
+
+    from fixtures.auditdata import Img, build
+    from PIL import Image
+
+    from datacopilot.audit.context import CheckContext
+    from datacopilot.embed import imaging
+
+    pytest.importorskip("PIL")
+    arr = np.random.default_rng(3).integers(0, 255, (24, 24, 3), dtype=np.uint8)
+    fast, small = io.BytesIO(), io.BytesIO()
+    Image.fromarray(arr).save(fast, format="PNG", compress_level=0)
+    Image.fromarray(arr).save(small, format="PNG", compress_level=9)
+    assert fast.getvalue() != small.getvalue()
+
+    class PixelEmbedder(FakeEmbedder):
+        def embed(self, images):  # type: ignore[no-untyped-def]
+            rows = [
+                imaging.decode_rgb(d, 0).astype(np.float32).reshape(-1)[:16] + 1.0 for d in images
+            ]
+            return np.stack(rows)
+
+    specs = [
+        Img("a.png", split="train", data=fast.getvalue()),
+        Img("b.png", split="test", data=small.getvalue()),
+        *[Img(f"o{k}.png", split="train", seed=700 + k) for k in range(3)],
+    ]
+    ds = build(tmp_path, specs)
+    (tmp_path / "ds.dcp").mkdir()
+    emb = PixelEmbedder()
+    ctx = CheckContext(
+        run_id="1111aaaa-2222-4333-8444-5555bbbb5555",
+        root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        dataset_dir=tmp_path / "ds.dcp",
+        embedder="px",
+        embeddings=embedding.PipelineProvider(emb),
+        config=CheckConfig(leakage_cosine=threshold, near_duplicate_cosine=threshold),
+        cache_key=__import__("pydantic").SecretStr("k" * 32),
+    )
+    # the other images decode with fixture-PNG bytes: PixelEmbedder is only needed for a and b
+    found = leakage.plugin.run(ds, ctx)
+    assert [f.payload["rule"] for f in found if f.payload["rule"] != "images_not_embedded"] == [
+        "cross_split_near_duplicate"
+    ]
+
+
+def test_a_hostile_near_identical_dataset_hits_the_pair_cap_with_a_gating_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datacopilot.audit.checks import embedtools
+
+    monkeypatch.setattr(embedtools, "MAX_PAIRS", 10)
+    rows = [
+        Row(f"d{k}.png", "train" if k % 2 else "test", near(BASE, 0.001, seed=k)) for k in range(30)
+    ]
+    ds, _, ctx = scene(tmp_path, rows)
+    for check in (near_duplicates, leakage):
+        found = check.plugin.run(ds, ctx)
+        (inc,) = of(found, "audit_incomplete")
+        assert inc.severity == "CRITICAL" and inc.payload["reason"] == "pair_cap"
+        assert of(
+            found, "near_duplicate" if check is near_duplicates else "cross_split_near_duplicate"
+        )
+
+
+@pytest.mark.parametrize("threshold", [1.0, 0.9995])
+def test_vectors_that_are_not_exactly_unit_length_still_meet_a_threshold_near_one(
+    tmp_path: Path, threshold: float
+) -> None:
+    """The check re-normalises through the index and compares with an epsilon."""
+    from datacopilot.audit.embedding import EmbeddingSet
+
+    rows = [Row("a.png", "train"), Row("b.png", "test"), *clean_rows(3)]
+    ds, _, ctx = scene(tmp_path, rows)
+    ids = tuple(sorted(i.image_id for i in ds.images))
+    named = {i.file_path.rsplit("/", 1)[-1]: i.image_id for i in ds.images}
+    matrix = np.stack([random_unit(f"v{k}".encode()) for k in range(len(ids))]).astype(np.float32)
+    matrix[ids.index(named["b.png"])] = matrix[ids.index(named["a.png"])]  # identical embedding
+    matrix *= np.float32(0.998)
+
+    class Stub:
+        def get(self, ds, ctx):  # type: ignore[no-untyped-def]
+            return EmbeddingSet(
+                ids=ids, matrix=matrix, total=len(ids), model_id="s", revision="1", dims=16
+            )
+
+    cfg = CheckConfig(leakage_cosine=threshold, near_duplicate_cosine=threshold)
+    ctx = ctx.model_copy(update={"embeddings": Stub(), "config": cfg})
+    found_nd = of(near_duplicates.plugin.run(ds, ctx), "near_duplicate")
+    assert len(found_nd) == 1 and found_nd[0].payload["count"] == 2
+    assert len(of(leakage.plugin.run(ds, ctx), "cross_split_near_duplicate")) == 1
+
+
+# ------------------------------------------------------------ fresh re-check of deciding pairs
+def forge(ds: Dataset, ctx: Any, victim: str, vector: Any) -> None:
+    """Rewrite the cache as a key holder would: valid MAC and digests, one wrong vector."""
+    from datacopilot.embed import cache as ec
+
+    provider = ctx.embeddings
+    cache = ec.EmbeddingCache.open(
+        ctx.dataset_dir / "embeddings",
+        provider._identity(ds),
+        ctx.cache_key.get_secret_value().encode(),
+    )
+    loaded = cache.load()
+    matrix = loaded.matrix.copy()
+    matrix[loaded.ids.index(victim)] = ec.canonical_vectors(vector[None, :], "float16")[0]
+    cache.reset()
+    cache.append(list(loaded.ids), matrix, list(loaded.digests))
+
+
+def unsampled_run(ds: Dataset, candidates: list[str]) -> tuple[str, str]:
+    """A run id whose spot-check sample misses one of ``candidates``, and that candidate."""
+    ids = sorted(i.image_id for i in ds.images)
+    for n in range(500):
+        run_id = f"{n:08x}-2222-4333-8444-5555bbbb5555"
+        sample = set(embedding.pick_sample(ids, run_id))
+        free = [c for c in candidates if c not in sample]
+        if free:
+            return run_id, free[0]
+    raise AssertionError("no run id leaves a pair member outside the sample")
+
+
+def test_a_borderline_pair_that_fresh_vectors_confirm_is_reported(tmp_path: Path) -> None:
+    rows = [Row("a.png", "train", BASE), Row("b.png", "test", TWIN), *clean_rows(40)]
+    ds, emb, ctx = scene(tmp_path, rows)
+    ctx.embeddings.get(ds, ctx)  # honest cache
+    named = {i.file_path.rsplit("/", 1)[-1]: i.image_id for i in ds.images}
+    run_id, victim = unsampled_run(ds, [named["a.png"], named["b.png"]])
+    forge(ds, ctx, victim, near(BASE, 0.35, seed=5))  # cached: cosine about 0.94, just below 0.95
+    fresh = ctx.model_copy(
+        update={"run_id": run_id, "embeddings": embedding.PipelineProvider(emb, batch_size=8)}
+    )
+    found = leakage.plugin.run(ds, fresh)
+    assert len(of(found, "cross_split_near_duplicate")) == 1
+    (note,) = of(found, "embedding_pair_contradicted")
+    assert note.severity == "WARN" and note.payload["count"] == 1
+
+
+def test_a_reported_pair_that_fresh_vectors_contradict_is_dropped_and_flagged(
+    tmp_path: Path,
+) -> None:
+    rows = [Row("a.png", "train"), Row("b.png", "test"), *clean_rows(40)]
+    ds, emb, ctx = scene(tmp_path, rows)
+    honest = ctx.embeddings.get(ds, ctx)
+    named = {i.file_path.rsplit("/", 1)[-1]: i.image_id for i in ds.images}
+    run_id, victim = unsampled_run(ds, [named["b.png"], named["a.png"]])
+    other = named["a.png"] if victim == named["b.png"] else named["b.png"]
+    forge(ds, ctx, victim, honest.matrix[honest.ids.index(other)])  # cached: identical to the other
+    fresh = ctx.model_copy(
+        update={"run_id": run_id, "embeddings": embedding.PipelineProvider(emb, batch_size=8)}
+    )
+    found = leakage.plugin.run(ds, fresh)
+    assert of(found, "cross_split_near_duplicate") == []
+    (note,) = of(found, "embedding_pair_contradicted")
+    assert note.payload["count"] == 1
+
+
+def test_without_cached_vectors_nothing_is_re_embedded(tmp_path: Path) -> None:
+    rows = [Row("a.png", "train", BASE), Row("b.png", "test", TWIN), *clean_rows(10)]
+    ds, emb, ctx = scene(
+        tmp_path,
+        rows,
+    )
+    ctx = ctx.model_copy(update={"embeddings": embedding.PipelineProvider(emb, use_cache=False)})
+    found = leakage.plugin.run(ds, ctx)
+    assert len(of(found, "cross_split_near_duplicate")) == 1
+    assert sum(emb.calls) == len(ds.images)  # one pass, no verification pass

@@ -277,3 +277,20 @@ def test_unknown_backend_is_rejected() -> None:
     v = unit(5)
     with pytest.raises(ValueError, match="backend"):
         knn.knn(v, v, 1, same_set=True, backend="annoy")  # type: ignore[arg-type]
+
+
+def test_identical_vectors_score_one_even_when_their_norm_is_not_exactly_one() -> None:
+    """Stored float16 vectors are unit length only within 1e-3; threshold 1.0 must still hold."""
+    v = unit(4, seed=21)
+    v[1] = v[0]
+    v = (v * np.float32(0.998)).astype(np.float32)  # inside the accepted norm tolerance
+    assert float(v[0] @ v[1]) < 0.9965  # the raw inner product would miss threshold 0.9995
+    idx, sims = knn.knn(v, v, 1, same_set=True)
+    assert idx[0, 0] == 1 and sims[0, 0] >= 1.0 - knn.SIM_EPSILON
+
+
+def test_the_callers_arrays_are_not_modified_by_normalisation() -> None:
+    v = (unit(6, seed=22) * np.float32(0.999)).astype(np.float32)
+    before = v.copy()
+    knn.knn(v, v, 2, same_set=True)
+    np.testing.assert_array_equal(v, before)

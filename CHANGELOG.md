@@ -105,6 +105,17 @@ once a release is tagged.
   unembeddable test image cannot pass the default gate; `images_without_group` (INFO) shows images
   that cannot take part in `group_overlap`.
 
+- Decoding: 16-bit and float images are scaled instead of clipped, alpha is composited on white,
+  unknown pixel modes and animations are refused (`multi_frame`), missing Pillow is a `ModelError`
+  with the install hint.
+- `near_duplicates`: a cluster across splits is CRITICAL (like exact duplicates); the perceptual-hash
+  prefilter never drops a cross-split pair; pairs that decide a verdict (reported and borderline,
+  at most 50 each) are re-embedded fresh when a cached vector is involved
+  (`embedding_pair_contradicted`); a pair cap (2,000,000) ends a hostile search with a CRITICAL
+  `audit_incomplete` (`pair_cap`).
+- The index re-normalises its working copies and callers compare with an epsilon, so a threshold of
+  1.0 or 0.9995 holds for identical embeddings.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

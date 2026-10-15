@@ -109,3 +109,32 @@ def test_images_that_cannot_be_hashed_keep_their_pairs_and_say_so(tmp_path: Path
     assert "near_duplicate" in rules and "phash_not_applied" in rules  # kept: cannot refute
     (note,) = [f for f in out if f.payload["rule"] == "phash_not_applied"]
     assert note.severity == "WARN" and note.payload["count"] == 1
+
+
+def test_the_prefilter_never_drops_a_cross_split_pair(tmp_path: Path) -> None:
+    """A hash that contradicts the model must not be able to hide a pair across splits."""
+    a, b = png(1), png(2)  # the hash says they differ; the model says near-duplicates
+    emb = FakeEmbedder()
+    emb.plant(a, BASE)
+    emb.plant(b, near(BASE, 0.1))
+    ds = build(
+        tmp_path,
+        [
+            Img("a.png", data=a, split="train"),
+            Img("b.png", data=b, split="test"),
+            *[Img(f"o{k}.png", data=png(10 + k)) for k in range(4)],
+        ],
+    )
+    (tmp_path / "ds.dcp").mkdir()
+    ctx = CheckContext(
+        run_id=RUN,
+        root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        dataset_dir=tmp_path / "ds.dcp",
+        embedder="fake",
+        embeddings=embedding.PipelineProvider(emb),
+        cache_key=SecretStr("k" * 32),
+        config=CheckConfig(near_duplicate_phash_max_distance=2),
+    )
+    (f,) = near_duplicates.plugin.run(ds, ctx)
+    assert f.payload["cross_split"] is True and f.severity == "CRITICAL"

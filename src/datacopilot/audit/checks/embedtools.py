@@ -21,7 +21,16 @@ from datacopilot.audit.embedding import EmbeddingSet
 from datacopilot.audit.findings import make_finding
 from datacopilot.audit.paths import display_name, safe_text, unchecked_severity
 from datacopilot.core.schema import Dataset, Finding, Image, Severity
+from datacopilot.embed import knn
 
+MAX_PAIRS = 2_000_000
+"""Similar pairs one check keeps. A hostile, near-identical dataset has about N x k of them (5
+million at 500,000 images); at the cap the search stops with a CRITICAL ``audit_incomplete``
+(``pair_cap``) and the clusters found so far are still reported."""
+BORDERLINE_MARGIN = 0.02
+"""Pairs this far below the threshold are re-embedded too, in case a cached vector hides them."""
+MAX_REVERIFY_PAIRS = 50
+"""Pairs per category (reported, borderline) whose members are re-embedded fresh."""
 MAX_MEMBERS_LISTED = 20
 """Images named in one cluster finding; ``count`` always carries the true size."""
 GROUP_ID_HEX = 12
@@ -91,6 +100,87 @@ def components(pairs: Iterable[tuple[int, int]]) -> list[list[int]]:
     for node in parent:
         grouped.setdefault(find(node), []).append(node)
     return sorted((sorted(g) for g in grouped.values()), key=lambda g: g[0])
+
+
+def add_pair(pairs: dict[tuple[int, int], float], i: int, j: int, sim: float) -> bool:
+    """Record the unordered pair ``(i, j)`` with its best similarity; False when the cap is hit.
+
+    The cap is read at call time so tests can lower it; a pair already present is always updated.
+    """
+    key = (i, j) if i < j else (j, i)
+    known = pairs.get(key)
+    if known is None:
+        if len(pairs) >= MAX_PAIRS:
+            return False
+    elif known >= sim:
+        return True
+    pairs[key] = sim
+    return True
+
+
+def reverify(
+    ds: Dataset,
+    ctx: CheckContext,
+    es: EmbeddingSet,
+    pairs: dict[tuple[int, int], float],
+    threshold: float,
+) -> tuple[dict[tuple[int, int], float], int]:
+    """Confirm the pairs that decide a verdict with freshly computed vectors.
+
+    ``pairs`` holds every pair found down to ``threshold - BORDERLINE_MARGIN``. The strongest
+    ``MAX_REVERIFY_PAIRS`` reported pairs and the strongest ``MAX_REVERIFY_PAIRS`` borderline pairs
+    that involve at least one image served from the cache have both members embedded again
+    (``fresh_vectors``, no cache) and their similarity recomputed: a reported pair the fresh
+    vectors contradict is dropped, a borderline pair they confirm is promoted. Returns the final
+    pairs (at or above the threshold) and how many decisions the fresh vectors reversed.
+
+    This protects the findings a check *shows* (and the ones one step from being shown). It cannot
+    prove a clean verdict: a cache forged by the key holder to push a pair far apart is caught only
+    by the sampled re-embedding, and the key is the trust anchor (docs/architecture/06).
+    """
+    floor = threshold - knn.SIM_EPSILON
+    reported = {k: v for k, v in pairs.items() if v >= floor}
+    fresh_of = getattr(ctx.embeddings, "fresh_vectors", None)
+    if fresh_of is None or not es.cached_ids:
+        return reported, 0
+
+    def pick(candidates: dict[tuple[int, int], float]) -> list[tuple[int, int]]:
+        keys = [
+            k for k in candidates if es.ids[k[0]] in es.cached_ids or es.ids[k[1]] in es.cached_ids
+        ]
+        keys.sort(key=lambda k: (-candidates[k], k))
+        return keys[:MAX_REVERIFY_PAIRS]
+
+    borderline = {k: v for k, v in pairs.items() if v < floor}
+    chosen = pick(reported) + pick(borderline)
+    wanted = sorted({es.ids[row] for pair in chosen for row in pair})
+    if not wanted:
+        return reported, 0
+    fresh = fresh_of(ds, ctx, wanted)
+    final = dict(reported)
+    reversed_decisions = 0
+    for a, b in chosen:
+        va, vb = fresh.get(es.ids[a]), fresh.get(es.ids[b])
+        if va is None or vb is None:
+            continue  # cannot be re-checked: the cached decision stands
+        ua, ub = knn.unit_rows(va[None, :])[0], knn.unit_rows(vb[None, :])[0]
+        sim = float(ua @ ub)
+        if (a, b) in reported and sim < floor:
+            del final[(a, b)]
+            reversed_decisions += 1
+        elif (a, b) in borderline and sim >= floor:
+            final[(a, b)] = sim
+            reversed_decisions += 1
+    return final, reversed_decisions
+
+
+def contradiction_finding(ctx: CheckContext, name: str, count: int) -> Finding:
+    return make_finding(
+        ctx.run_id,
+        name,
+        "WARN",
+        payload={"rule": "embedding_pair_contradicted", "count": count},
+    )
 
 
 def incomplete_finding(

@@ -52,6 +52,7 @@ _GENERIC: dict[str, str] = {
     "images_not_embedded": "Some images have no embedding and were not compared",
     "embedding_cache_rejected": "Part of the embedding cache failed verification and was ignored",
     "embedding_cache_content_changed": "Image files changed since their embeddings were cached",
+    "embedding_pair_contradicted": "Fresh embeddings reversed a verdict made from cached vectors",
     "embedding_cache_unverified": "Cached embeddings could not be verified and were not used",
     "embedding_cache_mismatch": "Cached embeddings disagreed with the images and were discarded",
 }

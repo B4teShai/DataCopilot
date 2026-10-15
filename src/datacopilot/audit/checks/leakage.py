@@ -105,6 +105,7 @@ class LeakageCheck:
         deadline = time.monotonic() + ctx.config.max_check_seconds
         pairs: dict[tuple[int, int], float] = {}
         searched = 0
+        capped = False
         for code in sorted(set(labels.tolist())):
             queries = np.flatnonzero(labels == code)
             others = np.flatnonzero(labels != code)
@@ -113,16 +114,26 @@ class LeakageCheck:
                 continue
             for block in knn.iter_knn(es.matrix[queries], es.matrix[others], k, deadline=deadline):
                 searched += len(block.indices)
-                hit_rows, hit_cols = np.nonzero(block.sims >= threshold)
+                hit_rows, hit_cols = np.nonzero(
+                    block.sims >= threshold - knn.SIM_EPSILON - embedtools.BORDERLINE_MARGIN
+                )
                 for r, c in zip(hit_rows.tolist(), hit_cols.tolist(), strict=True):
                     i = int(queries[block.start + r])
                     j = int(others[int(block.indices[r, c])])
-                    key = (i, j) if i < j else (j, i)
-                    sim = float(block.sims[r, c])
-                    if sim > pairs.get(key, -1.0):
-                        pairs[key] = sim
-        if searched < n:
+                    if not embedtools.add_pair(pairs, i, j, float(block.sims[r, c])):
+                        capped = True
+                        break
+                if capped:
+                    break
+            if capped:
+                break
+        if capped:
+            findings.append(embedtools.incomplete_finding(ctx, NAME, "pair_cap", searched, n))
+        elif searched < n:
             findings.append(embedtools.incomplete_finding(ctx, NAME, "time_budget", searched, n))
+        pairs, contradicted = embedtools.reverify(ds, ctx, es, pairs, threshold)
+        if contradicted:
+            findings.append(embedtools.contradiction_finding(ctx, NAME, contradicted))
         grouped = embedtools.components(pairs)
         component_of = {node: idx for idx, comp in enumerate(grouped) for node in comp}
         sims_of: list[list[float]] = [[] for _ in grouped]

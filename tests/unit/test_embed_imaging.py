@@ -128,11 +128,85 @@ def test_formats_outside_the_dataset_set_are_never_handed_to_their_decoders(data
     assert err.value.reason == "decode_failed"
 
 
-def test_a_gif_with_many_frames_decodes_only_the_first() -> None:
+def test_an_animated_image_is_refused_because_frame_zero_is_not_the_picture(
+    tmp_path: object,
+) -> None:
     frames = [Image.new("RGB", (8, 8), (i, i, i)) for i in range(50)]
     out = io.BytesIO()
     frames[0].save(out, format="GIF", save_all=True, append_images=frames[1:])
-    assert imaging.decode_rgb(out.getvalue(), 0).shape == (8, 8, 3)
+    with pytest.raises(ImageDecodeError) as err:
+        imaging.decode_rgb(out.getvalue(), 4)
+    assert err.value.reason == "multi_frame" and err.value.index == 4
+
+
+def test_a_single_frame_gif_is_accepted() -> None:
+    assert imaging.decode_rgb(encode("RGB", (8, 8), "GIF", (1, 2, 3)), 0).shape == (8, 8, 3)
+
+
+def test_sixteen_bit_images_are_scaled_not_clipped() -> None:
+    ramp = np.linspace(0, 65535, 64).astype(np.uint16)[None, :].repeat(8, 0)
+    out = io.BytesIO()
+    Image.fromarray(ramp).save(out, format="PNG")
+    with Image.open(io.BytesIO(out.getvalue())) as probe:
+        assert probe.mode == "I;16"  # the Pillow behaviour this test depends on
+        naive = np.asarray(probe.convert("RGB"))[0, 32, 0]
+    assert naive == 255  # Pillow's own conversion saturates the middle of the ramp
+    arr = imaging.decode_rgb(out.getvalue(), 0)
+    row = arr[0, :, 0].astype(int)
+    assert row[0] == 0 and row[-1] == 255 and abs(row[32] - 127) <= 3
+    assert (np.diff(row) >= 0).all() and len(set(row.tolist())) > 40  # a ramp, not a step
+
+
+def test_alpha_is_composited_on_a_fixed_background_so_hidden_pixels_do_not_count() -> None:
+    def rgba(hidden: tuple[int, int, int]) -> bytes:
+        img = Image.new("RGBA", (8, 8), (10, 20, 30, 255))
+        img.paste(Image.new("RGBA", (4, 8), (*hidden, 0)), (0, 0))  # left half fully transparent
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        return out.getvalue()
+
+    a, b = imaging.decode_rgb(rgba((255, 0, 0)), 0), imaging.decode_rgb(rgba((0, 255, 0)), 0)
+    np.testing.assert_array_equal(a, b)  # what sits under alpha 0 cannot change the embedding
+    assert a[0, 0].tolist() == [255, 255, 255] and a[0, 7].tolist() == [10, 20, 30]
+
+
+def test_palette_transparency_and_grayscale_alpha_are_composited_too() -> None:
+    pal = Image.new("P", (4, 4), 0)
+    pal.putpalette([255, 0, 0, 0, 0, 255] + [0] * 762)
+    out = io.BytesIO()
+    pal.save(out, format="PNG", transparency=0)
+    assert imaging.decode_rgb(out.getvalue(), 0)[0, 0].tolist() == [255, 255, 255]
+    la = Image.new("LA", (4, 4), (0, 0))
+    out = io.BytesIO()
+    la.save(out, format="PNG")
+    assert imaging.decode_rgb(out.getvalue(), 0)[0, 0].tolist() == [255, 255, 255]
+
+
+def test_cmyk_jpeg_and_one_bit_images_decode() -> None:
+    assert imaging.decode_rgb(encode("CMYK", (8, 8), "JPEG", (0, 0, 0, 0)), 0).shape == (8, 8, 3)
+    assert imaging.decode_rgb(encode("1", (8, 8), "PNG", 1), 0)[0, 0].tolist() == [255, 255, 255]
+
+
+def test_missing_pillow_is_a_model_error_with_the_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from datacopilot.core.errors import ModelError
+
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    monkeypatch.setitem(sys.modules, "PIL.Image", None)
+    for call in (
+        lambda: imaging.decode_rgb(b"x", 0),
+        lambda: imaging.preprocess(
+            np.zeros((2, 2, 3), np.uint8),
+            imaging.Preprocess(2, None, "bilinear", (0, 0, 0), (1, 1, 1)),
+        ),
+        lambda: imaging.dhash(b"x", 0),
+    ):
+        with pytest.raises(ModelError, match=r"datacopilot\[embed\]") as err:
+            call()
+        assert not isinstance(err.value, ImageDecodeError)
 
 
 # ------------------------------------------------------------ preprocessing

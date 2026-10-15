@@ -344,11 +344,14 @@ def test_the_embed_command_obeys_the_same_guard(
 
 
 def test_a_missing_extra_exits_1_naming_it(
-    clean: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    clean: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     for module in ("transformers", "huggingface_hub", backends.TENSOR_LIB):
         monkeypatch.setitem(sys.modules, module, None)
-    code = run(monkeypatch, "audit", clean, "--embedder", "dinov2_small")
+    code = run(monkeypatch, "audit", clean, "--embedder", "dinov2_small", *reports(tmp_path))
     err = capsys.readouterr().err
     assert code == 1 and "datacopilot[embed]" in err
 

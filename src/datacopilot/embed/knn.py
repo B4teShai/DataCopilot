@@ -44,6 +44,11 @@ DEFAULT_BLOCK_BYTES = 256 * 1024**2
 BYTES_PER_CELL = 8
 FAISS_MIN_ROWS = 20_000
 """Base size from which ``backend="auto"`` prefers FAISS when it is installed."""
+SIM_EPSILON = 1e-6
+"""Slack callers allow when comparing a similarity with a threshold. Stored vectors are unit length
+only to within float16 rounding; ``iter_knn`` re-normalises its working copies in float32, which
+leaves identical inputs at 1.0 within a few ulps, so ``sim >= threshold - SIM_EPSILON`` holds for
+a threshold of 1.0."""
 BACKEND_TOLERANCE = 1e-4
 """Largest similarity difference between the NumPy and FAISS backends."""
 _NORM_TOLERANCE = 1e-2
@@ -99,6 +104,19 @@ def _validate(
         if len(arr) and not np.all(np.abs(np.linalg.norm(arr, axis=1) - 1.0) <= _NORM_TOLERANCE):
             raise ValueError("vectors must have unit norm")
     return min(k, len(base) - (1 if same_set else 0))
+
+
+def unit_rows(arr: NDArray[np.float32]) -> NDArray[np.float32]:
+    """A float32 copy of ``arr`` with every row divided by its own norm (deterministic).
+
+    This is the normalisation the index applies to its inputs (which are validated to be nearly
+    unit length, so no norm is zero).
+    """
+    if len(arr) == 0:
+        return arr
+    norms = np.linalg.norm(arr, axis=1, keepdims=True).astype(np.float32)
+    unit: NDArray[np.float32] = (arr / norms).astype(np.float32)
+    return unit
 
 
 def _order(
@@ -193,6 +211,9 @@ def iter_knn(
     if backend not in ("auto", "numpy", "faiss"):
         raise ValueError("backend must be auto, numpy or faiss")
     effective = _validate(queries, base, k, same_set)
+    same = queries is base
+    queries = unit_rows(queries)
+    base = queries if same else unit_rows(base)
     if effective <= 0 or len(queries) == 0:
         for start in range(0, len(queries), block_rows(max(len(base), 1), max_block_bytes)):
             stop = min(start + block_rows(max(len(base), 1), max_block_bytes), len(queries))

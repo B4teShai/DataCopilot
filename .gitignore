@@ -20,3 +20,6 @@ htmlcov/
 .idea/
 .vscode/
 .claude/
+/report.html
+/report.json
+/report.sarif

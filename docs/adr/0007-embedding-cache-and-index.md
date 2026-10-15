@@ -11,7 +11,7 @@ so the vectors must be cached and the cache must survive an interrupted run. Thr
 shape the design:
 
 - The cache has to live with the dataset (`dataset.dcp/embeddings/`) so that a CI gate can use
-  precomputed vectors without a GPU, but a dataset directory is attacker-controlled input in a pull
+  precomputed vectors, but a dataset directory is attacker-controlled input in a pull
   request. A forged cache that gives a test image the vector of a train image would hide leakage
   and make the gate pass. A digest next to the data only detects damage, never forgery.
 - Embeddings are a function of the image bytes and the model weights, not of the dataset version,
@@ -69,7 +69,13 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
    file cannot be read is dropped and reported as not embedded. `image_id` stays a 64-bit label and
    is never the thing compared.
 5. As a second layer a sample of cache hits (1 percent, 10 to 64) is re-embedded on every run and
-   compared (cosine at least 0.999 between canonical vectors: both sides are rounded identically, so
+   compared. This is statistical: it catches bulk forgery, not one forged vector among thousands,
+   and the MAC key is the trust anchor. To narrow the gap where it matters, the members of the
+   strongest reported pairs and of the strongest borderline pairs (within 0.02 below the
+   threshold) that involve a cached vector are re-embedded fresh before the verdict (at most 50
+   pairs per kind): a reported pair that fresh vectors contradict is dropped, a borderline pair
+   they confirm is promoted, and an `embedding_pair_contradicted` WARN says so. A clean verdict
+   is not proven by this. The comparison (cosine at least 0.999 between canonical vectors: both sides are rounded identically, so
    only the backend's nondeterminism, about 1e-5, remains). The sample is ordered by
    `sha256(run_id : image_id)` where `run_id` is a fresh UUID per invocation, so the writer of the
    cache cannot predict it. One disagreeing vector discards the whole cache for the run and
@@ -88,17 +94,24 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
    cache was warm.
 
 **Index: option 1 by default, FAISS when installed.** `embed/knn.py` computes exact cosine kNN in
-blocks sized so that one block of similarities plus its sort keys stays under 64 MiB. Ties are broken
-by the lower index through a combined sort key, so the result is deterministic for a platform. N is
+blocks sized so that one block of similarities plus the partition copy stays under 256 MiB. Each
+row keeps the entries at or above its k-th best similarity and orders them with `np.lexsort` by
+similarity, then lower index, so ties resolve deterministically for a platform. The working copy
+of the vectors is re-normalised in float32 and callers compare with an epsilon of 1e-6, so
+identical embeddings meet even a threshold of 1.0. 50,000 x 768 with k = 10 took 16 s in the
+benchmark. N is
 capped at 500,000 and k at 100; beyond the caps the check reports an explicit finding instead of
 running. The FAISS adapter (`IndexFlatIP`, exact) returns the same neighbours within a similarity
-tolerance of 1e-4 and is selected automatically when `faiss` imports. No approximate index is used,
+tolerance of 1e-4 and is used automatically only above 20,000 base rows when `faiss` imports;
+at an exact tie on the k-th place it may pick another column. No approximate index is used,
 because a missed neighbour is a missed leak.
 
 ## Consequences
 
-- Easier: a CI gate can run the embedding checks from a precomputed cache and a CI secret, with no
-  GPU and no model download; an interrupted embedding run resumes at shard granularity.
+- Easier: a precomputed cache saves the embedding pass in CI (no full GPU run), and an interrupted
+  embedding run resumes at shard granularity. It does not remove the model from CI: the sample
+  re-embedding needs the model, `[embed]` and the images, and without them the cache is not trusted
+  and the gate fails closed.
 - Harder: the cache is bound to the dataset version, so a new version (a re-split, an applied
   proposal) recomputes every embedding. Carrying shards over to a new version after a spot check is
   a follow-up. The default CPU index is quadratic; at 500,000 images it needs hours and the audit
