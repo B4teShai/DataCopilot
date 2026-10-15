@@ -13,10 +13,21 @@ import shutil
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from datacopilot.core.errors import FormatError, ValidationError
-from datacopilot.core.schema import Dataset, DatasetManifest, validate_tables
+from datacopilot.core.schema import (
+    SCHEMA_VERSION,
+    Annotation,
+    Category,
+    Dataset,
+    DatasetManifest,
+    Image,
+    Task,
+    validate_tables,
+)
+from datacopilot.core.version import models_version
 from datacopilot.io import registry
 from datacopilot.io.report import ConversionReport, enforce_strict
 from datacopilot.logging import get_logger
@@ -72,27 +83,27 @@ def _log_loss(report: ConversionReport) -> None:
             )
 
 
-def ingest(
+@dataclass(frozen=True)
+class _Source:
+    """A validated read of a source dataset, before it is stored or wrapped."""
+
+    root: Path
+    name: str
+    task: Task
+    images: list[Image]
+    annotations: list[Annotation]
+    categories: list[Category]
+    report: ConversionReport
+
+
+def _read_source(
     source: str | Path,
-    format: str,  # noqa: A002  # public parameter name documented in the architecture
-    out: str | Path,
+    format: str,  # noqa: A002
     *,
-    group_by: str | None = None,
-    name: str | None = None,
-    limits: StoreLimits | None = None,
-    strict: bool = False,
-) -> IngestResult:
-    """Read ``source`` with the named reader, validate, and write a new ``dataset.dcp``.
-
-    With ``strict`` any value or row the reader could not carry into the data model (an
-    unsupported shape, a skipped file) fails the ingest before anything is written.
-
-    Raises:
-        FormatError, ValidationError, StoreError: nothing is written when any of them occurs.
-        ConversionLossError: ``strict`` and the reader dropped or skipped anything.
-        ValueError: for an invalid ``group_by`` expression.
-    """
-    started = time.perf_counter()
+    group_by: str | None,
+    name: str | None,
+    strict: bool,
+) -> _Source:
     pattern = parse_group_by(group_by) if group_by else None
     reader = registry.get_reader(format)
     path = Path(source)
@@ -100,8 +111,8 @@ def ingest(
     if not result.images:
         raise FormatError("no images found in the input")
     images = list(result.images)
+    root = (path if path.is_dir() else path.parent).resolve()
     if pattern is not None:
-        root = (path if path.is_dir() else path.parent).resolve()
         images = [
             i.model_copy(
                 update={"group_id": _group_of(pattern, os.path.relpath(i.file_path, root))}
@@ -130,26 +141,100 @@ def ingest(
     if strict and not report.is_lossless():
         _log_loss(report)
     enforce_strict(report, strict=strict)
-    store = DatasetStore.create(
-        out,
-        images,
-        result.annotations,
-        result.categories,
+    return _Source(
+        root=root,
         name=name or result.name,
         task=result.task,
+        images=images,
+        annotations=list(result.annotations),
+        categories=list(result.categories),
+        report=report,
+    )
+
+
+def ingest(
+    source: str | Path,
+    format: str,  # noqa: A002  # public parameter name documented in the architecture
+    out: str | Path,
+    *,
+    group_by: str | None = None,
+    name: str | None = None,
+    limits: StoreLimits | None = None,
+    strict: bool = False,
+) -> IngestResult:
+    """Read ``source`` with the named reader, validate, and write a new ``dataset.dcp``.
+
+    With ``strict`` any value or row the reader could not carry into the data model (an
+    unsupported shape, a skipped file) fails the ingest before anything is written.
+
+    Raises:
+        FormatError, ValidationError, StoreError: nothing is written when any of them occurs.
+        ConversionLossError: ``strict`` and the reader dropped or skipped anything.
+        ValueError: for an invalid ``group_by`` expression.
+    """
+    started = time.perf_counter()
+    read = _read_source(source, format, group_by=group_by, name=name, strict=strict)
+    store = DatasetStore.create(
+        out,
+        read.images,
+        read.annotations,
+        read.categories,
+        name=read.name,
+        task=read.task,
         limits=limits,
     )
     manifest = store.manifest()
-    _log_loss(report)
+    _log_loss(read.report)
     get_logger(__name__).info(
         "dataset_ingested",
         format=format,
-        image_count=len(images),
-        annotation_count=len(result.annotations),
+        image_count=len(read.images),
+        annotation_count=len(read.annotations),
         dataset_version=manifest.version,
         duration_ms=int((time.perf_counter() - started) * 1000),
     )
-    return IngestResult(Path(out), manifest, report)
+    return IngestResult(Path(out), manifest, read.report)
+
+
+def load_dataset(
+    source: str | Path,
+    format: str,  # noqa: A002
+    *,
+    group_by: str | None = None,
+    name: str | None = None,
+    strict: bool = False,
+) -> tuple[Dataset, ConversionReport]:
+    """Read ``source`` into a validated in-memory :class:`Dataset` without writing anything.
+
+    The dataset has the same content version as :func:`ingest` would store for it and its ``root``
+    is the source directory.
+
+    Raises:
+        FormatError, ValidationError, ConversionLossError, ValueError: as :func:`ingest`.
+    """
+    read = _read_source(source, format, group_by=group_by, name=name, strict=strict)
+    manifest = DatasetManifest(
+        version=models_version(
+            read.images, read.annotations, read.categories, schema_version=SCHEMA_VERSION
+        ),
+        schema_version=SCHEMA_VERSION,
+        name=read.name,
+        task=read.task,
+        categories=tuple(sorted(read.categories, key=lambda c: c.id)),
+        image_count=len(read.images),
+        annotation_count=len(read.annotations),
+        created_at=datetime.now(timezone.utc),
+    )
+    _log_loss(read.report)
+    get_logger(__name__).info(
+        "dataset_loaded",
+        format=format,
+        image_count=len(read.images),
+        annotation_count=len(read.annotations),
+        dataset_version=manifest.version,
+    )
+    dataset = Dataset(manifest, tuple(read.images), tuple(read.annotations), read.root)
+    return dataset, read.report
 
 
 def export(ds: Dataset, format: str, out: str | Path, *, strict: bool = False) -> ConversionReport:  # noqa: A002

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import math
 import os
 import platform
-import re
 import sys
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -175,33 +173,27 @@ def _split_option(value: str, option: str) -> list[str]:
     return parts
 
 
-_EMBEDDER_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 MAX_EMBED_BATCH_OPTION = 1024
 
 
 def _resolve_embedder(name: str, allowed_licenses: frozenset[str]) -> Any:
     """Create the named embedder after the license guard; usage errors exit 2, license and
     missing-extra errors exit 1. No weights are touched here (the model loads on first use)."""
-    from datacopilot.embed import registry as embed_registry
+    from datacopilot.audit.usecase import resolve_embedder
 
-    if not _EMBEDDER_NAME.fullmatch(name):
-        raise typer.BadParameter(
-            "use lower-case letters, digits and underscores", param_hint="--embedder"
-        )
-    available = embed_registry.embedder_names()
-    if name not in available:
-        raise typer.BadParameter(
-            f"unknown embedder; available: {', '.join(available) or 'none'}",
-            param_hint="--embedder",
-        )
-    return embed_registry.get_embedder(name, allowed_licenses)
+    try:
+        return resolve_embedder(name, allowed_licenses)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--embedder") from None
 
 
 def _check_threshold(value: float | None) -> None:
-    if value is not None and not (math.isfinite(value) and 0.0 < value <= 1.0):
-        raise typer.BadParameter(
-            "must be above 0 and at most 1", param_hint="--similarity-threshold"
-        )
+    from datacopilot.audit.usecase import check_threshold
+
+    try:
+        check_threshold(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--similarity-threshold") from None
 
 
 @app.command()

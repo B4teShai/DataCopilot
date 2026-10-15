@@ -11,7 +11,8 @@ import math
 import re
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -278,11 +279,18 @@ class AuditRun(_Row):
 
 @dataclass(frozen=True)
 class Dataset:
-    """A validated dataset version: manifest plus the image and annotation tables."""
+    """A validated dataset version: manifest plus the image and annotation tables.
+
+    ``root`` is the directory the image paths are expected to lie in (the dataset's own directory
+    for a source dataset, the parent of the ``.dcp`` directory for a stored one); the audit refuses
+    to read images outside it. It is not part of the dataset's identity: it is excluded from
+    equality and from the content version.
+    """
 
     manifest: DatasetManifest
     images: tuple[Image, ...]
     annotations: tuple[Annotation, ...]
+    root: Path | None = field(default=None, compare=False, repr=False)
 
     @property
     def categories(self) -> tuple[Category, ...]:

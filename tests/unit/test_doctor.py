@@ -96,8 +96,8 @@ def test_extras_report_what_is_importable_without_importing_it(
 
 # -------------------------------------------------------------- settings
 def test_settings_are_reported_without_the_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    secret = "s3cr3t-key-value-123456"  # noqa: S105
-    monkeypatch.setenv("DATACOPILOT_CACHE_KEY", secret)
+    canary = "s3cr3t-key-value-123456"
+    monkeypatch.setenv("DATACOPILOT_CACHE_KEY", canary)
     monkeypatch.setenv("DATACOPILOT_WORKERS", "3")
     monkeypatch.setenv("DATACOPILOT_ALLOWED_LICENSES", "MIT, Apache-2.0")
     report = diagnose()
@@ -105,7 +105,7 @@ def test_settings_are_reported_without_the_secret(monkeypatch: pytest.MonkeyPatc
     assert settings["valid"] is True and settings["error"] is None
     assert settings["cache_key"] == "set" and settings["workers"] == 3
     assert settings["allowed_licenses"] == ["apache-2.0", "mit"]
-    assert secret not in json.dumps(report) and secret not in doctor.to_text(report)
+    assert canary not in json.dumps(report) and canary not in doctor.to_text(report)
 
 
 def test_invalid_settings_are_reported_and_exit_with_2() -> None:
@@ -277,13 +277,13 @@ def test_cli_text_output_and_one_log_record(
 def test_cli_json_output_is_one_object_without_secrets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    secret = "another-secret-key-0000"  # noqa: S105
-    monkeypatch.setenv("DATACOPILOT_CACHE_KEY", secret)
+    canary = "another-secret-key-0000"
+    monkeypatch.setenv("DATACOPILOT_CACHE_KEY", canary)
     assert run(monkeypatch, "doctor", "--json") == 0
     out, err = capsys.readouterr()
     report = json.loads(out)
     assert report["settings"]["cache_key"] == "set" and report["status"] == "ok"
-    assert secret not in out and secret not in err
+    assert canary not in out and canary not in err
     assert len(out.strip().splitlines()) == 1
 
 

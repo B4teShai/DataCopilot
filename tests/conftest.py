@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 
 import pytest
+import structlog
 
 from datacopilot.core.schema import (
     SCHEMA_VERSION,
@@ -125,3 +126,12 @@ def table_rows(
     )
     anns = sorted((a.to_row() for a in ds_anns), key=lambda r: str(r["ann_id"]))
     return images, anns
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging() -> Iterator[None]:
+    """A test that configures logging (the CLI and the API do) must not leave a handle to a
+    captured, soon-closed stream behind for the tests that run after it."""
+    yield
+    structlog.reset_defaults()
+    structlog.contextvars.clear_contextvars()
