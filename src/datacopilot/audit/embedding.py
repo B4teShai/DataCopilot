@@ -67,12 +67,21 @@ MAX_BATCH_BYTES = 256 * 1024**2
 MAX_READ_WINDOW = 4
 """Images read ahead of the embedder, so memory is bounded by about this many files."""
 SPOT_FRACTION = 0.01
-SPOT_MIN = 4
+SPOT_MIN = 10
 SPOT_MAX = 64
-"""Cache hits re-embedded per run: 1 percent, at least 4, at most 64 (all if fewer)."""
-SPOT_MIN_COSINE = 0.99
-"""A re-embedded vector must be at least this close to the cached one (float16 rounding, device
-differences and a changed batch composition stay far above it)."""
+"""Cache hits re-embedded per run: 1 percent, at least 10, at most 64 (all if fewer)."""
+SPOT_MIN_VERIFIED_FRACTION = 0.5
+"""At least this fraction of the sampled hits must be verifiable (image readable, embedder
+working). Otherwise the cached vectors are not trusted: they are dropped and recomputed, and an
+image that cannot be read is then reported as not embedded, which gates."""
+SPOT_MIN_COSINE = 0.999
+"""A re-embedded vector must be at least this close to the cached one. Both are canonical vectors
+(``embed/cache.py``): a fresh vector is rounded to the storage dtype exactly like the stored one, so
+the only difference is the backend's own nondeterminism (kernel choice, batch composition, CPU
+versus GPU), which is about 1e-5 in cosine for the supported models; float16 rounding of a unit
+vector moves each component by under 1e-3 but is identical on both sides and does not count. A
+forged vector is far from this bound: the cosine of two unrelated images is below 0.9. One
+disagreeing sample discards the whole cache for the run."""
 _DECODE_REASONS = frozenset({"decode_failed", "too_many_pixels"})
 
 
@@ -95,6 +104,8 @@ class EmbeddingSet:
         cache_hits: vectors taken from the cache and kept.
         spot_checked: cache hits that were re-embedded and compared.
         spot_mismatched: of those, how many disagreed (the cache was then discarded).
+        cache_unverified: reason code (``too_few_verifiable``) when too few sampled hits could be
+            verified and the cached vectors were therefore not trusted.
         cache_unwritable: the cache could not be written (read-only dataset, cache full).
         cache_disabled_reason: why the cache was not used, when it was not.
     """
@@ -113,6 +124,7 @@ class EmbeddingSet:
     cache_hits: int = 0
     spot_checked: int = 0
     spot_mismatched: int = 0
+    cache_unverified: str | None = None
     cache_unwritable: bool = False
     cache_disabled_reason: str | None = None
 
@@ -287,12 +299,22 @@ class PipelineProvider:
             log.warning("embedding_cache_rejected", state=loaded.state, reasons=rejected)
 
         sampled = mismatched = 0
+        unverified: str | None = None
         if hits and cache.enabled:
-            sampled, mismatched = self._spot_check(
+            wanted, sampled, mismatched = self._spot_check(
                 ctx, by_id, ids_sorted, matrix, have, position, state, deadline
             )
+            if sampled < math.ceil(wanted * SPOT_MIN_VERIFIED_FRACTION):
+                unverified = "too_few_verifiable"
+                log.warning(
+                    "embedding_cache_unverified",
+                    reason=unverified,
+                    sampled=wanted,
+                    verified=sampled,
+                )
             if mismatched:
                 log.warning("embedding_cache_discarded", sampled=sampled, mismatched=mismatched)
+            if mismatched or unverified:
                 cache.reset()
                 have[:] = False
                 matrix[:] = 0.0
@@ -320,6 +342,7 @@ class PipelineProvider:
             cache_hits=hits,
             spot_checked=sampled,
             spot_mismatched=mismatched,
+            cache_unverified=unverified,
             cache_unwritable=unwritable,
             cache_disabled_reason=disabled_reason,
         )
@@ -345,8 +368,12 @@ class PipelineProvider:
         position: dict[str, int],
         state: _State,
         deadline: float,
-    ) -> tuple[int, int]:
-        """Re-embed a sample of the cached vectors; returns ``(compared, disagreeing)``."""
+    ) -> tuple[int, int, int]:
+        """Re-embed a sample of the cached vectors.
+
+        Returns ``(sample size, verified, disagreeing)``; a hit that cannot be re-read or
+        re-embedded counts in the sample but not as verified.
+        """
         cached = [ids_sorted[int(s)] for s in np.flatnonzero(have)]
         sample = [by_id[i] for i in pick_sample(cached, ctx.run_id)]
         compared = disagreeing = 0
@@ -356,7 +383,7 @@ class PipelineProvider:
             compared += 1
             if float(np.dot(vector, matrix[position[image_id]])) < SPOT_MIN_COSINE:
                 disagreeing += 1
-        return compared, disagreeing
+        return len(sample), compared, disagreeing
 
     def _embed_missing(
         self,

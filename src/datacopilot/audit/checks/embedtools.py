@@ -172,6 +172,19 @@ def embedding_set(
                 },
             )
         )
+    if es.cache_unverified is not None:
+        findings.append(
+            make_finding(
+                ctx.run_id,
+                name,
+                "WARN",
+                payload={
+                    "rule": "embedding_cache_unverified",
+                    "reason": es.cache_unverified,
+                    "verified": es.spot_checked,
+                },
+            )
+        )
     if es.spot_mismatched:
         findings.append(
             make_finding(

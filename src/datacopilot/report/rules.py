@@ -50,6 +50,7 @@ _GENERIC: dict[str, str] = {
     "embedder_error": "The embedder failed; images were not compared",
     "images_not_embedded": "Some images have no embedding and were not compared",
     "embedding_cache_rejected": "Part of the embedding cache failed verification and was ignored",
+    "embedding_cache_unverified": "Cached embeddings could not be verified and were not used",
     "embedding_cache_mismatch": "Cached embeddings disagreed with the images and were discarded",
 }
 

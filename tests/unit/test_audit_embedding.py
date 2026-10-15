@@ -80,8 +80,8 @@ def test_a_warm_cache_re_embeds_only_the_spot_check_sample(tmp_path: Path) -> No
     provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
     emb = FakeEmbedder()
     es = provider(emb).get(ds, make_ctx(tmp_path, None))
-    assert es.spot_checked == embedding.sample_size(12) == 4 and es.spot_mismatched == 0
-    assert sum(emb.calls) == 4
+    assert es.spot_checked == embedding.sample_size(12) == 10 and es.spot_mismatched == 0
+    assert sum(emb.calls) == 10
 
 
 def test_the_provider_computes_once_per_dataset(tmp_path: Path) -> None:
@@ -92,14 +92,111 @@ def test_the_provider_computes_once_per_dataset(tmp_path: Path) -> None:
     assert sum(emb.calls) == 12
 
 
-def test_images_are_only_read_when_they_are_not_cached(tmp_path: Path) -> None:
+def test_cached_vectors_that_cannot_be_verified_are_not_trusted(tmp_path: Path) -> None:
+    """Forged vectors for images that cannot be re-read must not make the audit pass."""
+    ds = dataset(tmp_path)
+    ids = sorted(i.image_id for i in ds.images)
+    (tmp_path / "ds.dcp").mkdir()
+    cache = ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", identity(ds), KEY.encode())
+    cache.load()
+    cache.append(ids, ec.canonical_vectors(np.tile(random_unit(b"decoy"), (12, 1)), "float16"))
+    for path in (tmp_path / "images").iterdir():
+        path.unlink()  # a runner without the images: nothing in the cache can be checked
+    es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    assert es.cache_unverified == "too_few_verifiable" and es.cache_hits == 0
+    assert es.ids == () and len(es.missing["file_missing"]) == 12  # unchecked, so it gates
+
+
+def test_a_cache_is_trusted_when_at_least_half_of_the_sample_is_verifiable(
+    tmp_path: Path,
+) -> None:
+    ds = dataset(tmp_path, 20)
+    provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    sample = embedding.pick_sample(sorted(i.image_id for i in ds.images), RUN)
+    assert len(sample) == 10
+    names = {i.image_id: i.file_path for i in ds.images}
+    for image_id in sample[:5]:
+        Path(names[image_id]).unlink()
+    es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    assert es.cache_unverified is None and es.spot_checked == 5 and es.cache_hits == 20
+    Path(names[sample[5]]).unlink()  # now only 4 of 10 can be verified
+    es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    assert es.cache_unverified == "too_few_verifiable" and es.cache_hits == 0
+
+
+def test_a_single_forged_vector_among_verifiable_ones_discards_the_whole_cache(
+    tmp_path: Path,
+) -> None:
+    ds = dataset(tmp_path)
+    good = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
+    ids = sorted(i.image_id for i in ds.images)
+    victim = embedding.pick_sample(ids, RUN)[0]
+    forged = good.matrix.copy()
+    forged[good.ids.index(victim)] = ec.canonical_vectors(random_unit(b"x")[None, :], "float16")[0]
+    ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", identity(ds), KEY.encode()).reset()
+    cache = ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", identity(ds), KEY.encode())
+    cache.load()
+    cache.reset()
+    cache.append(list(good.ids), forged)  # valid MAC, one wrong vector
+    emb = FakeEmbedder()
+    es = provider(emb).get(ds, make_ctx(tmp_path, None))
+    assert es.spot_mismatched == 1 and es.cache_hits == 0 and sum(emb.calls) >= 12
+    np.testing.assert_array_equal(es.matrix, good.matrix)
+
+
+def test_a_failing_embedder_during_the_spot_check_leaves_no_trusted_vector(
+    tmp_path: Path,
+) -> None:
     ds = dataset(tmp_path)
     provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
-    for path in (tmp_path / "images").iterdir():
-        path.unlink()  # a CI run with precomputed embeddings and no images on the runner
-    es = provider(FakeEmbedder()).get(ds, make_ctx(tmp_path, None))
-    assert es.cache_hits == 12 and len(es.ids) == 12  # the sample cannot be re-read: skipped
-    assert es.spot_checked == 0
+    emb = FakeEmbedder()
+    emb.fail_after, emb.error = 0, RuntimeError("down")
+    es = provider(emb).get(ds, make_ctx(tmp_path, None))
+    assert es.error == "RuntimeError" and es.ids == () and es.cache_hits == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        dict(dims=DIMS * 2),
+        dict(dtype="float32"),
+        dict(revision="2"),
+        dict(dataset_version="c" * 32),
+    ],
+    ids=["dims", "dtype", "revision", "dataset_version"],
+)
+def test_a_cache_written_for_another_identity_is_never_used(
+    tmp_path: Path, change: dict[str, Any]
+) -> None:
+    ds = dataset(tmp_path)
+    (tmp_path / "ds.dcp").mkdir()
+    base = identity(ds)
+    other = ec.CacheIdentity(**{**base.__dict__, **change})
+    cache = ec.EmbeddingCache.open(tmp_path / "ds.dcp" / "embeddings", other, KEY.encode())
+    cache.load()
+    ids = sorted(i.image_id for i in ds.images)
+    cache.append(ids, ec.canonical_vectors(np.ones((12, other.dims), np.float32), other.dtype))
+    # a manifest of another identity placed where this run looks (the revision changes the name)
+    src = tmp_path / "ds.dcp" / "embeddings" / other.directory_name
+    dst = tmp_path / "ds.dcp" / "embeddings" / base.directory_name
+    if src != dst:
+        src.rename(dst)
+    emb = FakeEmbedder()
+    es = provider(emb).get(ds, make_ctx(tmp_path, None))
+    assert es.cache_hits == 0 and sum(emb.calls) == 12 and len(es.ids) == 12
+
+
+def test_the_spot_check_tolerance_is_strict() -> None:
+    assert embedding.SPOT_MIN_COSINE >= 0.999
+
+
+def test_the_sample_depends_only_on_the_run_and_the_ids_never_on_the_cache() -> None:
+    keys = [f"{i:016x}" for i in range(500)]
+    runs = {
+        embedding.pick_sample(keys, f"{n:08x}-2222-4333-8444-5555bbbb5555")[0] for n in range(20)
+    }
+    assert len(runs) > 5  # varies with the per-run value
+    assert embedding.pick_sample(keys, RUN) == embedding.pick_sample(list(reversed(keys)), RUN)
 
 
 def test_resume_embeds_only_what_is_missing(tmp_path: Path) -> None:
@@ -427,6 +524,7 @@ def test_the_spot_check_sample_is_deterministic_per_run_and_bounded() -> None:
     assert a == embedding.pick_sample(keys, RUN) and len(a) == embedding.SPOT_MAX
     assert a != embedding.pick_sample(keys, "2222aaaa-2222-4333-8444-5555bbbb5555")
     assert embedding.sample_size(0) == 0 and embedding.sample_size(3) == 3
+    assert embedding.sample_size(50) == 10
     assert embedding.sample_size(10_000) == embedding.SPOT_MAX
 
 

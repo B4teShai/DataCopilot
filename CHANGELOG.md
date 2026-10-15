@@ -79,6 +79,10 @@ once a release is tagged.
   of every embedding check. Optional perceptual-hash prefilter (`near_duplicate_phash_max_distance`).
   `--checks all` includes the embedding checks only with an embedder; `registry.EMBEDDING_CHECKS`.
 
+- Cache verification rule: at least half of the sampled cached vectors must be re-verifiable
+  (sample 1 percent, 10 to 64, cosine at least 0.999) or no cached vector is trusted; the new
+  `embedding_cache_unverified` finding and event report it.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

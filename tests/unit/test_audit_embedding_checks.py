@@ -414,3 +414,19 @@ def test_findings_never_contain_directories(tmp_path: Path) -> None:
     for check in CHECKS.values():
         text = repr([f.model_dump() for f in check.plugin.run(ds, ctx)])
         assert str(tmp_path) not in text and "images/" not in text
+
+
+@pytest.mark.parametrize("name", sorted(CHECKS))
+def test_an_unverifiable_cache_is_a_warn_finding_and_its_images_are_unchecked(
+    tmp_path: Path, name: str
+) -> None:
+    ds, emb, ctx = scene(tmp_path, clean_rows(12))
+    CHECKS[name].plugin.run(ds, ctx)  # fills the cache
+    for path in (tmp_path / "images").iterdir():
+        path.unlink()
+    fresh = ctx.model_copy(update={"embeddings": embedding.PipelineProvider(emb, batch_size=8)})
+    found = CHECKS[name].plugin.run(ds, fresh)
+    (f,) = of(found, "embedding_cache_unverified")
+    assert f.severity == "WARN" and f.payload["reason"] == "too_few_verifiable"
+    (miss,) = of(found, "images_not_embedded")
+    assert miss.severity == "CRITICAL" and miss.payload["reasons"] == {"file_missing": 12}

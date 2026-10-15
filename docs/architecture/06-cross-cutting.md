@@ -23,7 +23,13 @@ per CLI invocation and doubles as `AuditRun.run_id` (built, tested through the C
 | `audit_not_stored` | WARN | `reason` (exception class; the dataset is read-only, the reports were written) | built |
 | `audit_nofollow_unavailable` | WARN | none (the platform lacks `O_NOFOLLOW`) | built |
 | `audit_cache_discarded` | WARN | `sampled`, `mismatched` (the spot check found a wrong cached digest) | built |
-| `embeddings_computed` | INFO | `model_id`, `model_revision`, `image_count`, `cache_hits`, `duration_ms` | planned |
+| `embeddings_computed` | INFO | `model_id`, `model_revision`, `image_count`, `embedded_count`, `cache_hits`, `missing_count`, `duration_ms` | built |
+| `embedding_cache_disabled` | WARN | `reason` (`ci_without_key`, `directory_not_private`, `secret_not_private`, `cache_directory_unavailable`) | built |
+| `embedding_cache_rejected` | WARN | `state`, `reasons` (rejected shards or manifest by reason code, for example `bad_digest`, `bad_mac`) | built |
+| `embedding_cache_unverified` | WARN | `reason` (`too_few_verifiable`), `sampled`, `verified` (fewer than half of the sampled cached vectors could be re-read and re-embedded; none were trusted) | built |
+| `embedding_cache_discarded` | WARN | `sampled`, `mismatched` (a re-embedded vector disagreed with the cache) | built |
+| `model_loaded` | INFO | `model_id`, `model_revision`, `device`, `weights_sha256`, `duration_ms` | built |
+| `embedder_device_fallback` | WARN | `model_id`, `reason` (exception class name) | built |
 | `audit_completed` | INFO | `run_id`, `dataset_version`, `critical`, `warn`, `info`, `passed` | built |
 | `report_written` | INFO | `format`, `path` (file name only, never the directory) | built |
 | `split_completed` | INFO | `parent_version`, `dataset_version`, `train`, `val`, `test`, `group_count` | planned |
@@ -32,7 +38,7 @@ per CLI invocation and doubles as `AuditRun.run_id` (built, tested through the C
 | `proposal_candidates_rejected` | WARN | `reason`, `count` | planned |
 | `review_exported` / `review_imported` | INFO | `target`, `set_id`, counts by status | planned |
 | `proposals_applied` | INFO | `parent_version`, `dataset_version`, `applied_count` | planned |
-| `model_license_shown` | INFO | `model_id`, `license`, `gated` | planned |
+| `model_license_shown` | INFO | `model_id`, `license`, `gated` | built |
 | `plugin_rejected` | WARN | `group`, `name`, `license`, `reason` | planned |
 
 Rules specific to this project: no image paths that contain user names in log fields
@@ -78,7 +84,8 @@ environment, where logs are public artifacts.
 | Threat | Mitigation | Status |
 |---|---|---|
 | Malicious export file (XML entity expansion, path traversal in file names, oversized or deeply nested JSON/XML, regex backtracking) | XML is parsed from `expat` events with every DOCTYPE and entity declaration rejected and nesting limited to 32 levels; every path resolved and kept inside the dataset root (symlinks included) before reading or writing; size limits per file (JSON 256 MiB, XML 8 MiB, text 8 MiB, `data.yaml` 1 MiB and 4096 characters per line, no regular expressions in its parser); untrusted `source` content written to XML is limited to valid element names, legal characters and bounded depth and size, and everything skipped is counted | built |
-| Pickled or executable payloads in weights | `safetensors` preferred; `torch.load(weights_only=True)`; weight hash recorded | planned |
+| Pickled or executable payloads in weights | Cards pin a full commit and the sha256 of each `.safetensors` file and cannot name a pickle checkpoint; only those files and `config.json` are downloaded (`allow_patterns`); each file is hashed and compared before the deserialiser sees it; `trust_remote_code=False`, `use_safetensors=True`, load from the verified local directory with `local_files_only`; hashes recorded in `model_loaded` and the cache manifest; hub error text is never copied into messages; download timeouts bounded | built (fake-library tests; real DINOv2 and SigLIP2 smoke runs behind the `real_model` marker) |
+| Forged or poisoned embedding cache hides leakage from the gate | `embed/cache.py` and `audit/embedding.py` treat `dataset.dcp/embeddings/` as untrusted: bounded from metadata before decoding, per-shard sha256 on the parsed bytes, HMAC over the manifest bound to model, revision, dimensions, dtype, weight hashes and dataset version (key: `DATACOPILOT_CACHE_KEY`, or a private local secret; in CI without a key the cache is neither read nor written). Every run re-embeds a sample of cache hits chosen from `sha256(run_id : image_id)` with a per-run random `run_id` (1 percent, 10 to 64): one vector with cosine below 0.999 to the fresh one discards the whole cache and recomputes. **Verified-fraction rule:** if fewer than half of the sampled hits can be verified (image unreadable, embedder failing, time budget), no cached vector is trusted for this run: they are dropped, everything is recomputed, and images that cannot be read are reported as not embedded (WARN, CRITICAL above `max_unchecked_fraction` or with `--require-local-images`) next to an `embedding_cache_unverified` WARN. A rejected shard or manifest is an `embedding_cache_rejected` WARN. Residual risk: a holder of the MAC key can forge the vectors outside the sample; the key is the trust anchor | built |
 | Model hallucinations written into labels | proposals only; nothing auto-applied; consensus gating; review in an external tool; `provenance=proposal_accepted` on every applied row; lineage allows rollback | planned |
 | Prompt injection through category names or aliases used as prompts | prompts are built from an allow-listed character set; prompt hash recorded; model output validated as boxes and class ids only, never executed | planned |
 | License contamination | allow-list in the model registry; copyleft libraries only behind an extra with lazy import and a user-facing notice; copyleft-derived code in separate packages; CI dependency check that the core lock has no copyleft package | planned (policy fixed by ADR-0001) |

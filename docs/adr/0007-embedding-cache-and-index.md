@@ -63,9 +63,18 @@ no float16 handling beyond what NumPy offers. Parquet already has footer metadat
    dtype, weight hashes and **dataset version**. Without a key outside CI the secret is generated
    beside the cache directory; in CI without a key the cache is not read and not written. A forged
    shard cannot verify without the key; a shard from another dataset version fails the binding.
-5. As a second layer a deterministic sample of cache hits is re-embedded on every run and compared;
-   a mismatch discards the cache and is a finding. This catches bulk forgery by someone who does hold
-   the key's directory; it does not prove every vector.
+5. As a second layer a sample of cache hits (1 percent, 10 to 64) is re-embedded on every run and
+   compared (cosine at least 0.999 between canonical vectors: both sides are rounded identically, so
+   only the backend's nondeterminism, about 1e-5, remains). The sample is ordered by
+   `sha256(run_id : image_id)` where `run_id` is a fresh UUID per invocation, so the writer of the
+   cache cannot predict it. One disagreeing vector discards the whole cache for the run and
+   recomputes everything. **Verified-fraction rule:** if fewer than half of the sampled hits can be
+   verified (image unreadable, embedder failing, time budget), no cached vector is trusted: they are
+   dropped and recomputed, an unreadable image becomes "not embedded" (the existing gating outcome),
+   and an `embedding_cache_unverified` finding and event say why. A precomputed cache therefore
+   needs the images to be present; without them the gate fails rather than trusting vectors it
+   cannot check. This catches bulk forgery by someone who holds the key; it does not prove every
+   vector, so the key stays the trust anchor.
 6. A rejected shard or manifest is ignored, counted by reason and reported; the vectors are
    recomputed. A cache problem never silently reduces what is checked.
 7. Vectors are L2-normalised and rounded to float16 (default) or float32. Rounding is IEEE round to

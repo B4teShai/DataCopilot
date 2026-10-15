@@ -456,6 +456,16 @@ BAD_SHARDS: list[tuple[str, Callable[[], bytes], str]] = [
         "bad_shape",
     ),
     (
+        "wrong declared revision",
+        lambda: parquet_bytes(table_of(ids(2), unit(2)), dcp_revision="2"),
+        "bad_shape",
+    ),
+    (
+        "wrong declared dtype",
+        lambda: parquet_bytes(table_of(ids(2), unit(2)), dcp_dtype="float16"),
+        "bad_shape",
+    ),
+    (
         "wrong declared dataset version",
         lambda: parquet_bytes(table_of(ids(2), unit(2)), dcp_dataset_version=OTHER_VERSION),
         "bad_shape",
