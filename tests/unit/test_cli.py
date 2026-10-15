@@ -47,7 +47,7 @@ def test_doctor_emits_one_compliant_log_line(
 ) -> None:
     assert run(monkeypatch, "doctor") == 0
     out, err = capsys.readouterr()
-    assert out == "ok\n"
+    assert out.splitlines()[0] == "ok"
     (rec,) = log_lines(err)
     assert REQUIRED <= rec.keys()
     assert rec["message"] == "doctor_completed" and rec["service"] == "datacopilot"
@@ -58,7 +58,7 @@ def test_invalid_setting_exits_2_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], var: str
 ) -> None:
     monkeypatch.setenv(var, "banana")
-    assert run(monkeypatch, "doctor") == 2
+    assert run(monkeypatch, "formats") == 2
     out, err = capsys.readouterr()
     assert out == "" and var in err and "Traceback" not in err
     assert len(err.strip().splitlines()) == 1

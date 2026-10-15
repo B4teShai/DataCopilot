@@ -20,7 +20,7 @@ from datacopilot.logging import (
     current_request_id,
     get_logger,
 )
-from datacopilot.settings import SettingsError, load_settings
+from datacopilot.settings import Settings, SettingsError, load_settings
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False, help="DataCopilot")
 
@@ -31,35 +31,66 @@ def _version(value: bool) -> None:
         raise typer.Exit()
 
 
+_settings_error: str | None = None
+"""Set by the root callback for ``doctor`` only, which reports a bad environment instead of
+refusing to start (every other command exits 2 at once)."""
+
+
 @app.callback()
 def _root(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option("--version", callback=_version, is_eager=True, help="Show version and exit."),
     ] = False,
 ) -> None:
+    global _settings_error  # noqa: PLW0603
+    _settings_error = None
     try:
         settings = load_settings()
     except SettingsError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(2) from None
+        if ctx.invoked_subcommand != "doctor":
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(2) from None
+        _settings_error = str(exc)
+        settings = Settings()
     configure_logging("datacopilot", settings)
 
 
-def _run_doctor() -> None:
+def _run_doctor() -> dict[str, Any]:
+    """Diagnose the installation, log one ``doctor_completed`` record and return the report."""
+    from datacopilot import doctor as diagnosis
+
+    error = _settings_error
+    report = diagnosis.diagnose(None if error else load_settings(), settings_error=error)
     get_logger("datacopilot.cli").info(
         "doctor_completed",
-        status="ok",
+        status=report["status"],
         package_version=__version__,
         python_version=platform.python_version(),
     )
+    return report
 
 
 @app.command()
-def doctor() -> None:
-    """Check that the installation works."""
-    _run_doctor()
-    typer.echo("ok")
+def doctor(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Print the report as one JSON object.")
+    ] = False,
+) -> None:
+    """Check the installation: versions, extras, settings, cache directory, FAISS and GPU.
+
+    Prints the status (`ok`, `warn` or `fail`) and one line per section, or with --json one JSON
+    object (schema 1). Never prints secrets. Exit codes: 0 ok or warn; 1 a core dependency is
+    missing; 2 an invalid DATACOPILOT_* setting (reported in the output).
+    """
+    from datacopilot import doctor as diagnosis
+
+    report = _run_doctor()
+    typer.echo(diagnosis.to_json(report) if json_out else diagnosis.to_text(report))
+    code = diagnosis.exit_code(report)
+    if code:
+        raise typer.Exit(code)
 
 
 FormatOption = Annotated[

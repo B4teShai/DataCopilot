@@ -9,7 +9,7 @@ import pytest
 SRC = Path(__file__).resolve().parents[2] / "src" / "datacopilot"
 CORE_DEPENDENCIES = {"click", "jinja2", "numpy", "pyarrow", "pydantic", "structlog", "typer"}
 ALLOWED_TOP_LEVEL = set(sys.stdlib_module_names) | CORE_DEPENDENCIES | {"datacopilot", "__future__"}
-UPPER = ("cli", "api", "convert", "audit", "split", "propose", "patch", "report")
+UPPER = ("cli", "api", "convert", "doctor", "audit", "split", "propose", "patch", "report")
 ADAPTER_FREE = {"datacopilot.io.registry", "datacopilot.io.report", "datacopilot.io.files"}
 
 
