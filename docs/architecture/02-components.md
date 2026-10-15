@@ -320,14 +320,15 @@ FAISS index for kNN.
 class Embedder(Protocol):
     spec: PluginSpec
     def embed(self, images: Iterable[Image], *, batch_size: int) -> NDArray[np.float32]   # (n, dims)
-def knn(vectors: NDArray[np.float32], k: int) -> tuple[NDArray[np.int64], NDArray[np.float32]]
+def knn(queries, base, k, *, same_set=False, backend="auto") -> tuple[NDArray[np.int64], NDArray[np.float32]]
+def iter_knn(queries, base, k, *, same_set=False, backend="auto", deadline=None) -> Iterator[KnnBlock]
 ```
 
 Depends on: `core/`, `models/`, `[embed]` extra inside functions. Status: the `Embedder` and
 `EmbedderPlugin` protocols and the registry (`embed/protocol.py`, `embed/registry.py`) are **built**;
 the backends (`embed/backends.py`: `dinov2_small`, `dinov2_base`, `siglip2_base`), the bounded image
 decoder and preprocessing (`embed/imaging.py`), the `hash` test embedder (`embed/hashembed.py`) and
-the cache (`embed/cache.py`) are **built**; kNN follows.
+the cache (`embed/cache.py`) and the exact kNN index (`embed/knn.py`) are **built**.
 
 Deviation from the first design: `embed` takes encoded image bytes (`Sequence[bytes]`), not `Image`
 rows. The caller resolves every path inside the dataset root, opens it with `O_NOFOLLOW`, bounds its

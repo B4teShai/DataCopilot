@@ -64,6 +64,12 @@ once a release is tagged.
 - `hash`: a dependency-free test embedder (SimHash of byte shingles) for tests and benchmarks.
 - A `real_model` pytest marker (off by default) for smoke tests with real weights and real FAISS.
 
+- Exact cosine kNN (`embed/knn.py`): blocked NumPy matrix multiply with memory bounded by a block
+  budget (256 MiB), deterministic order (similarity descending, lower index first), caps of 500,000
+  rows and 100 neighbours, a deadline between blocks, and an exact FAISS `IndexFlatIP` adapter
+  (`[embed]`) used above 20,000 rows when installed and equal within 1e-4 in similarity.
+  Measured: 50,000 x 768, k = 10: 15.9 s, 0.83 GB peak RSS (NumPy, Apple M4 Pro).
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.
