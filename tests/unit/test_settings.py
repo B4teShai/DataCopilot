@@ -100,3 +100,33 @@ def test_invalid_cache_key_names_the_variable_not_the_value(value: str) -> None:
     assert (
         "DATACOPILOT_CACHE_KEY" in str(info.value) and value not in str(info.value) or value == ""
     )
+
+
+# ------------------------------------------------------------ DATACOPILOT_ALLOWED_LICENSES
+def test_allowed_licenses_default_is_the_permissive_set() -> None:
+    assert load_settings({}).allowed_licenses == frozenset({"apache-2.0", "mit", "bsd-3-clause"})
+
+
+def test_allowed_licenses_are_parsed_trimmed_and_case_folded() -> None:
+    s = load_settings({"DATACOPILOT_ALLOWED_LICENSES": " MIT , Apache-2.0,SAM-License "})
+    assert s.allowed_licenses == frozenset({"mit", "apache-2.0", "sam-license"})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",  # an empty allow-list is almost certainly a mistake, never "allow everything"
+        "   ",
+        "MIT,,Apache-2.0",
+        "MIT,",
+        "MIT;Apache-2.0",
+        "mit\nbsd",
+        "x" * 65,
+        "../etc/passwd",
+        ",".join(f"L{n}" for n in range(33)),  # more entries than any sane policy
+    ],
+)
+def test_invalid_allowed_licenses_name_the_variable_not_the_value(value: str) -> None:
+    with pytest.raises(SettingsError, match="DATACOPILOT_ALLOWED_LICENSES") as err:
+        load_settings({"DATACOPILOT_ALLOWED_LICENSES": value})
+    assert value.strip() == "" or value not in str(err.value)

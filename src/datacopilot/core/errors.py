@@ -21,3 +21,11 @@ class StoreError(DataCopilotError):
 
 class ConversionLossError(DataCopilotError):
     """A conversion dropped fields while strict mode was requested."""
+
+
+class LicenseError(DataCopilotError):
+    """A model or plugin license is outside ``DATACOPILOT_ALLOWED_LICENSES``."""
+
+
+class ModelError(DataCopilotError):
+    """A model cannot be resolved, downloaded, verified, loaded or run."""

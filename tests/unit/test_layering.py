@@ -47,7 +47,11 @@ def test_domain_imports_only_stdlib_pydantic_numpy_and_itself(path: Path) -> Non
             assert name.startswith("datacopilot.core"), f"{path.name} imports {name}"
 
 
-@pytest.mark.parametrize("path", modules("io") + modules("store"), ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "path",
+    modules("io") + modules("store") + modules("embed") + modules("models"),
+    ids=lambda p: p.name,
+)
 def test_infrastructure_never_imports_application_or_interface(path: Path) -> None:
     for name in imports(path):
         assert not any(
@@ -99,3 +103,17 @@ def test_declared_core_dependencies_are_exactly_the_documented_set() -> None:
         if ">=" in line
     }
     assert names == CORE_DEPENDENCIES
+
+
+@pytest.mark.parametrize("path", modules("embed") + modules("models"), ids=lambda p: p.name)
+def test_model_runtime_never_imports_the_application_layers_or_other_adapters(path: Path) -> None:
+    for name in imports(path):
+        assert not allowed(name, {f"datacopilot.{u}" for u in UPPER}), f"{path.name}: {name}"
+        if name.startswith("datacopilot.io."):
+            assert allowed(name, ADAPTER_FREE), f"{path.name} imports adapter {name}"
+        assert not name.startswith("datacopilot.store"), f"{path.name} imports {name}"
+
+
+@pytest.mark.parametrize("path", modules("models"), ids=lambda p: p.name)
+def test_models_does_not_depend_on_embed(path: Path) -> None:
+    assert not any(n.startswith("datacopilot.embed") for n in imports(path))

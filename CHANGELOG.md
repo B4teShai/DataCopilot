@@ -37,6 +37,17 @@ once a release is tagged.
 - Events `dataset_ingested`, `dataset_exported` and `conversion_loss`.
 - Settings `DATACOPILOT_MAX_TABLE_ROWS` and `DATACOPILOT_MAX_TABLE_BYTES`.
 
+- Model registry (`models/registry.py`): cards pinned to a full commit hash and to the sha256 of
+  each safetensors file for `dinov2_small`, `dinov2_base` and `siglip2_base`; license guard
+  `get_model` / `require_license` against `DATACOPILOT_ALLOWED_LICENSES` (default
+  `Apache-2.0,MIT,BSD-3-Clause`; an empty or malformed list is a configuration error, exit 2);
+  `weight_hash`. `LicenseError` and `ModelError`.
+- Embedder protocol and registry (`embed/`, entry-point group `datacopilot.embedders`): embedders
+  receive encoded bytes, never paths; a first-party model is license-checked from its card before its
+  module is imported, any plugin before `create`.
+- `[embed]` extra declared (`pillow`, `safetensors`, `huggingface-hub`, `transformers`, `faiss-cpu`
+  and the tensor library); the core install is unchanged. `THIRD_PARTY_MODELS.md` lists the three models.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

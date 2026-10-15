@@ -323,7 +323,15 @@ class Embedder(Protocol):
 def knn(vectors: NDArray[np.float32], k: int) -> tuple[NDArray[np.int64], NDArray[np.float32]]
 ```
 
-Depends on: `core/`, `models/`, `[embed]` extra inside functions. Status: planned.
+Depends on: `core/`, `models/`, `[embed]` extra inside functions. Status: the `Embedder` and
+`EmbedderPlugin` protocols and the registry (`embed/protocol.py`, `embed/registry.py`) are **built**;
+backends, cache and kNN are planned in this document's later sections as they land.
+
+Deviation from the first design: `embed` takes encoded image bytes (`Sequence[bytes]`), not `Image`
+rows. The caller resolves every path inside the dataset root, opens it with `O_NOFOLLOW`, bounds its
+size and hands the bytes over, so path containment lives in one reviewed place and a plugin is a pure
+function from bytes to vectors. Embedder names are `snake_case` (`dinov2_base`) because `PluginSpec.name`
+is; a hyphen is not accepted.
 
 ### `models/`
 
@@ -338,7 +346,10 @@ def get_model(model_id: str, allowed_licenses: frozenset[str]) -> ModelCard   # 
 def weight_hash(local_path: Path) -> str
 ```
 
-Status: planned.
+Cards pin a full 40-hex revision and the sha256 of each safetensors file (the registry cannot name a
+pickle checkpoint). `get_model` raises `LicenseError` before any download or load; the allow-list is
+compared case-insensitively. Status: **built** (`dinov2_small`, `dinov2_base`, `siglip2_base`; DINOv3
+and SAM cards are not registered). The `ModelCard` also carries `dims` and `family`.
 
 ### `integrations/`
 

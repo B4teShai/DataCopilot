@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal
@@ -31,11 +32,16 @@ _FIELDS: dict[str, tuple[str, Callable[[str], str]]] = {
     "hash_cache": ("HASH_CACHE", lambda v: v.strip().lower()),
     "cache_dir": ("CACHE_DIR", str.strip),
     "cache_key": ("CACHE_KEY", str.strip),
+    "allowed_licenses": ("ALLOWED_LICENSES", str.strip),
 }
 MIN_CACHE_KEY_CHARS = 16
 MAX_CACHE_KEY_CHARS = 1024
 MAX_WORKERS = 256
 """Upper bound of ``DATACOPILOT_WORKERS``; a typo must not start thousands of threads."""
+DEFAULT_ALLOWED_LICENSES = frozenset({"apache-2.0", "mit", "bsd-3-clause"})
+"""Licenses a model may carry by default (lower case; comparison is case-insensitive)."""
+MAX_LICENSES = 32
+_LICENSE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
 
 
 def _default_cache_dir(source: Mapping[str, str]) -> Path:
@@ -59,8 +65,28 @@ class Settings(BaseModel, frozen=True):
     )
     hash_cache: bool = True
     cache_key: SecretStr | None = None
+    allowed_licenses: frozenset[str] = DEFAULT_ALLOWED_LICENSES
     ci: bool = False
     cache_dir: Path = Field(default_factory=lambda: _default_cache_dir(os.environ))
+
+    @field_validator("allowed_licenses", mode="before")
+    @classmethod
+    def _license_list(cls, value: object) -> object:
+        """``"MIT, Apache-2.0"`` -> ``{"mit", "apache-2.0"}``; anything malformed is rejected.
+
+        An empty list is refused rather than read as "allow nothing" or "allow everything": both
+        readings are surprising and the variable is a security control.
+        """
+        if not isinstance(value, str):
+            return value
+        parts = [part.strip() for part in value.split(",")]
+        if (
+            not parts
+            or len(parts) > MAX_LICENSES
+            or not all(_LICENSE_TOKEN.fullmatch(part) for part in parts)
+        ):
+            raise ValueError("invalid license list")
+        return frozenset(part.casefold() for part in parts)
 
     @field_validator("cache_key")
     @classmethod
