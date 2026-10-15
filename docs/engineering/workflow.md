@@ -51,7 +51,9 @@ A change is done when all of the following are true:
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs lint, format check, type check and tests with coverage on
-Python 3.10 to 3.13 on every push to `main` and every pull request. A red CI blocks merge.
+Python 3.10 to 3.13, and jobs for the lock file, the strict docs build and the executed tutorial, the
+package (artifact contents, `twine check --strict`, clean-environment install) and `pip-audit`, on every
+push to `main` and every pull request. A red CI blocks merge.
 
 ## Releases
 
@@ -59,8 +61,9 @@ Python 3.10 to 3.13 on every push to `main` and every pull request. A red CI blo
   says so explicitly.
 - Deprecations: the old name keeps working for one minor version and emits a
   `DeprecationWarning` that names the replacement.
-- Release steps: update `CHANGELOG.md`, bump `__version__`, tag `vX.Y.Z`, build with
-  `uv build`, publish to TestPyPI, install the wheel in a clean environment and run the
-  `doctor` command, then publish to PyPI.
+- Release steps are in [release.md](release.md): update `CHANGELOG.md`, bump `__version__`, build the
+  wheel and sdist, rehearse locally (checks, `twine check --strict`, install in clean environments and run
+  `doctor`), get the maintainer's approval, tag `vX.Y.Z`; the tag-triggered pipeline publishes with trusted
+  publishing. TestPyPI is not used (the name is taken by another project).
 - A release includes: wheel and sdist, CHANGELOG entry, updated docs, the benchmark numbers
   used for any performance claim.

@@ -30,8 +30,8 @@ const lInfra = lane("l_inf", laneX, laneY(4), laneW, 250, "Infrastructure");
 const lSide = lane("l_side", laneX + laneW + 30, laneY(0), 270, 770, "Cross-cutting, plugins");
 
 // Interface.
-const cli = component("cli", ...p(0, 0, 6), "cli/", "Typer commands. Built: doctor, ingest, export, formats, audit, embed. Planned: split, propose, review, apply", true);
-const api = component("api", ...p(0, 1, 6), "api.py", "public Python API: load, audit, split, propose, apply, export");
+const cli = component("cli", ...p(0, 0, 6), "cli/", "Typer commands. Built: doctor (--json), ingest, export, formats, audit, embed. Planned: split, propose, review, apply", true);
+const api = component("api", ...p(0, 1, 6), "api.py", "public Python API. Built: load, audit, export. Planned: split, propose, apply", true);
 
 // Application (integer columns).
 const convert = component("convert", ...p(0, 2), "convert.py", "ingest / export use case", true);
@@ -47,7 +47,7 @@ const geometry = component("geometry", ...p(1.5, 3), "core/geometry.py", "box co
 const version = component("version", ...p(3.5, 3), "core/version.py", "content hash, lineage", true);
 
 // Infrastructure row 1 (half columns) and the store spanning all columns.
-const io = component("io", ...p(0.5, 4), "io/", "4 formats + registry", true);
+const io = component("io", ...p(0.5, 4), "io/", "6 formats + registry", true);
 const embed = component("embed", ...p(1.5, 4), "embed/", "DINOv2, SigLIP2, cache, kNN", true);
 const models = component("models", ...p(2.5, 4), "models/", "registry, license guard", true);
 const integrations = component("integrations", ...p(3.5, 4), "integrations/", "fiftyone, cvat, cleanlab, lightly");

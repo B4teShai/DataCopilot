@@ -63,7 +63,7 @@ Failure paths:
 |---|---|---|
 | Unknown command or option; invalid `DATACOPILOT_*` value | one line on `stderr`, no log record | 2 |
 | `--format` not registered, or its extra is missing | `FormatError` names the format and the extra | 1 |
-| Export directory missing or unreadable; malformed COCO/YOLO/VOC/ImageFolder content (invalid JSON, unsafe path, bad label line, XML with a DOCTYPE) | one `FormatError` naming the file and the problem | 1 |
+| Export directory missing or unreadable; malformed COCO/YOLO/VOC/CVAT/Label Studio/ImageFolder content (invalid JSON, unsafe path, bad label line, XML with a DOCTYPE, an out-of-range coordinate) | one `FormatError` naming the file and the problem | 1 |
 | Two images with identical content; no images found | `ValidationError` / `FormatError` naming the files; nothing is written | 1 |
 | `export` output not empty, or `--strict` with dropped fields | `FormatError` / `ConversionLossError` listing columns and counts; nothing is written | 1 |
 | Table over `DATACOPILOT_MAX_TABLE_ROWS` / `_BYTES`, wrong Parquet schema, manifest counts that do not match | `StoreError` naming the file and the limit | 1 |

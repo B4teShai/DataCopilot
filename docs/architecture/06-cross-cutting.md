@@ -11,8 +11,9 @@ per CLI invocation and doubles as `AuditRun.run_id` (built, tested through the C
 
 | Event (`message`) | Level | Fields | Status |
 |---|---|---|---|
-| `doctor_completed` | INFO | `status`, `package_version`, `python_version` | built |
+| `doctor_completed` | INFO | `status` (`ok`, `warn`, `fail`), `package_version`, `python_version` | built |
 | `command_failed` | ERROR | `command`, `exception` (from `exc_info`) | built |
+| `dataset_loaded` | INFO | `format`, `image_count`, `annotation_count`, `dataset_version` (the Python API's `load`) | built |
 | `dataset_ingested` | INFO | `format`, `image_count`, `annotation_count`, `dataset_version`, `duration_ms` | built |
 | `conversion_loss` | WARN | `source_format`, `target_format`, `column`, `count`, `kind` (`dropped` or `skipped`) | built |
 | `dataset_exported` | INFO | `format`, `image_count`, `annotation_count`, `dataset_version`, `dropped_count`, `skipped_count`, `strict`, `duration_ms` | built |
@@ -60,8 +61,9 @@ code 2.
 
 | Command family | 0 | 1 | 2 | 130 |
 |---|---|---|---|---|
-| `--version`, `doctor` (built) | printed | internal error (`command_failed`) | bad `DATACOPILOT_*` value, unknown option | Ctrl-C |
-| `ingest`, `export` (built) | converted; `export --strict` with zero dropped fields | unreadable or malformed input, invariant violation, identical image content, non-empty output, over-limit table, `--strict` with dropped fields, unknown format | bad option (`--format` missing, output not `*.dcp`, invalid `--group-by`), bad env | Ctrl-C; no partial version left visible |
+| `--version` (built) | printed | internal error (`command_failed`) | bad `DATACOPILOT_*` value, unknown option | Ctrl-C |
+| `doctor` (built) | status `ok` or `warn` | a core dependency is missing (`fail`), internal error | bad `DATACOPILOT_*` value (reported in the output, not refused) | Ctrl-C |
+| `ingest`, `export` (built) | converted; `--strict` with zero dropped or skipped values | unreadable or malformed input, invariant violation, identical image content, non-empty output, over-limit table, `--strict` with dropped or skipped values (also on `ingest`: nothing is written), unknown format | bad option (`--format` missing, output not `*.dcp`, invalid `--group-by`), bad env | Ctrl-C; no partial version left visible |
 | `audit` (built) | run completed and gate passed (or no `--fail-on`) | `--fail-on` matched; dataset unreadable; report not writable; embedder license refused; embedder missing its extra or failing (a CRITICAL finding) | bad option (unknown check, bad or never-firing `--fail-on`, `--workers` out of range, embedding check without `--embedder`, bad `--embedder`, `--embed-batch` or `--similarity-threshold`), bad env | Ctrl-C |
 | `embed` (built) | every image embedded and stored | an image without an embedding, embedder failure, license refused, cache not writable, unreadable dataset | bad option, cache unusable (`CI` without key) | Ctrl-C |
 | `split` (planned) | new version written | ratios do not sum to 1, impossible stratification, store error | bad option | Ctrl-C |
@@ -85,7 +87,7 @@ environment, where logs are public artifacts.
 
 | Threat | Mitigation | Status |
 |---|---|---|
-| Malicious export file (XML entity expansion, path traversal in file names, oversized or deeply nested JSON/XML, regex backtracking) | XML is parsed from `expat` events with every DOCTYPE and entity declaration rejected and nesting limited to 32 levels; every path resolved and kept inside the dataset root (symlinks included) before reading or writing; size limits per file (JSON 256 MiB, XML 8 MiB, text 8 MiB, `data.yaml` 1 MiB and 4096 characters per line, no regular expressions in its parser); untrusted `source` content written to XML is limited to valid element names, legal characters and bounded depth and size, and everything skipped is counted | built |
+| Malicious export file (XML entity expansion, path traversal in file names, oversized or deeply nested JSON/XML, regex backtracking) | XML is parsed from `expat` events with every DOCTYPE and entity declaration rejected and nesting limited to 32 levels, 1,000,000 elements per document and 256 attributes per element; every path resolved and kept inside the dataset root (symlinks included) before reading or writing; size limits per file (COCO JSON 256 MiB, Label Studio JSON 64 MiB, VOC XML 8 MiB, CVAT XML 64 MiB, text 8 MiB, `data.yaml` 1 MiB and 4096 characters per line, no regular expressions in its parser); untrusted `source` content written to XML is limited to valid element names, legal characters and bounded depth and size, and everything skipped is counted; CVAT and Label Studio readers also validate every coordinate, percentage and size (finite, in range, positive), refuse repeated JSON keys (Label Studio), bound tasks, annotations and results per task, never fetch a remote image reference, never store personal fields of `completed_by`, and count every unsupported construct (`skipped`) so `ingest --strict` fails on it | built |
 | Pickled or executable payloads in weights | Cards pin a full commit and the sha256 of each `.safetensors` file and cannot name a pickle checkpoint; only those files and `config.json` are downloaded (`allow_patterns`); each file's size and sha256 are compared with the card before the deserialiser sees it, and `config.json` is pinned the same way (an `auto_map` entry cannot appear), with its digest in the cache identity; `trust_remote_code=False`, `use_safetensors=True`, load from the verified local directory with `local_files_only`; hashes recorded in `model_loaded` and the cache manifest; hub error text is never copied into messages; download timeouts bounded; `HF_HUB_DISABLE_TELEMETRY=1` by default; a custom `HF_ENDPOINT` is refused in CI unless `DATACOPILOT_ALLOW_HF_ENDPOINT=1` (the token goes to that host) | built (fake-library tests; real DINOv2 and SigLIP2 smoke runs behind the `real_model` marker) |
 | Personal data in leakage findings; a test double mistaken for a real embedder; a symlinked dataset | Group ids come from file paths, so `group_overlap` shows only a 12-hex `group_ref` unless `--show-group-labels` is given; group labels are compared after NFKC, case folding and trimming; the `hash` embedder compares file bytes, is marked `test_only`, prints a warning, is refused for any gate unless `--allow-test-embedder` and appears as `hash@1-test-only` in every report; the dataset path is `lstat`-ed and a symlink is refused before anything is resolved or read | built |
 | Evading the embedding checks through image decoding (clipped or alpha-hidden pixels, animations, exotic formats) | Only JPEG, PNG, GIF and BMP reach a decoder; 16-bit integer images are scaled (65535 to 255) instead of saturating, alpha (RGBA, LA, palette and colour-key transparency) is composited on white so what hides under alpha 0 cannot change or carry an embedding, unknown pixel modes and animations (more than one frame, `multi_frame`) are refused and counted as not embedded (gating for `leakage`); Pillow missing is a `ModelError` with the install hint, never a bare import error | built |
@@ -130,14 +132,17 @@ status; the registry logs `model_license_shown` on first use.
 
 What a user can inspect today:
 
-- `datacopilot doctor` prints `ok` and emits one `doctor_completed` record with
-  `package_version` and `python_version`; exit code 0.
+- `datacopilot doctor` prints the status (`ok`, `warn`, `fail`) and one line per section, or one JSON
+  object with `--json` (schema 1): versions of the package and its core dependencies, which extras are
+  importable (looked up, not imported), the validated settings (the cache key only as `set` or
+  `unset`), the cache directory (existence, writability, a bounded size that never follows symlinks),
+  FAISS (never imported), GPU visibility, the allowed licenses and the registered plugin names per
+  group (not loaded). It emits one `doctor_completed` record; exit code 0 (ok or warn), 1 (a core
+  dependency is missing) or 2 (an invalid `DATACOPILOT_*` value, reported by `doctor` itself).
 - Every record on `stderr` carries `request_id`; `DATACOPILOT_ENV=dev` with
   `DATACOPILOT_LOG_LEVEL=DEBUG` enables debug output.
 
-Planned additions to `doctor`: installed extras and whether their imports succeed; GPU
-presence and free memory; `DATACOPILOT_CACHE_DIR` writability; the allowed-license list;
-registered plugins per group with license and extra, without loading them; the
-`schema_version` the package writes. Planned per-run artefacts: `audits/<run_id>.json`
+Planned additions to `doctor`: free GPU memory and the `schema_version` migration state.
+Planned per-run artefacts: `audits/<run_id>.json`
 with timings per check, `ConversionReport` on every conversion, and `duration_ms` on every
 completed-event record.

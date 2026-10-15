@@ -8,6 +8,38 @@ once a release is tagged.
 
 ### Added
 
+- CVAT for images 1.1 XML (`cvat_xml`) and Label Studio JSON (`label_studio`) readers and writers.
+  CVAT: boxes, labels with colour and type, attributes, `occluded`, `source` as provenance, task subset as
+  split; polygons, polylines, points, ellipses, masks, skeletons, cuboids, tags, rotated boxes and tracks
+  are counted as `skipped` (`annotations.unsupported.<shape>`), never dropped silently. Label Studio:
+  `rectanglelabels` (percent of the original size, converted to pixels, rounded to 1e-6) and `choices`
+  (classification), annotations as human rows and the first prediction as model rows with scores, one
+  annotation per task (ground truth first, else the lowest id) with the rest counted, unsupported result
+  types, rotated rectangles and remote images counted, personal fields of `completed_by` never stored.
+  Both are in the loss matrix and the round-trip goldens.
+- `datacopilot ingest --strict`: fail, writing nothing, when a reader skipped or dropped anything.
+- `datacopilot doctor` is a real diagnosis: versions of the package and its core dependencies, importable
+  extras, validated settings (the cache key only as set or unset), the cache directory (existence,
+  writability, bounded size, symlinks not followed), FAISS, GPU visibility and the registered plugin names;
+  `--json` prints schema 1; exit 0 (ok or warn), 1 (a core dependency is missing), 2 (invalid settings,
+  reported by `doctor` itself).
+- Python API: `datacopilot.load`, `audit` and `export` over the same code as the commands, `Dataset.root`,
+  `__all__` pinned by a snapshot test, and `datacopilot.deprecation.deprecated` for the one-minor-version
+  deprecation policy. `python -m datacopilot` runs the command line.
+- Documentation site (MkDocs Material, pinned in a `docs` dependency group, strict build, no remote assets):
+  user guide, a tutorial on a generated synthetic dataset whose commands are executed by a test, a CLI
+  reference generated from the Typer application (a drift test fails when it is stale) and the design
+  documents. Every command block of a user page is executed by a test or marked non-executable.
+- Release pipeline: `release.yml` (build job with read-only permissions and no secrets; publish job with
+  trusted publishing, a protected `pypi` environment, version tags only, the exact build artifact, tag
+  equal to `__version__`), pinned actions in every workflow, CI jobs for the lock file, the docs, the
+  package (artifact contents, `twine check --strict`, clean-environment install on 3.10 and 3.13) and
+  `pip-audit`; tests that lint the workflows and assert the wheel and sdist contents; the runbook
+  `docs/engineering/release.md`.
+- Package metadata: classifiers, project URLs, authors and keywords; the sdist is an allow-list.
+- Element, attribute and depth limits in the XML parser (1,000,000 elements per document, 256 attributes per
+  element, a per-call depth limit), `parse_json(unique_keys=True)`.
+
 - `datacopilot audit`: runs the CPU checks `integrity` (existence, readable header, declared size,
   EXIF orientation; no full decode), `duplicates` (streamed sha256, CRITICAL across splits),
   `imbalance` (per-split long-tail ratio, effective class number, missing and unused classes) and
@@ -134,6 +166,8 @@ once a release is tagged.
 
 ### Changed
 
+- `doctor` prints several lines instead of `ok`; the first line is still the status. `Dataset` gained
+  an optional `root` (not part of equality or of the content version).
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.
 - Expected failures print one `error:` line on `stderr` in addition to the `command_failed`
   log record.
@@ -172,5 +206,7 @@ once a release is tagged.
 
 - Two images with identical bytes cannot be ingested together (`image_id` is the primary key).
 - The embedding cache is bound to the dataset version, so a new version recomputes every embedding;
-  `label_noise`, CVAT XML and Label Studio formats, `split`, `propose`, `review`, `apply` and the
-  Python API are not implemented yet.
+  `label_noise`, `split`, `propose`, `review` and `apply` are not implemented yet.
+- A Label Studio export does not carry the labelling configuration, so classes that no row uses are not
+  carried; CVAT label attribute definitions beyond a name are counted, not kept.
+- Before 1.0 a minor version may break the public API (`datacopilot.__all__`); the changelog says so.

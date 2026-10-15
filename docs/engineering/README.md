@@ -10,6 +10,7 @@ binding for every contribution; the review checklist refers to them by section.
 | [errors-and-logging.md](errors-and-logging.md) | Exit-code contract, the single error boundary, the structured-logging contract |
 | [dependencies-and-licensing.md](dependencies-and-licensing.md) | Core versus extras, license allow-list, model weights, how to add a dependency |
 | [workflow.md](workflow.md) | Branching, pull requests, review checklist, definition of done, CI, releases |
+| [release.md](release.md) | Release runbook: trusted publishing, local rehearsal, approval, rollback |
 
 Quick start for a contributor:
 

@@ -56,3 +56,14 @@ uv run pytest --cov=datacopilot --cov-fail-under=85
 
 Parity, chaos and benchmark tiers are selected with pytest markers (`-m parity`, `-m chaos`)
 and excluded from the default run once they exist.
+
+## Documentation and release tests
+
+- `tests/docs/` executes the tutorial and the Python API page (every `<!-- run -->` block; output is
+  compared with the page, `...` and `<uuid>` are wildcards), requires every command block of a user page
+  to be executed or marked `<!-- skip: reason -->`, checks the generated CLI reference for drift and, with
+  the `docs` dependency group, builds the site in strict mode and scans it for remote assets.
+- `tests/release/` lints every workflow (pinned actions, no expression in a script, permissions, trigger
+  and job separation of the release), and, with the `release` dependency group, builds the wheel and the
+  sdist, asserts their contents and metadata and installs the wheel in a clean environment.
+  `uv run --group docs --group release pytest` runs everything.

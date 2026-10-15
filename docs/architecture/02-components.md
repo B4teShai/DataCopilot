@@ -3,7 +3,7 @@
 ![Components by layer](../diagrams/png/components.png)
 
 Layers follow [ADR-0004](../adr/0004-layering-and-dependency-rule.md). Import package:
-`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, ImageFolder), `store/`, `logging.py`, `settings.py`. Everything else is planned.
+`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
 
 | Layer | Packages |
 |---|---|
@@ -25,9 +25,9 @@ Public interface (built):
 ```python
 app: typer.Typer
 def main() -> NoReturn                       # entry point `datacopilot`
-def doctor() -> None                         # prints "ok", logs doctor_completed
+def doctor(json_out) -> None                 # status + one line per section (or --json), logs doctor_completed; exit 0 / 1 / 2
 # `datacopilot --version` prints "datacopilot <__version__>"
-def ingest(path, format, output, group_by, name) -> None    # prints manifest.version
+def ingest(path, format, output, group_by, name, strict) -> None   # prints manifest.version
 def export(dataset, format, output, strict) -> None         # prints the output directory
 def formats() -> None                                       # name, read/write, license, extra
 def audit(dataset, checks, fail_on, report, json, sarif, workers, hash_cache,
@@ -41,15 +41,30 @@ def embed(dataset, embedder, embed_batch, embedding_cache,
 Built commands: `ingest`, `export`, `formats`, `audit`, `embed` (exit codes in their `--help` and in
 [04-flows.md](04-flows.md)). Planned commands: `split`, `propose`, `review`,
 `apply`, `plugins`. Each is a thin function that validates options and calls one use case.
-Until `api.py` exists the built commands call `convert.py` directly (imported lazily so
-`--version` and `doctor` do not load `pyarrow`).
+The built commands call `convert.py` and `audit/` directly (imported lazily so `--version` does not
+load `pyarrow`); `api.py` wraps the same use cases for Python callers.
 
-Depends on: `convert.py` (planned: `api.py`), `logging.py`, `settings.py`. Status:
+Depends on: `convert.py`, `audit/`, `doctor.py`, `logging.py`, `settings.py`. Status:
 **built** for `doctor`, `ingest`, `export`, `formats`, `audit`, `embed`; the rest planned.
 
 ### `api.py`
 
-Responsibility: the public Python API; stable names under semver.
+Responsibility: the public Python API; stable names under semver. `datacopilot.__all__` is the
+frozen surface, pinned by `tests/unit/test_api_surface.py`; `deprecation.deprecated` implements the
+one-minor-version deprecation policy.
+
+Built (thin wrappers over `convert.py` and `audit/`; same validation, limits and fail-closed rules
+as the commands; a failed gate is recorded in `AuditRun.passed`, not raised):
+
+```python
+def load(path, format=None, *, group_by=None, strict=False) -> Dataset
+def audit(dataset, checks="all", *, fail_on=("critical",), embedder=None, embed_batch=None,
+          similarity_threshold=None, allow_test_embedder=False, root=None, workers=None,
+          require_local_images=False) -> AuditRun
+def export(dataset, format, out, *, strict=False) -> ConversionReport
+```
+
+Planned (the design below; `load` and `audit` above are the built forms of the first two):
 
 ```python
 def load(path: str, *, format: str | None = None, group_by: str | None = None,
@@ -70,7 +85,7 @@ class Dataset:
     def export(self, format: str, out: str, *, strict: bool = False) -> ConversionReport
 ```
 
-Depends on: application packages, `core/`. Status: planned.
+Depends on: application packages, `core/`. Status: **built** for `load`, `audit`, `export`; `split`, `propose`, `ProposalSet` and `Dataset.export` planned.
 
 ## Application layer
 
@@ -308,8 +323,9 @@ Format modules import only the standard library and `core/`; `xmlsafe.py` parses
 `expat` events with DOCTYPE and entity declarations rejected; `miniyaml.py` parses the
 `data.yaml` subset; `files.py` holds bounded reads, path containment, a regular-file-only non-blocking open and
 image-header parsing (`image_header`: format, stored size, EXIF orientation; reused by the
-`integrity` check). Depends on: `core/`. Status: **built** for `coco`, `yolo`, `voc`, `imagefolder` and
-`registry`; `cvat_xml` and `labelstudio` planned.
+`integrity` check). Depends on: `core/`. Status: **built** for `coco`, `yolo`, `voc`, `cvat_xml`, `label_studio`, `imagefolder` and
+`registry`. `cvat_xml.py` and `labelstudio.py` also read through bounded descriptors with element, depth,
+attribute, task and result caps and count every unsupported shape.
 
 ### `store/`
 

@@ -284,7 +284,8 @@ long as `schema_version` is equal.
 
 ## Format mapping and loss matrix
 
-Built for COCO, YOLO, VOC and ImageFolder. Rules shared by every reader and writer:
+Built for COCO, YOLO, VOC, CVAT for images 1.1 XML (`cvat_xml`), Label Studio JSON (`label_studio`) and
+ImageFolder. Rules shared by every reader and writer:
 
 - Nothing a reader cannot map is discarded: it is kept verbatim in `source` (image and
   annotation rows), always with `source.format` naming the producing format. A writer
@@ -295,8 +296,8 @@ Built for COCO, YOLO, VOC and ImageFolder. Rules shared by every reader and writ
 - Absent files are never silent: a missing image file skips the image and its annotations
   (`skipped`: `images.file_missing`, `annotations.of_missing_image`); a declared size that
   differs from the file header is counted (`images.declared_size`) and the header wins.
-- Detection formats (COCO, YOLO, VOC) hold `task == detection` only; ImageFolder holds
-  `classification` only. Converting between the two groups is a `FormatError`.
+- Detection formats (COCO, YOLO, VOC, CVAT XML) hold `task == detection` only; ImageFolder holds
+  `classification` only; Label Studio holds either. Converting between the two groups is a `FormatError`.
 - Two images with identical bytes share one `image_id` and are rejected at ingest with both
   file names, because `image_id` is the primary key.
 - Boxes: COCO `bbox` (xywh) and VOC `bndbox` are taken as given (no 1-based offset); YOLO
@@ -309,17 +310,47 @@ Built for COCO, YOLO, VOC and ImageFolder. Rules shared by every reader and writ
 - Category ids: YOLO, VOC and ImageFolder re-index ids (position, or sorted name for
   ImageFolder); a category whose id changes is counted in `categories.id`.
 
+Format-specific rules for the two newest readers (both treat their input as untrusted; see
+[cross-cutting](06-cross-cutting.md#security-and-threat-model)):
+
+- **CVAT XML** (`cvat_xml`): `annotations.xml` or `annotations/<split>.xml` (split from `<meta><task><subset>`
+  or the file name). Mapped: image `name` (kept as `source.file_name`) and `id`, box `xtl ytl xbr ybr`,
+  `label`, `occluded`, `<attribute>` children (as text), `source` (`manual` is `human`, `auto` is `model`),
+  label colour and type (category attributes). Counted in `skipped` as `annotations.unsupported.<shape>`:
+  polygon, polyline, points, ellipse, mask, skeleton, cuboid, tag, rotated box, and every `track`
+  (`annotations.unsupported.track`); unknown top-level elements are `dataset.unsupported_element`. Label
+  attribute definitions that carry more than a name are `categories.attributes` (a definition that only
+  names the attribute is not a loss). An unknown task subset is `images.subset`. Meta fields that describe
+  the export (ids, dates, owner, size) are neither kept nor counted. Writers count `annotations.truncated`,
+  `is_crowd`, `score`, `provenance` (`proposal_accepted`), non-text attribute values
+  (`annotations.attributes_stringified`) and everything a foreign row carries in `source`.
+- **Label Studio** (`label_studio`): the "JSON" export, an array of tasks. Mapped: `rectanglelabels`
+  results (percent of the original size converted to pixels of the real image, rounded to 1e-6 pixel; an
+  overshoot of at most 0.001 pixel is snapped and counted in `annotations.bbox_snapped`) and `choices`
+  results (classification). The dataset is detection if any box was read, else classification; categories
+  are the sorted label names in use, so `categories.id` is counted for any category whose id is not its
+  sorted position. `annotations` entries are `human` rows, the first `predictions` entry gives `model` rows
+  with their score. One annotation per task is read (ground truth first, else the lowest id); counted in
+  `skipped`: `annotations.cancelled`, `annotations.of_other_annotators`, `annotations.of_other_predictions`,
+  `annotations.unsupported.<type>` (polygon, brush, keypoint, text area, relation, `multi_label_rectangle`,
+  `rotated_rectangle`, `image_rotation`, `choices` in a detection dataset, other), `images.remote_uri`
+  (never fetched). A task without a kept annotation is marked `source.unlabeled`. Task, annotation and
+  result fields are kept in `source`; personal fields of `completed_by` are never stored.
+- `ingest --strict` fails when a reader dropped or skipped anything, before anything is written.
+
 Dropped-field counts for the synthetic fixtures (`tests/fixtures/synth.py`), asserted by
 `tests/golden/test_roundtrip_matrix.py`. Rows are the source format, columns the target;
 same-format conversions drop nothing and read back field-identical with an equal
 `manifest.version`.
 
-| Source \ target | COCO | YOLO | VOC |
-|---|---|---|---|
-| COCO | 0 | 31: `annotations.is_crowd` 1, `annotations.source.{area,id,segmentation}` 4 each, `categories.attributes` 3, `categories.id` 3, `images.source.{date_captured,id,license}` 4 each | 31: same columns as COCO to YOLO |
-| YOLO | 0 | 0 | 0 |
-| VOC | 24: `annotations.attributes` 4, `annotations.source.pose` 4, `annotations.truncated` 4, `images.source.{depth,folder,segmented}` 4 each | 24: same columns as VOC to COCO | 0 |
+| Source \ target | COCO | YOLO | VOC | CVAT XML | Label Studio |
+|---|---|---|---|---|---|
+| COCO | 0 | 31: `annotations.is_crowd` 1, `annotations.source.{area,id,segmentation}` 4 each, `categories.attributes` 3, `categories.id` 3, `images.source.{date_captured,id,license}` 4 each | 31: same columns as COCO to YOLO | 31: same columns | 29: same columns, `categories.id` 1 |
+| YOLO | 0 | 0 | 0 | 0 | 3: `categories.id` 3 |
+| VOC | 24: `annotations.attributes` 4, `annotations.source.pose` 4, `annotations.truncated` 4, `images.source.{depth,folder,segmented}` 4 each | 24: same columns as VOC to COCO | 0 | 24: as VOC to COCO, but `annotations.attributes_stringified` 4 instead of `annotations.attributes` | 27: same columns as VOC to COCO, `categories.id` 3 |
+| CVAT XML | 16: `annotations.attributes` 1, `annotations.occluded` 4, `annotations.source.z_order` 4, `categories.attributes` 3, `images.source.id` 4 | 16: same columns | 12: as to COCO without `annotations.occluded` | 0 | 19: as to COCO, `categories.id` 3 |
+| Label Studio | 20: `annotations.source.{from_name,id,to_name}` 4 each, `images.source.{annotation,id}` 4 each | 20: same columns | 20: same columns | 20: same columns | 0 |
 
-ImageFolder to ImageFolder drops nothing; ImageFolder to and from the detection formats is
-refused. YOLO to COCO or VOC loses nothing because a YOLO row carries no fields beyond the
-box, class and split.
+ImageFolder to ImageFolder drops nothing; ImageFolder to and from COCO, YOLO, VOC and CVAT XML is
+refused (Label Studio holds both tasks, so ImageFolder to Label Studio converts). YOLO to COCO, VOC or
+CVAT XML loses nothing because a YOLO row carries no fields beyond the box, class and split.

@@ -6,10 +6,13 @@ by a person before they touch a label.
 
 ## Status
 
-Built and tested: `ingest` and `export` between COCO, YOLO, Pascal VOC and ImageFolder, with a
+Built and tested: `ingest` and `export` between COCO, YOLO, Pascal VOC, CVAT for images 1.1 XML, Label
+Studio JSON and ImageFolder, with a
 versioned `dataset.dcp/` store, an order-independent `manifest.version`, and a count of every
-field a conversion cannot carry (`--strict` turns any loss into a failure). `datacopilot
---version`, `doctor` and `formats` also run. Settings come from `DATACOPILOT_ENV`,
+field a conversion cannot carry (`--strict` turns any loss into a failure, on `export` and on `ingest`).
+`datacopilot --version`, `formats` and `doctor` (versions, extras, settings, cache directory, FAISS and
+GPU; `--json` for a machine-readable report) also run, and the Python API has three functions: `load`,
+`audit` and `export`. Settings come from `DATACOPILOT_ENV`,
 `DATACOPILOT_LOG_LEVEL`, `DATACOPILOT_MAX_TABLE_ROWS`, `DATACOPILOT_MAX_TABLE_BYTES`,
 `DATACOPILOT_WORKERS`, `DATACOPILOT_CACHE_DIR`, `DATACOPILOT_CACHE_KEY` and `DATACOPILOT_HASH_CACHE`; logging is JSON on `stderr`.
 
@@ -19,12 +22,14 @@ exits 1 when `--fail-on` matches, so it can gate CI. With `--embedder` it adds t
 checks: near-duplicates, split leakage (`--fail-on leakage`) and per-class outliers. `datacopilot
 embed` fills the embedding cache ahead of time.
 
-Everything under "Planned usage" below is **not implemented**: label noise, split, propose, review, apply, the Python API, CVAT XML and Label Studio formats, and all model-backed features. The
+Everything under "Planned usage" below is **not implemented**: label noise, split, propose, review, apply, the CVAT review integration and all proposal models. The
 architecture documents mark every element as built or planned.
 
-## Install (from source)
+## Install
 
-Requires Python 3.10 or newer and [`uv`](https://docs.astral.sh/uv/).
+Requires Python 3.10 or newer. The package is not published yet; until it is, install from source with
+[`uv`](https://docs.astral.sh/uv/) or from a wheel you built (see the
+[release runbook](docs/engineering/release.md)).
 
 ```bash
 git clone <repository-url> datacopilot
@@ -32,6 +37,7 @@ cd datacopilot
 uv sync
 uv run datacopilot --version
 uv run datacopilot formats
+uv run datacopilot doctor
 ```
 
 `uv sync` installs the core dependencies only (`typer`, `click`, `pydantic`, `structlog`,
@@ -47,14 +53,32 @@ uv run datacopilot export ds.dcp --format coco -o ./coco_again --strict
 ```
 
 Formats: `coco` (annotations JSON per split), `yolo` (`data.yaml`, `images/`, `labels/`), `voc`
-(`Annotations/`, `JPEGImages/`, `ImageSets/Main/`) and `imagefolder` (class directories,
-classification). Input is validated: paths cannot leave the dataset directory, XML with a
+(`Annotations/`, `JPEGImages/`, `ImageSets/Main/`), `cvat_xml` (CVAT for images 1.1: `annotations.xml` or
+`annotations/<split>.xml`), `label_studio` (the JSON export; boxes and choices) and `imagefolder` (class
+directories, classification). Polygons, tracks, masks and other shapes that the data model cannot hold
+are counted when a CVAT or Label Studio export is read (`ingest --strict` fails on them). Input is
+validated: paths cannot leave the dataset directory, XML with a
 DOCTYPE is rejected, boxes must lie inside their image, and identical image content is
 reported by file name. What each conversion loses is listed in
 [the loss matrix](docs/architecture/03-data-model.md#format-mapping-and-loss-matrix).
 
 Exit codes: `0` success, `1` the command ran and failed (unreadable or invalid input, unknown
 format, output exists, `--strict` with dropped fields), `2` usage or configuration error.
+
+### Python API
+
+```python
+import datacopilot as dc
+
+ds = dc.load("shop", format="coco")  # in memory; nothing is written
+run = dc.audit(ds, fail_on=("warn",))  # run.passed is the gate's verdict
+report = dc.export(ds, "label_studio", "shop_ls")
+print(ds.manifest.image_count, run.passed, sorted(report.dropped))
+```
+
+The [tutorial](docs/tutorial.md) runs every command and script above against a generated dataset (it is
+executed by `tests/docs/test_tutorial.py`); the documentation site (`uv run --group docs mkdocs build
+--strict`) has a user guide, the generated CLI reference and the design documents.
 
 ### Audit as a CI gate
 
@@ -136,7 +160,7 @@ pip install "datacopilot[cleanlab]"     # Cleanlab backend for the label-noise c
 ### Planned: command line
 
 ```bash
-datacopilot ingest ./fridge_export --format cvat_xml --group-by "re:^(?P<g>cam\d+_\d{8})" -o fridge.dcp
+datacopilot ingest ./fridge_export --format cvat_xml --group-by "re:^(?P<g>cam\d+_\d{8})" -o fridge.dcp  # built
 datacopilot audit fridge.dcp --checks all --embedder dinov2_base --report report.html --fail-on leakage,critical
 datacopilot split fridge.dcp --by-group --ratios 0.8,0.1,0.1 --stratify category
 datacopilot propose fridge.dcp --proposer missing_boxes --models grounding-dino-base,sam3 --consensus 2
@@ -146,19 +170,14 @@ datacopilot apply fridge.dcp --proposals latest --accepted-only
 
 ### Planned: Python API
 
-```python
-import datacopilot as dc
+`load`, `audit` and `export` are built (above). The proposal workflow is not:
 
-ds = dc.load("./fridge_export", format="coco", group_by="metadata.session_id")
-report = dc.audit(
-    ds, checks=["duplicates", "leakage", "boxes", "label_noise"], embedder="dinov3-vitb16"
-)
+```python
 props = dc.propose(
     ds, "missing_boxes", models=["grounding-dino-base"], prompts_from="category.aliases"
 )
 props.to_fiftyone("fridge_review")  # human review in FiftyOne
 ds2 = props.apply(ds, status="accepted")  # a new dataset version with lineage; ds is unchanged
-ds2.export("yolo", "./yolo_ready", strict=True)
 ```
 
 ## Architecture
@@ -168,9 +187,8 @@ Parquet plus DuckDB, images referenced by path or URI and never copied). Model-b
 features live behind optional extras and plugins so the core stays CPU-only and
 Apache-2.0 clean.
 
-![System context](docs/diagrams/png/context.png)
-
-![Containers](docs/diagrams/png/containers.png)
+The diagrams (system context, containers, components, data model, flows) are in
+[docs/diagrams/png/](docs/diagrams/png/).
 
 - Architecture documents (C4 views, data model, flows, runtime, cross-cutting concerns):
   [docs/architecture/README.md](docs/architecture/README.md)
