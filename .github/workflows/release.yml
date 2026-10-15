@@ -1,8 +1,10 @@
 name: release
 
-# Publishing is irreversible and needs the maintainer's approval (docs/engineering/release.md):
-# the `pypi` environment has required reviewers. There is no token anywhere; the publish job
-# authenticates to PyPI with a short-lived OIDC identity (trusted publishing).
+# Publishing is irreversible and needs the maintainer's approval (docs/engineering/release.md).
+# Nothing in this file can enforce repository settings, so the runbook makes the evidence for
+# them a mandatory one-time step: a protected `pypi` environment with required reviewers, a tag
+# ruleset on v*, and the trusted-publisher binding on PyPI. There is no token anywhere; the
+# publish job authenticates to PyPI with a short-lived OIDC identity (trusted publishing).
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -18,10 +20,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      digest: ${{ steps.digests.outputs.digest }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Check the tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "error: $GITHUB_SHA is not an ancestor of origin/main; refusing to release it" >&2
+            exit 1
+          }
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           version: "0.11.7"
@@ -33,6 +45,10 @@ jobs:
         run: python3 scripts/check_release_tag.py "$TAG"
       - name: Install the locked environment
         run: uv sync --locked --group release
+      - name: Audit the locked runtime dependencies
+        run: |
+          uv export --locked --no-dev --no-emit-project --all-extras --format requirements-txt -o requirements-audit.txt
+          uv run --locked --group release pip-audit --requirement requirements-audit.txt --no-deps --disable-pip --strict
       - name: Gate
         run: |
           uv run ruff check .
@@ -46,10 +62,13 @@ jobs:
       - name: Check the metadata
         run: uv run twine check --strict release/dist/*
       - name: Record the digests
+        id: digests
         run: |
           cd release
           sha256sum dist/* | tee SHA256SUMS
-          { echo '### Artifact digests'; echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          digest=$(sha256sum dist/* | sha256sum | cut -d' ' -f1)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          { echo '### Artifact digests'; echo '```'; cat SHA256SUMS; echo; echo "listing digest $digest"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release
@@ -71,11 +90,27 @@ jobs:
         with:
           name: release
           path: release
-      - name: Verify the downloaded artifact is the one that was built
+      - name: Verify the artifact
+        env:
+          TAG: ${{ github.ref_name }}
+          EXPECTED_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
-          cd release
-          sha256sum --check SHA256SUMS
-          ls -l dist
+          set -eu
+          version="${TAG#v}"
+          expected="datacopilot-${version}-py3-none-any.whl
+          datacopilot-${version}.tar.gz"
+          actual=$(ls release/dist)
+          if [ "$actual" != "$expected" ]; then
+            echo "error: release/dist must hold exactly the wheel and the sdist of $TAG" >&2
+            echo "$actual" >&2
+            exit 1
+          fi
+          digest=$(cd release && sha256sum dist/* | sha256sum | cut -d' ' -f1)
+          if [ "$digest" != "$EXPECTED_DIGEST" ]; then
+            echo "error: the artifact digest $digest is not the one the build job recorded" >&2
+            exit 1
+          fi
+          (cd release && sha256sum dist/*)
       - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
         with:
           packages-dir: release/dist

@@ -191,6 +191,13 @@ First release candidate. Before 1.0 a minor version may break the public API.
 
 ### Security
 
+- Release pipeline hardening: the build refuses a commit that is not an ancestor of `origin/main`; the build
+  backend and its dependencies are exact pins; the publish job is download, verify (exact file set and the
+  digest the build job exported) and publish, nothing else; the audit tool is the locked one and runs for
+  Python 3.10 and 3.13 in CI, in the release build and nightly (`audit.yml`); the runbook makes the
+  repository-settings evidence (environment reviewers, tag ruleset, deployment tag policy, trusted
+  publisher) a mandatory one-time step; workflow lint rules run against a hostile fixture; the wheel is
+  compared with a committed manifest and both artifacts are scanned for more secret formats.
 - Audit hardening: the hash cache is authenticated (HMAC), ownership-checked and spot-verified;
   image reads are confined to the dataset root (symlinks resolved, `O_NOFOLLOW`, regular files
   only, size-capped); reports escape every dataset string, carry a strict Content-Security-Policy

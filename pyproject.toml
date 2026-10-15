@@ -1,5 +1,15 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+# Exact pins, build backend and its dependencies: the build environment is created outside the lock
+# file, so nothing here may float (docs/engineering/release.md, "Build backend").
+requires = [
+  "hatchling==1.32.4",
+  "packaging==26.3",
+  "pathspec==1.1.1",
+  "pluggy==1.7.0",
+  "tomli==2.5.0; python_version < '3.11'",
+  "tomlkit==0.15.1",
+  "trove-classifiers==2026.9.21.13",
+]
 build-backend = "hatchling.build"
 
 [project]

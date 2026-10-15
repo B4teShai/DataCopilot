@@ -95,15 +95,33 @@ def test_wheel_has_license_notice_and_py_typed(wheel: Path, version: str) -> Non
     assert "datacopilot/cli/app.py" in names and "datacopilot/__main__.py" in names
 
 
-def test_wheel_holds_only_the_package_and_its_metadata(wheel: Path, version: str) -> None:
+MANIFEST = Path(__file__).with_name("wheel_manifest.txt")
+ALLOWED_SUFFIXES = {".py", ".typed", ".j2"}
+DIST_INFO = {
+    "METADATA",
+    "WHEEL",
+    "RECORD",
+    "entry_points.txt",
+    "licenses/LICENSE",
+    "licenses/NOTICE",
+}
+
+
+def test_wheel_holds_exactly_the_committed_manifest_and_its_metadata(
+    wheel: Path, version: str
+) -> None:
     with zipfile.ZipFile(wheel) as z:
         names = z.namelist()
-    outside = [
-        n for n in names if not n.startswith(("datacopilot/", f"datacopilot-{version}.dist-info/"))
-    ]
-    assert outside == []
+    package = sorted(n for n in names if n.startswith("datacopilot/"))
+    assert package == MANIFEST.read_text().split(), (
+        "the wheel's files changed; review, then update tests/release/wheel_manifest.txt"
+    )
+    assert {Path(n).suffix for n in package} <= ALLOWED_SUFFIXES
+    prefix = f"datacopilot-{version}.dist-info/"
+    info = {n[len(prefix) :] for n in names if n.startswith(prefix)}
+    assert info == DIST_INFO
+    assert len(package) + len(info) == len(names), "nothing outside the package and dist-info"
     assert [n for n in names if FORBIDDEN.search(n)] == []
-    assert not [n for n in names if n.endswith("/")] or True
 
 
 def test_wheel_fits_the_size_budget(wheel: Path, sdist: Path) -> None:
@@ -173,16 +191,48 @@ def test_sdist_is_an_allow_list(sdist: Path, version: str) -> None:
     assert "src/datacopilot/py.typed" in relative
 
 
+SECRET_MARKERS = [
+    rb"-{5}BEGIN [A-Z ]*PRIVATE KEY-{5}",
+    rb"-{5}BEGIN PGP PRIVATE KEY BLOCK-{5}",
+    rb"\bgh[pousr]_[A-Za-z0-9]{20,}",
+    rb"\bgithub_pat_[A-Za-z0-9_]{20,}",
+    rb"\bxox[abposr]-[A-Za-z0-9-]{10,}",
+    rb"\bsk-[A-Za-z0-9_-]{20,}",
+    rb"\bAIza[0-9A-Za-z_-]{30,}",
+    rb"\bAKIA[0-9A-Z]{16}\b",
+    rb"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+    rb"\bhf_[A-Za-z0-9]{30,}",
+    rb"\bpypi-AgE[A-Za-z0-9_-]{20,}",
+]
+
+
+def test_the_secret_patterns_recognise_what_they_are_for() -> None:
+    samples = [
+        b"-" * 5 + b"BEGIN RSA PRIVATE KEY" + b"-" * 5,
+        b"ghp_" + b"a" * 30,
+        b"github_pat_" + b"A" * 30,
+        b"xoxb-123456789012-abc",
+        b"sk-" + b"a" * 30,
+        b"AIza" + b"B" * 35,
+        b"AKIA" + b"A" * 16,
+        b"eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4",
+        b"hf_" + b"a" * 34,
+        b"pypi-AgEIcHlwaS5vcmc" + b"A" * 30,
+    ]
+    for sample in samples:
+        assert any(re.search(m, sample) for m in SECRET_MARKERS), sample
+
+
 def test_no_member_of_either_artifact_holds_a_secret_marker(wheel: Path, sdist: Path) -> None:
-    marker = re.compile(
-        rb"-----BEGIN [A-Z ]*PRIVATE KEY-----|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}"
-    )
+    def hits(data: bytes) -> bool:
+        return any(re.search(m, data) for m in SECRET_MARKERS)
+
     with zipfile.ZipFile(wheel) as z:
-        assert not [n for n in z.namelist() if marker.search(z.read(n))]
+        assert not [n for n in z.namelist() if hits(z.read(n))]
     with tarfile.open(sdist) as t:
         for member in t.getmembers():
             handle = t.extractfile(member)
-            assert handle is None or not marker.search(handle.read()), member.name
+            assert handle is None or not hits(handle.read()), member.name
 
 
 def test_the_wheel_installs_nothing_outside_its_prefix(wheel: Path) -> None:
