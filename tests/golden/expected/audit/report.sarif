@@ -1,0 +1,496 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "automationDetails": {
+        "correlationGuid": "1111aaaa-2222-4333-8444-5555bbbb5555",
+        "id": "datacopilot/audit/"
+      },
+      "originalUriBaseIds": {
+        "DATASET_IMAGES": {
+          "description": {
+            "text": "Directory of the dataset images (location not disclosed)."
+          }
+        }
+      },
+      "properties": {
+        "critical": 5,
+        "datasetVersion": "32d05067c3df6c1686d714d97c138df5",
+        "info": 0,
+        "passed": false,
+        "warn": 8
+      },
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "27eb8ea4a311ec78"
+                }
+              ],
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "f.png",
+                  "uriBaseId": "DATASET_IMAGES"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Image file is missing"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "217b2a83c9e28cd2"
+          },
+          "properties": {
+            "check": "integrity",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "integrity/file_missing",
+          "ruleIndex": 8
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "560205b3ec517689"
+                }
+              ],
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "e.png",
+                  "uriBaseId": "DATASET_IMAGES"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Declared size differs from the image header (actual=[50,50]; declared=[60,50])"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "8c5d51e0b1391c75"
+          },
+          "properties": {
+            "check": "integrity",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "integrity/size_mismatch",
+          "ruleIndex": 10
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "00000000000000c1"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Images with identical file content (count=2; cross_split=true; group_id=995e9ce2b9cb; members=[{\"image_id\":\"00000000000000c1\",\"split\":\"train\",\"file_name\":\"c.png\"},{\"image_id\":\"00000000000000d1\",\"split\":\"test\",\"file_name\":\"d.png\"}]; splits={\"test\":1,\"train\":1})"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "4656f42f2048f6fb"
+          },
+          "properties": {
+            "check": "duplicates",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "duplicates/exact_duplicate",
+          "ruleIndex": 4
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "00000000000000c1"
+                }
+              ],
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "c.png",
+                  "uriBaseId": "DATASET_IMAGES"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "File content no longer matches the image id (actual=995e9ce2b9cb; expected=00000000000000c1)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "509d74ad4f3977c7"
+          },
+          "properties": {
+            "check": "duplicates",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "duplicates/content_changed",
+          "ruleIndex": 3
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "00000000000000d1"
+                }
+              ],
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "d.png",
+                  "uriBaseId": "DATASET_IMAGES"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "File content no longer matches the image id (actual=995e9ce2b9cb; expected=00000000000000d1)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "f038f033f4dab848"
+          },
+          "properties": {
+            "check": "duplicates",
+            "severity": "CRITICAL"
+          },
+          "ruleId": "duplicates/content_changed",
+          "ruleIndex": 3
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Remote images were not checked (count=1; total=18)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "6a888300403b4410"
+          },
+          "properties": {
+            "check": "integrity",
+            "severity": "WARN"
+          },
+          "ruleId": "integrity/remote_not_checked",
+          "ruleIndex": 9
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Some images could not be hashed (count=2; reasons={\"file_missing\":1,\"remote\":1}; total=18)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "f3bfb78aad699088"
+          },
+          "properties": {
+            "check": "duplicates",
+            "severity": "WARN"
+          },
+          "ruleId": "duplicates/images_not_hashed",
+          "ruleIndex": 5
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Class distribution is long-tailed (classes_present=3; effective_classes=1.5895; head=[{\"id\":1,\"name\":\"cat\",\"count\":14},{\"id\":2,\"name\":\"dog\",\"count\":1},{\"id\":3,\"name\":\"bird\",\"count\":1}]; ratio=14.0; split=train; tail=[{\"id\":2,\"name\":\"dog\",\"count\":1},{\"id\":3,\"name\":\"bird\",\"count\":1},{\"id\":1,\"name\":\"cat\",\"count\":14}]; total=16)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "17ce876e84bea493"
+          },
+          "properties": {
+            "check": "imbalance",
+            "severity": "WARN"
+          },
+          "ruleId": "imbalance/long_tail",
+          "ruleIndex": 7
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Classes missing from a split (class_ids=[1,3]; count=2; split=test)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "3dd528ac6ef1abd3"
+          },
+          "properties": {
+            "check": "imbalance",
+            "severity": "WARN"
+          },
+          "ruleId": "imbalance/class_missing_in_split",
+          "ruleIndex": 6
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "module",
+                  "name": "dataset.dcp"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Classes missing from a split (class_ids=[2,3]; count=2; split=val)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "ab0ce89f4eeb7cd9"
+          },
+          "properties": {
+            "check": "imbalance",
+            "severity": "WARN"
+          },
+          "ruleId": "imbalance/class_missing_in_split",
+          "ruleIndex": 6
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "55ac5348b50cd24b"
+                },
+                {
+                  "kind": "annotation",
+                  "name": "1-0"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Box has an extreme aspect ratio (aspect_ratio=40.0)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "2a2ddb5d1223ec85"
+          },
+          "properties": {
+            "check": "boxes",
+            "severity": "WARN"
+          },
+          "ruleId": "boxes/extreme_aspect",
+          "ruleIndex": 1
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "55ac5348b50cd24b"
+                },
+                {
+                  "kind": "annotation",
+                  "name": "1-0"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Box is very small (area_fraction=0.008333; height=40.0; width=1.0)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "d0e292d4f80a13a7"
+          },
+          "properties": {
+            "check": "boxes",
+            "severity": "WARN"
+          },
+          "ruleId": "boxes/tiny_box",
+          "ruleIndex": 2
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "kind": "image",
+                  "name": "733494d1bd6f1402"
+                },
+                {
+                  "kind": "annotation",
+                  "name": "0-1"
+                }
+              ]
+            }
+          ],
+          "message": {
+            "text": "Duplicate box of the same class (category_id=1; iou=0.9855; other_ann_id=0-0)"
+          },
+          "partialFingerprints": {
+            "findingId/v1": "ffc687772b2694c1"
+          },
+          "properties": {
+            "check": "boxes",
+            "severity": "WARN"
+          },
+          "ruleId": "boxes/duplicate_box",
+          "ruleIndex": 0
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "datacopilot",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "boxes/duplicate_box",
+              "shortDescription": {
+                "text": "Duplicate box of the same class"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "boxes/extreme_aspect",
+              "shortDescription": {
+                "text": "Box has an extreme aspect ratio"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "boxes/tiny_box",
+              "shortDescription": {
+                "text": "Box is very small"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "duplicates/content_changed",
+              "shortDescription": {
+                "text": "File content no longer matches the image id"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "duplicates/exact_duplicate",
+              "shortDescription": {
+                "text": "Images with identical file content"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "duplicates/images_not_hashed",
+              "shortDescription": {
+                "text": "Some images could not be hashed"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "imbalance/class_missing_in_split",
+              "shortDescription": {
+                "text": "Classes missing from a split"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "imbalance/long_tail",
+              "shortDescription": {
+                "text": "Class distribution is long-tailed"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "integrity/file_missing",
+              "shortDescription": {
+                "text": "Image file is missing"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "integrity/remote_not_checked",
+              "shortDescription": {
+                "text": "Remote images were not checked"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "integrity/size_mismatch",
+              "shortDescription": {
+                "text": "Declared size differs from the image header"
+              }
+            }
+          ],
+          "version": "{{VERSION}}"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

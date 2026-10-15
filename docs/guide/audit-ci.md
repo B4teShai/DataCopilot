@@ -32,6 +32,13 @@ Exit codes: `0` gate passed (or no gate); `1` a match, an empty or unreadable da
 that is not allowed or fails; `2` a usage or configuration error. Reports are written even when the
 gate fails.
 
+## Model-generated annotations
+
+Annotations whose provenance is `model` (Label Studio predictions, a model's pre-annotations) are left out of every check unless you pass
+`--include-model-annotations`: model output is not ground truth, so it must not hide a class imbalance or
+add box findings to the people who labelled the data. The report and a line on standard error say how many
+were left out. Accepted proposals are audited like human labels.
+
 ## Recommended CI settings
 
 - Pass `--no-hash-cache` (or set `DATACOPILOT_HASH_CACHE=false`). Never restore the hash cache from

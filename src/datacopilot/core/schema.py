@@ -25,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from datacopilot.core.errors import ValidationError
+from datacopilot.core.errors import GateFailedError, ValidationError
 
 Split = Literal["train", "val", "test", "unassigned"]
 Kind = Literal["bbox", "classification"]
@@ -225,6 +225,9 @@ class SummaryClass(_Row):
 class Summary(_Row):
     """Dataset facts the reports need (histogram, split by class table), computed once per run.
 
+    ``annotation_count`` and ``class_counts`` describe the rows the checks saw: model-generated rows
+    (``provenance == "model"``) are excluded from an audit unless asked for, and
+    ``excluded_model_annotations`` says how many were left out.
     ``class_counts`` maps ``split -> str(category_id) -> annotations``. When the dataset has more
     classes than the summary cap, ``classes`` and ``class_counts`` are empty and
     ``classes_omitted`` is true; the totals are always present.
@@ -237,6 +240,7 @@ class Summary(_Row):
     classes: tuple[SummaryClass, ...] = ()
     classes_omitted: bool = False
     class_counts: dict[str, dict[str, int]] = Field(default_factory=dict)
+    excluded_model_annotations: int = Field(default=0, ge=0)
 
 
 class AuditRun(_Row):
@@ -260,6 +264,19 @@ class AuditRun(_Row):
     timings_ms: dict[str, int] = Field(default_factory=dict)
     summary: Summary | None = None
     findings: tuple[Finding, ...] = ()
+
+    def raise_for_gate(self) -> None:
+        """Raise :class:`GateFailedError` if the gate that was evaluated matched.
+
+        The command line turns a failed gate into exit code 1; the Python API records it in
+        ``passed`` and leaves the decision to the caller, who calls this to get the same effect.
+        """
+        if not self.passed:
+            c = self.counts
+            raise GateFailedError(
+                f"the audit gate failed: critical={c.critical} warn={c.warn} info={c.info} "
+                f"(run_id {self.run_id})"
+            )
 
     @model_validator(mode="after")
     def _check(self) -> AuditRun:

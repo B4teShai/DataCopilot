@@ -195,6 +195,13 @@ def run_audit(
     """
     if not ds.images:
         raise ValidationError("dataset has no images; there is nothing to audit")
+    excluded = 0
+    if not ctx.include_model_annotations:
+        # unreviewed model output is not ground truth; accepted proposals (human-reviewed) stay
+        kept = tuple(a for a in ds.annotations if a.provenance != "model")
+        excluded = len(ds.annotations) - len(kept)
+        if excluded:
+            ds = Dataset(ds.manifest, ds.images, kept, ds.root)
     with_embedder = ctx.embeddings is not None
     names = select_checks(checks, with_embedder=with_embedder)
     tokens = parse_fail_on(fail_on)
@@ -231,7 +238,7 @@ def run_audit(
         passed=True,
         fail_on=tokens,
         timings_ms=timings,
-        summary=build_summary(ds),
+        summary=build_summary(ds, excluded),
         findings=tuple(findings),
     )
     run = draft.model_copy(update={"passed": not gate_failed(draft, tokens)})

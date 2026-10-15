@@ -391,9 +391,13 @@ def test_run_carries_a_dataset_summary_for_the_reports(
     monkeypatch: pytest.MonkeyPatch, ds: Dataset, tmp_path: Path
 ) -> None:
     install(monkeypatch, FakeCheck("boxes"))
-    summary = run_audit(ds, ["boxes"], ctx(tmp_path)).summary
+    summary = run_audit(ds, ["boxes"], ctx(tmp_path, include_model_annotations=True)).summary
     assert summary is not None
     assert (summary.task, summary.image_count, summary.annotation_count) == ("detection", 3, 4)
+    assert summary.excluded_model_annotations == 0
+    default = run_audit(ds, ["boxes"], ctx(tmp_path)).summary  # the model row is left out
+    assert default is not None
+    assert (default.annotation_count, default.excluded_model_annotations) == (3, 1)
     assert summary.split_images == {"train": 1, "val": 1, "unassigned": 1}
     assert [(c.id, c.name) for c in summary.classes] == [(1, "cat"), (2, "dog")]
     assert summary.class_counts == {
@@ -415,7 +419,7 @@ def test_summary_omits_per_class_detail_beyond_the_class_cap(
     cats = [Category(id=i, name=f"c{i}") for i in (1, 2, 3)]
     big = dataset_from(images, anns, cats)
     install(monkeypatch, FakeCheck("boxes"))
-    s = run_audit(big, ["boxes"], ctx(tmp_path)).summary
+    s = run_audit(big, ["boxes"], ctx(tmp_path, include_model_annotations=True)).summary
     assert s is not None and s.classes_omitted and s.classes == () and s.class_counts == {}
     assert s.annotation_count == 4
 

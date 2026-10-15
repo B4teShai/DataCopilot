@@ -1,0 +1,144 @@
+{
+ "Annotation": {
+  "ann_id": "<class 'str'>=required",
+  "attributes": "dict[str, str | int | float | bool]=factory:dict",
+  "bbox_xyxy_abs": "tuple[float, float, float, float] | None=None",
+  "category_id": "<class 'int'>=required",
+  "image_id": "<class 'str'>=required",
+  "is_crowd": "<class 'bool'>=False",
+  "kind": "typing.Literal['bbox', 'classification']=required",
+  "occluded": "bool | None=None",
+  "provenance": "typing.Literal['human', 'model', 'proposal_accepted']='human'",
+  "score": "float | None=None",
+  "source": "dict[str, typing.Annotated[JsonValue, AfterValidator(func=<function _finite>)]]=factory:dict",
+  "truncated": "bool | None=None"
+ },
+ "AuditRun": {
+  "checks": "tuple[str, ...]=required",
+  "counts": "<class 'datacopilot.core.schema.Counts'>=required",
+  "dataset_version": "<class 'str'>=required",
+  "embedder": "str | None=None",
+  "fail_on": "tuple[str, ...]=()",
+  "findings": "tuple[datacopilot.core.schema.Finding, ...]=()",
+  "passed": "<class 'bool'>=required",
+  "run_id": "<class 'str'>=required",
+  "started_at": "<class 'pydantic.types.AwareDatetime'>=required",
+  "summary": "datacopilot.core.schema.Summary | None=None",
+  "timings_ms": "dict[str, int]=factory:dict"
+ },
+ "Category": {
+  "aliases": "tuple[str, ...]=()",
+  "attributes": "dict[str, str]=factory:dict",
+  "id": "<class 'int'>=required",
+  "name": "<class 'str'>=required"
+ },
+ "ConversionLossError": [
+  "ConversionLossError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "ConversionReport": {
+  "dropped": "dict[str, typing.Annotated[int, Gt(gt=0)]]=factory:dict",
+  "rows_read": "<class 'int'>=required",
+  "rows_written": "<class 'int'>=required",
+  "skipped": "dict[str, typing.Annotated[int, Gt(gt=0)]]=factory:dict",
+  "source_format": "<class 'str'>=required",
+  "target_format": "<class 'str'>=required"
+ },
+ "DataCopilotError": [
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "Dataset": {
+  "annotations": "tuple[Annotation, ...]=required",
+  "images": "tuple[Image, ...]=required",
+  "manifest": "DatasetManifest=required",
+  "root": "Path | None=None"
+ },
+ "DatasetManifest": {
+  "annotation_count": "<class 'int'>=required",
+  "categories": "tuple[datacopilot.core.schema.Category, ...]=required",
+  "created_at": "<class 'pydantic.types.AwareDatetime'>=required",
+  "image_count": "<class 'int'>=required",
+  "lineage": "tuple[str, ...]=()",
+  "name": "<class 'str'>=required",
+  "schema_version": "<class 'int'>=required",
+  "task": "typing.Literal['detection', 'classification']=required",
+  "version": "<class 'str'>=required"
+ },
+ "Finding": {
+  "ann_id": "str | None=None",
+  "check": "<class 'str'>=required",
+  "finding_id": "<class 'str'>=required",
+  "image_id": "str | None=None",
+  "payload": "dict[str, typing.Annotated[JsonValue, AfterValidator(func=<function _finite>)]]=factory:dict",
+  "run_id": "<class 'str'>=required",
+  "severity": "typing.Literal['CRITICAL', 'WARN', 'INFO']=required"
+ },
+ "FormatError": [
+  "FormatError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "GateFailedError": [
+  "GateFailedError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "Image": {
+  "file_path": "<class 'str'>=required",
+  "group_id": "str | None=None",
+  "height": "<class 'int'>=required",
+  "image_id": "<class 'str'>=required",
+  "source": "dict[str, typing.Annotated[JsonValue, AfterValidator(func=<function _finite>)]]=factory:dict",
+  "split": "typing.Literal['train', 'val', 'test', 'unassigned']='unassigned'",
+  "width": "<class 'int'>=required"
+ },
+ "LicenseError": [
+  "LicenseError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "ModelError": [
+  "ModelError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "SettingsError": [
+  "SettingsError",
+  "ValueError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "StoreError": [
+  "StoreError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "ValidationError": [
+  "ValidationError",
+  "DataCopilotError",
+  "Exception",
+  "BaseException",
+  "object"
+ ],
+ "__version__": "str",
+ "audit": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:checks: Sequence[str] | Literal['all']='all', KEYWORD_ONLY:fail_on: Sequence[str]=('critical',), KEYWORD_ONLY:embedder: str | None=None, KEYWORD_ONLY:embed_batch: int | None=None, KEYWORD_ONLY:similarity_threshold: float | None=None, KEYWORD_ONLY:allow_test_embedder: bool=False, KEYWORD_ONLY:root: str | Path | None=None, KEYWORD_ONLY:workers: int | None=None, KEYWORD_ONLY:require_local_images: bool=False, KEYWORD_ONLY:include_model_annotations: bool=False) -> AuditRun",
+ "export": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:format: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:strict: bool=False) -> ConversionReport",
+ "load": "(POSITIONAL_OR_KEYWORD:path: str | Path, POSITIONAL_OR_KEYWORD:format: str | None=None, KEYWORD_ONLY:group_by: str | None=None, KEYWORD_ONLY:strict: bool=False) -> Dataset"
+}

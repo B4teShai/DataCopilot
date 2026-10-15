@@ -1,6 +1,6 @@
 """The public API is frozen: any change of a name, signature or field list fails here.
 
-A deliberate change is made by editing SURFACE in the same commit, with a CHANGELOG entry (before
+A deliberate change regenerates api_surface.json in the same commit, with a CHANGELOG entry (before
 1.0 a minor version may break the API; after, only a major one may).
 """
 
@@ -8,39 +8,27 @@ import __future__
 
 import dataclasses
 import inspect
+import json
+import os
+import re
 import subprocess
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 
 import datacopilot as dc
 from datacopilot import api, deprecation
 
-SURFACE = {
-    "Annotation": "model(ann_id,image_id,category_id,kind,bbox_xyxy_abs,score,is_crowd,occluded,truncated,attributes,provenance,source)",  # noqa: E501
-    "AuditRun": "model(run_id,dataset_version,started_at,checks,embedder,counts,passed,fail_on,timings_ms,summary,findings)",  # noqa: E501
-    "Category": "model(id,name,aliases,attributes)",
-    "ConversionLossError": "exception(DataCopilotError)",
-    "ConversionReport": "model(source_format,target_format,rows_read,rows_written,dropped,skipped)",
-    "DataCopilotError": "exception(Exception)",
-    "Dataset": "dataclass(manifest,images,annotations,root)",
-    "DatasetManifest": "model(version,schema_version,name,task,categories,lineage,image_count,annotation_count,created_at)",  # noqa: E501
-    "Finding": "model(finding_id,run_id,check,severity,image_id,ann_id,payload)",
-    "FormatError": "exception(DataCopilotError)",
-    "Image": "model(image_id,file_path,width,height,split,group_id,source)",
-    "LicenseError": "exception(DataCopilotError)",
-    "ModelError": "exception(DataCopilotError)",
-    "SettingsError": "exception(ValueError)",
-    "StoreError": "exception(DataCopilotError)",
-    "ValidationError": "exception(DataCopilotError)",
-    "__version__": "str",
-    "audit": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:checks: Sequence[str] | Literal['all']='all', KEYWORD_ONLY:fail_on: Sequence[str]=('critical',), KEYWORD_ONLY:embedder: str | None=None, KEYWORD_ONLY:embed_batch: int | None=None, KEYWORD_ONLY:similarity_threshold: float | None=None, KEYWORD_ONLY:allow_test_embedder: bool=False, KEYWORD_ONLY:root: str | Path | None=None, KEYWORD_ONLY:workers: int | None=None, KEYWORD_ONLY:require_local_images: bool=False) -> AuditRun",  # noqa: E501
-    "export": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:format: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:strict: bool=False) -> ConversionReport",  # noqa: E501
-    "load": "(POSITIONAL_OR_KEYWORD:path: str | Path, POSITIONAL_OR_KEYWORD:format: str | None=None, KEYWORD_ONLY:group_by: str | None=None, KEYWORD_ONLY:strict: bool=False) -> Dataset",  # noqa: E501
-}
+SNAPSHOT = Path(__file__).with_name("api_surface.json")
+"""The pinned surface, one entry per name of ``__all__``: for a function its full signature, for a
+pydantic model every field with its type and default, for a dataclass the same, for an exception
+its whole MRO. Regenerate deliberately with ``UPDATE_API_SURFACE=1 uv run pytest
+tests/unit/test_api_surface.py`` and review the diff."""
 DEPRECATION_SURFACE = {
     "deprecated": "(KEYWORD_ONLY:since: str, KEYWORD_ONLY:removal: str, KEYWORD_ONLY:replacement: str) -> Callable[[Callable[P, R]], Callable[P, R]]"  # noqa: E501
 }
@@ -56,14 +44,34 @@ def signature(fn: Any) -> str:
     return f"({', '.join(parts)}) -> {sig.return_annotation}"
 
 
-def describe(obj: Any) -> str:
+def _clean(text: str) -> str:
+    return re.sub(r" at 0x[0-9a-f]+", "", text)  # a function's address is not part of the surface
+
+
+def _field(field: Any) -> str:
+    if field.default is not PydanticUndefined:
+        default = repr(field.default)
+    elif field.default_factory is not None:
+        default = "factory:" + getattr(field.default_factory, "__name__", "?")
+    else:
+        default = "required"
+    return _clean(f"{field.annotation!r}={default}")
+
+
+def describe(obj: Any) -> Any:
     if inspect.isclass(obj):
         if issubclass(obj, BaseException):
-            return "exception(" + ",".join(b.__name__ for b in obj.__bases__) + ")"
+            return [c.__name__ for c in obj.__mro__]
         if issubclass(obj, BaseModel):
-            return "model(" + ",".join(obj.model_fields) + ")"
+            return {name: _field(f) for name, f in obj.model_fields.items()}
         if dataclasses.is_dataclass(obj):
-            return "dataclass(" + ",".join(f.name for f in dataclasses.fields(obj)) + ")"
+            return {
+                f.name: _clean(
+                    f"{f.type}="
+                    + ("required" if f.default is dataclasses.MISSING else repr(f.default))
+                )
+                for f in dataclasses.fields(obj)
+            }
         return "class"
     if callable(obj):
         return signature(obj)
@@ -76,8 +84,68 @@ def resolve(name: str) -> Any:
     return getattr(api, name) if name in api.__all__ else getattr(dc, name)
 
 
+def surface() -> dict[str, Any]:
+    return {name: describe(resolve(name)) for name in sorted(dc.__all__)}
+
+
 def test_the_public_surface_matches_the_snapshot() -> None:
-    assert {name: describe(resolve(name)) for name in dc.__all__} == SURFACE
+    if os.environ.get("UPDATE_API_SURFACE"):
+        SNAPSHOT.write_text(json.dumps(surface(), indent=1, sort_keys=True) + "\n")
+    assert surface() == json.loads(SNAPSHOT.read_text())
+
+
+def test_the_snapshot_pins_types_defaults_and_the_exception_hierarchy() -> None:
+    pinned = json.loads(SNAPSHOT.read_text())
+    assert pinned["Annotation"]["provenance"].endswith("='human'")
+    assert pinned["Annotation"]["kind"].startswith("typing.Literal[")
+    assert pinned["Summary" if "Summary" in pinned else "AuditRun"]
+    assert pinned["FormatError"] == [
+        "FormatError",
+        "DataCopilotError",
+        "Exception",
+        "BaseException",
+        "object",
+    ]
+    assert pinned["SettingsError"][:2] == ["SettingsError", "ValueError"]
+    assert pinned["GateFailedError"][:2] == ["GateFailedError", "DataCopilotError"]
+    assert "root" in pinned["Dataset"] and pinned["Dataset"]["root"].endswith("=None")
+
+
+def test_load_and_export_are_the_api_functions_themselves() -> None:
+    assert dc.load is api.load and dc.export is api.export
+
+
+def test_audit_forwards_to_the_api_function(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Any, Any]] = []
+
+    def fake(*args: Any, **kwargs: Any) -> str:
+        seen.append((args, kwargs))
+        return "run"
+
+    monkeypatch.setattr(api, "audit", fake)
+    assert dc.audit("ds", fail_on=()) == "run"
+    assert seen == [(("ds",), {"fail_on": ()})]
+
+
+def test_audit_introspects_and_pickles_like_the_function() -> None:
+    import pickle
+
+    assert inspect.signature(dc.audit) == inspect.signature(api.audit)
+    assert inspect.unwrap(dc.audit) is api.audit
+    assert pickle.loads(pickle.dumps(dc.audit)) is dc.audit  # noqa: S301
+    import functools
+
+    assert pickle.loads(pickle.dumps(functools.partial(dc.audit, fail_on=()))).keywords == {  # noqa: S301
+        "fail_on": ()
+    }
+
+
+def test_audit_can_be_sent_to_another_process() -> None:
+    from concurrent.futures import ProcessPoolExecutor
+
+    with ProcessPoolExecutor(max_workers=1) as pool:
+        assert pool.submit(inspect.signature, api.audit).result() == inspect.signature(api.audit)
+        assert pool.submit(callable, dc.audit).result() is True
 
 
 def test_all_is_sorted_unique_and_resolvable() -> None:

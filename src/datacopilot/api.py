@@ -147,11 +147,14 @@ def audit(
     root: str | Path | None = None,
     workers: int | None = None,
     require_local_images: bool = False,
+    include_model_annotations: bool = False,
 ) -> AuditRun:
     """Run the audit checks over ``dataset`` and return the run; nothing is written.
 
-    The hash cache is not used and images outside ``root`` are never read. The gate is evaluated
-    and recorded (``AuditRun.passed``) but, unlike the command line, a failed gate does not raise.
+    The hash cache is not used and images outside ``root`` are never read. The checks, limits and
+    gate evaluation are those of the command line, but a failed gate is **recorded** in
+    ``AuditRun.passed`` and does not raise (the command line turns it into exit code 1): call
+    ``run.raise_for_gate()`` where a failure must stop the program.
 
     Args:
         dataset: a loaded dataset or the path of a ``.dcp`` directory (whose embedding cache is
@@ -169,7 +172,12 @@ def audit(
         root: directory the image paths must lie in; defaults to ``Dataset.root`` (set by
             :func:`load`) or the parent of a ``.dcp`` directory.
         workers: threads for the file checks (default: ``DATACOPILOT_WORKERS`` or the CPU count).
-        require_local_images: treat any image that could not be examined as CRITICAL.
+        require_local_images: treat any image that could not be examined as CRITICAL; use it
+            wherever the result gates something (CI), because the default tolerates a minority of
+            remote or external images as a WARN.
+        include_model_annotations: also audit rows with ``provenance == "model"`` (for example
+            Label Studio predictions); by default they are left out of every check and counted in
+            ``run.summary.excluded_model_annotations``.
 
     Raises:
         ValueError: invalid ``checks``, ``fail_on``, ``embedder`` or threshold.
@@ -221,6 +229,7 @@ def audit(
             cache_key=settings.cache_key,
             in_ci=settings.ci,
             require_local_images=require_local_images,
+            include_model_annotations=include_model_annotations,
             dataset_dir=dcp_dir,
             embedder=None if created is None else embedder_label(created),
             embeddings=provider,

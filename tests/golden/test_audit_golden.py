@@ -21,7 +21,7 @@ from datacopilot.audit.engine import run_audit
 from datacopilot.core.schema import AuditRun, Dataset
 from datacopilot.report import html_report, json_report, sarif_report
 
-DATA = Path(__file__).parent / "data" / "audit"
+DATA = Path(__file__).parent / "expected" / "audit"
 RUN = "1111aaaa-2222-4333-8444-5555bbbb5555"
 TWIN = png_bytes(16, 16, 7)
 
@@ -65,17 +65,25 @@ def run(tmp_path: Path) -> AuditRun:
     return normalised(run_audit(ds, "all", ctx, fail_on=["critical"]))
 
 
-GOLDEN_VERSION = "0.0.1.dev0"
-"""The package version the golden files were written with. Reports name the tool version; it is
-replaced by this value before comparing, so a release does not rewrite every golden file."""
+VERSION_PLACEHOLDER = "{{VERSION}}"
+"""The golden files carry this where a report names the tool version, so a release does not rewrite
+them. Only the two exact places a version appears are replaced (and each must occur exactly once);
+``test_reports_name_the_running_version`` proves separately that they hold ``__version__``."""
+TOKENS = {
+    "report.sarif": ('"version": "{v}"', '"version": "' + VERSION_PLACEHOLDER + '"'),
+    "report.html": ("datacopilot {v}.", "datacopilot " + VERSION_PLACEHOLDER + "."),
+}
 
 
 def check(name: str, text: str) -> None:
-    text = text.replace(f'"{__version__}"', f'"{GOLDEN_VERSION}"').replace(
-        f"datacopilot {__version__}", f"datacopilot {GOLDEN_VERSION}"
-    )
+    if name in TOKENS:
+        token, placeholder = TOKENS[name]
+        token = token.format(v=__version__)
+        assert text.count(token) == 1, f"{name}: the version must appear exactly once as {token!r}"
+        text = text.replace(token, placeholder)
     target = DATA / name
     if os.environ.get("UPDATE_GOLDEN"):
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
     assert target.read_text(encoding="utf-8") == text, f"{name} changed; see the module docstring"
 
@@ -137,3 +145,10 @@ def test_two_runs_with_different_run_ids_are_identical_after_the_documented_norm
         assert a[fmt].replace(RUN, "<run-id>") == b[fmt].replace(RUN_B, "<run-id>"), fmt
     assert RUN in a["json"].split('"findings"')[1]  # findings carry the run id too
     assert json.loads(a["sarif"])["runs"][0]["automationDetails"]["id"] == "datacopilot/audit/"
+
+
+def test_reports_name_the_running_version(run: AuditRun) -> None:
+    sarif = json.loads(sarif_report.render_sarif(run))
+    assert sarif["runs"][0]["tool"]["driver"]["version"] == __version__
+    assert f"datacopilot {__version__}." in html_report.render_html(run)
+    assert VERSION_PLACEHOLDER not in sarif_report.render_sarif(run)

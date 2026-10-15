@@ -172,6 +172,13 @@ First release candidate. Before 1.0 a minor version may break the public API.
 
 ### Changed
 
+- `audit` leaves rows whose provenance is `model` out of every check unless `--include-model-annotations` (API:
+  `include_model_annotations=True`) is given, and reports the number in the summary, the HTML report and a
+  note on standard error. `AuditRun.raise_for_gate()` and `GateFailedError` let API callers turn a failed
+  gate into an exception; the docs no longer claim the API raises on its own. The callable
+  `datacopilot.audit` forwards its signature and pickles; the API surface snapshot (`api_surface.json`) now
+  pins field types, defaults and exception hierarchies, and the audit golden files carry a `{{VERSION}}`
+  placeholder (`tests/golden/expected/`) with a separate test that the reports name the running version.
 - Label Studio reader: a skipped entry with no results is no longer counted as zero (a normal export with a
   cancelled annotation or a second annotator without results made `ingest` exit 1 without a message and made
   `load` leak a validation error); `ConversionReport` drops zero counts and a reader's row-level validation

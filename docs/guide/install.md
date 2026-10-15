@@ -39,7 +39,10 @@ behind them are not built yet.
 `datacopilot doctor` reports the versions of the package and its dependencies, which extras are
 importable, the validated settings, the cache directory, FAISS and GPU visibility. It exits 0 when
 the installation works (extras may be missing), 1 when a core dependency is missing and 2 when a
-`DATACOPILOT_*` variable is invalid. `datacopilot doctor --json` prints one JSON object.
+`DATACOPILOT_*` variable is invalid. `datacopilot doctor --json` prints one JSON object. The report is safe to paste into a bug report: it never
+holds a secret (the cache key shows only as set or unset) and writes your home directory as `~`, but it does
+include versions, the operating system name and the cache directory (in full when it is outside your home
+directory), so read it before you share it.
 
 ## Settings
 

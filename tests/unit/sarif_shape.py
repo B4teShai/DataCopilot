@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from datacopilot import __version__
+
 LEVELS = {"none", "note", "warning", "error"}
 
 
@@ -45,7 +47,7 @@ def validate_sarif(doc: Any) -> None:
     tool = _obj(run["tool"], "tool", {"driver"}, set())
     driver = _obj(tool["driver"], "driver", {"name", "version", "rules"}, {"informationUri"})
     _text(driver["name"], "driver.name")
-    _text(driver["version"], "driver.version")
+    assert _text(driver["version"], "driver.version") == __version__
     rules = driver["rules"]
     assert isinstance(rules, list)
     ids = []

@@ -87,6 +87,9 @@ class CheckContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
             paths and can carry names.
         dataset_dir: the ``dataset.dcp`` directory, where the embedding cache lives; None means no
             persistent embedding cache.
+        include_model_annotations: audit rows with ``provenance == "model"`` too; by default they
+            are left out of every check (model output is not ground truth) and counted in the
+            summary.
         require_local_images: any image that a check could not examine is CRITICAL.
         cache_key: out-of-band MAC secret of the hash cache (``DATACOPILOT_CACHE_KEY``).
         incomplete_is_critical: severity of ``audit_incomplete`` (the runner sets WARN when no gate
@@ -108,6 +111,7 @@ class CheckContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
     dataset_dir: Path | None = None
     show_group_labels: bool = False
     require_local_images: bool = False
+    include_model_annotations: bool = False
     cache_key: SecretStr | None = None
     in_ci: bool = False
     incomplete_is_critical: bool = True

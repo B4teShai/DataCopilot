@@ -34,8 +34,13 @@ def _normal(line: str) -> str:
     return " ".join(line.split())
 
 
+ALLOWED_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT")
+"""The only variables a documented command inherits: it must not see tokens, cloud credentials or
+the CI context of the machine that runs the tests."""
+
+
 def _env(home: Path) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("DATACOPILOT_") and k != "CI"}
+    env = {k: os.environ[k] for k in ALLOWED_ENV if k in os.environ}
     env.update(
         HOME=str(home),
         XDG_CACHE_HOME=str(home / "xdg"),
@@ -43,6 +48,22 @@ def _env(home: Path) -> dict[str, str]:
         PYTHONIOENCODING="utf-8",
     )
     return env
+
+
+def test_documented_commands_get_an_allow_listed_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in {
+        "GITHUB_TOKEN": "t", "AWS_SECRET_ACCESS_KEY": "s", "HF_TOKEN": "h", "CI": "true",
+        "DATACOPILOT_CACHE_KEY": "k" * 20, "PYTHONPATH": "/evil", "LD_PRELOAD": "/evil.so",
+        "PATH": "/usr/bin", "LANG": "C.UTF-8",
+    }.items():  # fmt: skip
+        monkeypatch.setenv(name, value)
+    env = _env(tmp_path)
+    assert set(env) <= set(ALLOWED_ENV) | {"HOME", "XDG_CACHE_HOME", "DATACOPILOT_CACHE_DIR",
+                                           "PYTHONIOENCODING"}  # fmt: skip
+    assert env["PATH"] == "/usr/bin" and env["LANG"] == "C.UTF-8"
+    assert env["HOME"] == str(tmp_path) and "GITHUB_TOKEN" not in env and "PYTHONPATH" not in env
 
 
 def _run(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:

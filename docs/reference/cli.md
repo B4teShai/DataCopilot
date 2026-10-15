@@ -62,6 +62,7 @@ datacopilot audit [OPTIONS] DATASET
 | `--embedding-cache` / `--no-embedding-cache` |  | on | Keep embeddings in dataset.dcp/embeddings (authenticated; default: on). |
 | `--allow-test-embedder` |  | off | Allow a test-only embedder such as `hash` (it compares file bytes, not pictures) to drive a gate. Without it such an embedder is refused unless `--fail-on none`. |
 | `--require-cache-key` |  | off | Fail (exit 2) unless DATACOPILOT_CACHE_KEY is set, whether or not CI is detected (only the CI variable is looked at). Use it where the cache directory is shared or restored from elsewhere. |
+| `--include-model-annotations` |  | off | Also audit annotations whose provenance is `model` (for example Label Studio predictions). By default they are left out of every check, because model output is not ground truth, and the number left out is reported. |
 | `--show-group-labels` |  | off | Show group ids in leakage findings (default: only a hashed reference; group ids come from file paths and can carry names). |
 
 ## datacopilot doctor

@@ -23,6 +23,10 @@ class ConversionLossError(DataCopilotError):
     """A conversion dropped fields while strict mode was requested."""
 
 
+class GateFailedError(DataCopilotError):
+    """An audit's gate matched (raised by ``AuditRun.raise_for_gate``; the command line exits 1)."""
+
+
 class LicenseError(DataCopilotError):
     """A model or plugin license is outside ``DATACOPILOT_ALLOWED_LICENSES``."""
 

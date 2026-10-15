@@ -10,7 +10,7 @@ MAX_SUMMARY_CLASSES = 2_000
 """Classes listed in a summary; a dataset with more keeps only its totals."""
 
 
-def build_summary(ds: Dataset) -> Summary:
+def build_summary(ds: Dataset, excluded_model_annotations: int = 0) -> Summary:
     """Totals, images per split and annotations per (split, class) of ``ds``."""
     split_of = {i.image_id: i.split for i in ds.images}
     split_images: Counter[str] = Counter(split_of.values())
@@ -31,6 +31,7 @@ def build_summary(ds: Dataset) -> Summary:
             for c in sorted(ds.categories, key=lambda c: c.id)
         ),
         classes_omitted=omitted,
+        excluded_model_annotations=excluded_model_annotations,
         class_counts={
             split: {str(cid): n for cid, n in sorted(per.items())} for split, per in counts.items()
         },

@@ -60,7 +60,8 @@ as the commands; a failed gate is recorded in `AuditRun.passed`, not raised):
 def load(path, format=None, *, group_by=None, strict=False) -> Dataset
 def audit(dataset, checks="all", *, fail_on=("critical",), embedder=None, embed_batch=None,
           similarity_threshold=None, allow_test_embedder=False, root=None, workers=None,
-          require_local_images=False) -> AuditRun
+          require_local_images=False, include_model_annotations=False) -> AuditRun
+# AuditRun.raise_for_gate() raises GateFailedError when the recorded gate failed
 def export(dataset, format, out, *, strict=False) -> ConversionReport
 ```
 

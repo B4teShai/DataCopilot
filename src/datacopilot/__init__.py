@@ -20,6 +20,7 @@ if _typing.TYPE_CHECKING:
         ConversionLossError,
         DataCopilotError,
         FormatError,
+        GateFailedError,
         LicenseError,
         ModelError,
         StoreError,
@@ -48,6 +49,7 @@ __all__ = [
     "DatasetManifest",
     "Finding",
     "FormatError",
+    "GateFailedError",
     "Image",
     "LicenseError",
     "ModelError",
@@ -71,6 +73,7 @@ _LAZY = {
             "ConversionLossError",
             "DataCopilotError",
             "FormatError",
+            "GateFailedError",
             "LicenseError",
             "ModelError",
             "StoreError",
@@ -98,10 +101,25 @@ class _CallableModule(_types.ModuleType):
     Importing a sub-package binds its name on the parent, so a function called ``audit`` in this
     namespace would be replaced by the sub-package at the first ``import datacopilot.audit``.
     Making the sub-package callable keeps ``datacopilot.audit(dataset)`` working either way.
+
+    The object also forwards what tools ask a function: ``__wrapped__`` makes
+    :func:`inspect.signature` report the signature of :func:`datacopilot.api.audit`, and pickling
+    stores a reference to the name, so ``datacopilot.audit`` can be sent to a process pool. A module
+    still shows its own help; use ``help(datacopilot.api.audit)`` for the function, and hand
+    ``datacopilot.api.audit`` itself to executors.
     """
+
+    __module__ = "datacopilot"
 
     def __call__(self, *args: _typing.Any, **kwargs: _typing.Any) -> _typing.Any:
         return _importlib.import_module("datacopilot.api").audit(*args, **kwargs)
+
+    @property
+    def __wrapped__(self) -> _typing.Any:
+        return _importlib.import_module("datacopilot.api").audit
+
+    def __reduce__(self) -> str:
+        return "audit"
 
 
 _audit_package.__class__ = _CallableModule

@@ -328,6 +328,15 @@ def audit(
             "shared or restored from elsewhere.",
         ),
     ] = False,
+    include_model_annotations: Annotated[
+        bool,
+        typer.Option(
+            "--include-model-annotations",
+            help="Also audit annotations whose provenance is `model` (for example Label Studio "
+            "predictions). By default they are left out of every check, because model output is "
+            "not ground truth, and the number left out is reported.",
+        ),
+    ] = False,
     show_group_labels: Annotated[
         bool,
         typer.Option(
@@ -447,6 +456,7 @@ def audit(
         require_local_images=require_local_images,
         dataset_dir=dataset.resolve(),
         show_group_labels=show_group_labels,
+        include_model_annotations=include_model_annotations,
         embedder=None
         if created is None
         else (
@@ -474,6 +484,14 @@ def audit(
         f"{'passed' if result.passed else 'failed'} critical={counts.critical} "
         f"warn={counts.warn} info={counts.info} run_id={result.run_id}"
     )
+    excluded = result.summary.excluded_model_annotations if result.summary is not None else 0
+    if excluded:
+        typer.echo(
+            f"note: {excluded} model-generated annotation{'s' if excluded != 1 else ''} "
+            "(provenance: model) excluded from every check; pass --include-model-annotations "
+            "to audit them",
+            err=True,
+        )
     if not result.passed:
         raise typer.Exit(1)
 
