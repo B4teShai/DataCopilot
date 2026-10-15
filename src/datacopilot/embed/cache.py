@@ -607,6 +607,12 @@ class EmbeddingCache:
         order = sorted(range(len(all_ids)), key=all_ids.__getitem__)
         return LoadResult(tuple(all_ids[i] for i in order), matrix[order], dict(rejected), "ok")
 
+    def reset(self) -> None:
+        """Forget every shard: the next ``append`` publishes a fresh manifest and the old shard
+        files, now unlisted, are removed. Used when the cache is found to disagree with the
+        images (the spot check); nothing on disk changes until then."""
+        self._shards, self._ids, self._loaded = [], set(), True
+
     def append(self, image_ids: list[str], vectors: NDArray[np.float32]) -> None:
         """Write ``vectors`` as one new shard and publish it in the manifest.
 

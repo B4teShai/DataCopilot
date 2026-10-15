@@ -46,6 +46,9 @@ boxes = "datacopilot.audit.checks.boxes:plugin"
 duplicates = "datacopilot.audit.checks.duplicates:plugin"
 imbalance = "datacopilot.audit.checks.imbalance:plugin"
 integrity = "datacopilot.audit.checks.integrity:plugin"
+leakage = "datacopilot.audit.checks.leakage:plugin"
+near_duplicates = "datacopilot.audit.checks.near_duplicates:plugin"
+outliers = "datacopilot.audit.checks.outliers:plugin"
 
 [project.entry-points."datacopilot.embedders"]
 hash = "datacopilot.embed.hashembed:plugin"

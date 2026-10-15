@@ -114,3 +114,27 @@ def preprocess(rgb: NDArray[np.uint8], pre: Preprocess) -> NDArray[np.float32]:
     std = np.asarray(pre.std, dtype=np.float32)
     normalised: NDArray[np.float32] = ((array - mean) / std).transpose(2, 0, 1).astype(np.float32)
     return np.ascontiguousarray(normalised)
+
+
+def dhash(data: bytes, index: int, *, max_pixels: int = MAX_DECODE_PIXELS) -> int:
+    """64-bit difference hash of an image: luma resized to 9 x 8, one bit per horizontal step.
+
+    Decoding is as bounded as :func:`decode_rgb`, whose errors it raises. Two pictures that differ
+    by recompression, small brightness changes or mild resizing differ in few bits.
+    """
+    from PIL import Image
+
+    rgb = decode_rgb(data, index, max_pixels=max_pixels)
+    luma = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    gray = Image.fromarray(np.clip(luma + 0.5, 0, 255).astype(np.uint8), "L")
+    small = np.asarray(gray.resize((9, 8), Image.Resampling.BILINEAR), dtype=np.int16)
+    bits = (small[:, 1:] > small[:, :-1]).reshape(-1)
+    value = 0
+    for bit in bits.tolist():
+        value = (value << 1) | int(bit)
+    return value
+
+
+def hamming(a: int, b: int) -> int:
+    """Number of differing bits of two hashes."""
+    return (a ^ b).bit_count()

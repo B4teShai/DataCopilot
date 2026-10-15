@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TypeVar
 
@@ -25,7 +25,7 @@ def bounded_map(
     workers: int,
     window: int | None = None,
     deadline: float | None = None,
-) -> Iterator[R]:
+) -> Generator[R, None, None]:
     """Yield ``fn(item)`` for a prefix of ``items`` in order.
 
     The prefix is all of ``items`` unless ``deadline`` (a ``time.monotonic()`` value) passes first;

@@ -110,9 +110,11 @@ class Check(Protocol):
     def run(self, ds: Dataset, ctx: CheckContext) -> list[Finding]
 class CheckContext(BaseModel, frozen=True):
     run_id: str; root: Path; cache_dir: Path; workers: int; embedder: str | None
+    embeddings: EmbeddingProvider | None; dataset_dir: Path | None   # the embedding checks' input
     use_hash_cache: bool; cache_key: SecretStr | None; in_ci: bool
     allow_external_images: bool; require_local_images: bool; incomplete_is_critical: bool
-    config: CheckConfig   # thresholds and budgets (max_unchecked_fraction, max_check_seconds, max_hash_bytes)
+    config: CheckConfig   # thresholds and budgets (max_unchecked_fraction, max_check_seconds, max_hash_bytes,
+                          # near_duplicate_cosine, leakage_cosine, knn_k, outlier_*, max_embed_image_bytes)
 def run_audit(ds: Dataset, checks: Sequence[str] | Literal["all"], ctx: CheckContext,
               fail_on: Sequence[str] = ()) -> AuditRun
 def gate_failed(run: AuditRun, fail_on: Sequence[str]) -> bool   # True -> exit code 1
@@ -125,11 +127,23 @@ Built checks and findings (`payload["rule"]`):
 | `integrity` | CRITICAL / WARN / INFO | `file_missing`, `unsafe_path`, `not_a_regular_file`, `unreadable`, `empty_file`, `invalid_header` (also an unrecognised format: ingest accepted every image, so a file that no longer parses was damaged or replaced), `size_mismatch`, `audit_incomplete` (time budget reached; WARN when no gate is applied) (CRITICAL); `file_too_large` (WARN); `remote_not_checked`, `external_not_checked` (WARN, CRITICAL above `max_unchecked_fraction` = 50 percent of the images or with `--require-local-images`); `exif_orientation` (INFO). Header only (PNG, JPEG, GIF, BMP with DIB header size checked), never a full decode |
 | `duplicates` | CRITICAL across train/val/test or between `unassigned` and a real split, WARN within one split | `exact_duplicate` (one finding per group, `group_id` = 12-hex digest prefix), `content_changed` (CRITICAL: the file no longer hashes to `image_id`), `audit_incomplete` (CRITICAL; time or byte budget reached), `hash_cache_mismatch` (WARN), `images_not_hashed` (WARN, CRITICAL like `remote_not_checked`; counts by reason) |
 | `imbalance` | WARN / INFO | `long_tail` (per split: ratio `max/min` over present classes, effective number of classes `exp(H)`), `class_missing_in_split`, `class_unused` |
+| `near_duplicates` | WARN | `near_duplicate` (cluster of images whose embeddings have cosine similarity of at least `near_duplicate_cosine` = 0.95 among each other's 10 nearest neighbours; `cross_split` flags a cluster that touches two splits, which `leakage` reports as CRITICAL; `group_id` = 12-hex digest of the member ids, up to 20 members as short id, split and base name), `phash_not_applied` (WARN; optional perceptual-hash prefilter could not hash some images, their pairs are kept) |
+| `leakage` | CRITICAL | `cross_split_near_duplicate` (neighbours are searched only among the images of the *other* splits, so a crowd of same-split frames cannot hide a leak; `unassigned` is compared with the real splits like in `duplicates`), `group_overlap` (one `group_id` in more than one split; needs no embedding) |
+| `outliers` | INFO | `outlier` (per class, mean cosine distance to the 5 nearest images of the same class, robust z above 3.5 with the scale floored at 0.02; at most 20 per class), `classes_skipped`, `images_without_class` |
 | `boxes` | CRITICAL / WARN | `invalid_box`, `out_of_bounds`, `zero_area` (CRITICAL); `tiny_box`, `extreme_aspect`, `duplicate_box` (earliest same-class match), `conflicting_class` (earliest different-class match; one box can be both), `pairwise_skipped` (WARN: an image with more than 20,000 boxes) (WARN); `boxes_truncated` (INFO) |
 
-`near_duplicates`, `leakage`, `label_noise`, `outliers` and `sku_confusion` are planned;
-`--fail-on` rejects their names as "not available in this version" instead of accepting a gate
-that can never fire.
+The three embedding checks share these **fail-closed rules**, emitted by each of them so that
+`--fail-on <check>` and the severity gates see them: `embedder_missing` (CRITICAL, no provider),
+`embedder_error` (CRITICAL; the exception *type* only, never its text), `images_not_embedded`
+(WARN, CRITICAL above `max_unchecked_fraction` or with `--require-local-images`; counts by reason
+`remote`, `outside_root`, `unsafe_path`, `file_missing`, `not_a_regular_file`, `unreadable`,
+`file_too_large`, `content_changed`, `decode_failed`, `too_many_pixels`, `zero_vector`,
+`embedder_error`, `time_budget`), `audit_incomplete` (embedding time budget, neighbour search time
+budget, or more than 500,000 images), `embedding_cache_rejected` and `embedding_cache_mismatch`
+(WARN). `--checks all` includes the three only when an embedder is given; naming one without
+`--embedder`, or gating on one that is not part of the run, is a usage error (exit 2).
+`label_noise` and `sku_confusion` are planned; `--fail-on` rejects their names as "not available
+in this version" instead of accepting a gate that can never fire.
 
 `--fail-on` defaults to `critical` at the CLI; `none` (alone) applies no gate. It accepts severity names and check names. A severity name is a threshold: `warn` matches
 WARN and CRITICAL, `info` matches everything. A check name matches every finding of that check.
@@ -150,8 +164,9 @@ Depends on: `core/`, `io.files` and `io.registry` (header reader, path helpers; 
 adapter module), `logging.py`. The tables arrive as a `Dataset` read through the bounded store
 reader; DuckDB is not used (see [ADR-0003](../adr/0003-repo-and-tooling.md)). Hashing and header
 reads run on a thread pool (`hashlib` releases the GIL on large chunks), not a process pool.
-Status: **built** for the registry, runner, gate and the four CPU checks above; embedding checks
-planned.
+Status: **built** for the registry, runner, gate, the four CPU checks and the three embedding
+checks (`near_duplicates`, `leakage`, `outliers`) with `audit/embedding.py`, the pipeline that feeds
+them (cache, bounded reads, batching, spot check, budgets).
 
 ### `split/`
 

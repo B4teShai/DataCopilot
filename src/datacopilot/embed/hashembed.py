@@ -34,7 +34,8 @@ def _splitmix(x: NDArray[np.uint64]) -> NDArray[np.uint64]:
     z = x + _U64(0x9E3779B97F4A7C15)
     z = (z ^ (z >> _U64(30))) * _U64(0xBF58476D1CE4E5B9)
     z = (z ^ (z >> _U64(27))) * _U64(0x94D049BB133111EB)
-    return z ^ (z >> _U64(31))
+    mixed: NDArray[np.uint64] = z ^ (z >> _U64(31))
+    return mixed
 
 
 _SEEDS = _splitmix(np.arange(1, DIMS + 1, dtype=np.uint64))

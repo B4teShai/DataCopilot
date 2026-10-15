@@ -146,23 +146,37 @@ def _guarded(name: str, call: Callable[[], T]) -> T:
         raise DataCopilotError(f"check {name!r} aborted the audit ({type(exc).__name__})") from None
 
 
-def select_checks(checks: Sequence[str] | Literal["all"]) -> list[str]:
+def select_checks(
+    checks: Sequence[str] | Literal["all"], *, with_embedder: bool = False
+) -> list[str]:
     """Resolve a selection to registered names in run order.
 
+    ``"all"`` includes the embedding checks (``registry.EMBEDDING_CHECKS``) only with an embedder.
+
     Raises:
-        ValueError: an empty selection.
+        ValueError: an empty selection, or an embedding check without an embedder.
         FormatError: an unknown name.
     """
     available = registry.check_names()
     if checks == "all":
-        return available
+        return [n for n in available if with_embedder or n not in registry.EMBEDDING_CHECKS]
     if not checks:
         raise ValueError("no checks selected")
     for name in checks:
         if name not in available:
             registry.get_check(name)  # raises FormatError naming the available checks
+        if name in registry.EMBEDDING_CHECKS and not with_embedder:
+            raise ValueError(f"check {name!r} needs an embedder (--embedder NAME)")
     wanted = set(checks)
     return [n for n in available if n in wanted]
+
+
+def not_in_run_message(token: str, with_embedder: bool) -> str:
+    """Usage error for a ``--fail-on`` check name that is not among the checks being run."""
+    hint = (
+        " (it needs --embedder)" if token in registry.EMBEDDING_CHECKS and not with_embedder else ""
+    )
+    return f"--fail-on {token!r} is not among the checks being run{hint}"
 
 
 def run_audit(
@@ -181,11 +195,12 @@ def run_audit(
     """
     if not ds.images:
         raise ValidationError("dataset has no images; there is nothing to audit")
-    names = select_checks(checks)
+    with_embedder = ctx.embeddings is not None
+    names = select_checks(checks, with_embedder=with_embedder)
     tokens = parse_fail_on(fail_on)
     for token in tokens:
         if token not in _SEVERITY_NAMES and token not in names:
-            raise ValueError(f"--fail-on {token!r} is not among the checks being run")
+            raise ValueError(not_in_run_message(token, with_embedder))
     ctx = ctx.model_copy(update={"incomplete_is_critical": bool(tokens)})
     log = get_logger(__name__)
     if not hasattr(os, "O_NOFOLLOW"):

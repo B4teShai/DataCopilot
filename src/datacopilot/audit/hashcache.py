@@ -129,6 +129,30 @@ def _load_secret(directory: Path) -> bytes | None:
     return None
 
 
+def resolve_secret(
+    directory: Path, key: bytes | None, in_ci: bool
+) -> tuple[bytes | None, str | None]:
+    """The MAC secret for a cache kept in ``directory`` and why none is available.
+
+    ``key`` is the out-of-band secret (``DATACOPILOT_CACHE_KEY``). Without it, ``in_ci`` yields no
+    secret (``ci_without_key``); otherwise a private ``secret.key`` beside the cache is used and
+    created on first use. The directory must be private to this user, else no secret is returned
+    (``directory_not_private``, ``secret_not_private``).
+
+    Raises:
+        OSError: the directory cannot be created.
+    """
+    if key is None and in_ci:
+        return None, "ci_without_key"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not _private_dir(directory):
+        return None, "directory_not_private"
+    secret = key if key is not None else _load_secret(directory)
+    if secret is None:
+        return None, "secret_not_private"
+    return secret, None
+
+
 class HashCache:
     """In-memory view of a verified cache file with buffered, append-only persistence.
 
@@ -166,16 +190,9 @@ class HashCache:
             OSError: the directory cannot be created.
         """
         cache = cls()
-        if key is None and in_ci:
-            cache.untrusted_reason = "ci_without_key"
-            return cache
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if not _private_dir(directory):
-            cache.untrusted_reason = "directory_not_private"
-            return cache
-        secret = key if key is not None else _load_secret(directory)
+        secret, reason = resolve_secret(directory, key, in_ci)
         if secret is None:
-            cache.untrusted_reason = "secret_not_private"
+            cache.untrusted_reason = reason
             return cache
         cache._mac_key = hashlib.sha256(secret + b"\x00" + binding.encode("utf-8")).digest()
         path = directory / file_name

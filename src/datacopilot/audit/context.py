@@ -6,6 +6,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
+from datacopilot.audit.embedding import EmbeddingProvider
+
 MAX_WORKERS = 256
 """Upper bound for ``workers``; a typo such as 100000 must not fork a hundred thousand processes."""
 
@@ -27,6 +29,18 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
         max_hash_bytes: total bytes the duplicates check may hash in one run (same finding).
         max_unchecked_fraction: when more than this fraction of the images could not be checked
             (remote, outside the root, unhashable) the finding is CRITICAL, else WARN.
+        max_embed_image_bytes: files larger than this are not read for embedding (reported).
+        near_duplicate_cosine: image pairs whose embeddings have at least this cosine similarity
+            are near-duplicates.
+        leakage_cosine: cross-split pairs at or above this cosine similarity are leakage.
+        knn_k: neighbours examined per image by the near-duplicate and leakage checks.
+        near_duplicate_phash_max_distance: when set, a candidate pair is kept only if the 64-bit
+            difference hashes of its two images differ in at most this many bits (a pair that cannot
+            be hashed is kept).
+        outlier_k: neighbours (within the class) whose mean distance is the outlier score.
+        outlier_z: robust z-score (median and MAD) above which an image is an outlier.
+        outlier_min_class_images: classes with fewer embedded images are skipped.
+        max_outliers_per_class: outliers reported per class (highest score first).
     """
 
     imbalance_info_ratio: float = Field(default=3.0, gt=1.0, le=1e9, allow_inf_nan=False)
@@ -39,6 +53,15 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
     max_check_seconds: float = Field(default=1800.0, gt=0.0, le=1e7, allow_inf_nan=False)
     max_hash_bytes: int = Field(default=200 * 1024**3, ge=1)
     max_unchecked_fraction: float = Field(default=0.5, ge=0.0, le=1.0, allow_inf_nan=False)
+    max_embed_image_bytes: int = Field(default=32 * 1024**2, ge=1)
+    near_duplicate_cosine: float = Field(default=0.95, gt=0.0, le=1.0, allow_inf_nan=False)
+    leakage_cosine: float = Field(default=0.95, gt=0.0, le=1.0, allow_inf_nan=False)
+    knn_k: int = Field(default=10, ge=1, le=100)
+    near_duplicate_phash_max_distance: int | None = Field(default=None, ge=0, le=64)
+    outlier_k: int = Field(default=5, ge=1, le=100)
+    outlier_z: float = Field(default=3.5, gt=0.0, le=100.0, allow_inf_nan=False)
+    outlier_min_class_images: int = Field(default=8, ge=3, le=1_000_000)
+    max_outliers_per_class: int = Field(default=20, ge=1, le=10_000)
 
     @model_validator(mode="after")
     def _ordered(self) -> CheckConfig:
@@ -47,7 +70,7 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
         return self
 
 
-class CheckContext(BaseModel, frozen=True):
+class CheckContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """What a check may use besides the dataset.
 
     Attributes:
@@ -57,6 +80,10 @@ class CheckContext(BaseModel, frozen=True):
         cache_dir: where resumable caches live.
         workers: thread count for the file-reading checks.
         embedder: embedder registry id, if the run uses one (none in the CPU checks).
+        embeddings: the provider of image embeddings for the embedding checks (computes once per
+            audit and caches in memory); None when no embedder was requested.
+        dataset_dir: the ``dataset.dcp`` directory, where the embedding cache lives; None means no
+            persistent embedding cache.
         require_local_images: any image that a check could not examine is CRITICAL.
         cache_key: out-of-band MAC secret of the hash cache (``DATACOPILOT_CACHE_KEY``).
         incomplete_is_critical: severity of ``audit_incomplete`` (the runner sets WARN when no gate
@@ -74,6 +101,8 @@ class CheckContext(BaseModel, frozen=True):
     cache_dir: Path
     workers: int = Field(default=1, ge=1, le=MAX_WORKERS)
     embedder: str | None = None
+    embeddings: EmbeddingProvider | None = Field(default=None, exclude=True)
+    dataset_dir: Path | None = None
     require_local_images: bool = False
     cache_key: SecretStr | None = None
     in_ci: bool = False

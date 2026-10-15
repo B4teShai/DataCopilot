@@ -657,3 +657,11 @@ def test_identity_validates_its_fields() -> None:
     ):
         with pytest.raises(ValueError):
             ident(**bad)
+
+
+def test_reset_drops_the_old_shards_on_the_next_write(tmp_path: Path) -> None:
+    c = fill(tmp_path, 4)
+    c.reset()
+    c.append(ids(2, 50), unit(2, 4))
+    got = open_cache(tmp_path).load()
+    assert list(got.ids) == sorted(ids(2, 50)) and len(shard_files(tmp_path)) == 1

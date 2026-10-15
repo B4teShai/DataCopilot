@@ -181,3 +181,34 @@ def test_tiny_and_extreme_aspect_images_still_produce_the_target_size() -> None:
     )
     for shape in ((1, 1, 3), (1, 5000, 3), (5000, 1, 3)):
         assert imaging.preprocess(np.zeros(shape, dtype=np.uint8), pre).shape == (3, 32, 32)
+
+
+# ------------------------------------------------------------ difference hash
+def noise_png(seed: int, size: tuple[int, int] = (64, 48), brighten: int = 0) -> bytes:
+    rng = np.random.default_rng(seed)
+    arr = rng.integers(0, 200, (size[1], size[0], 3), dtype=np.uint8) + brighten
+    out = io.BytesIO()
+    Image.fromarray(arr.astype(np.uint8)).save(out, format="PNG")
+    return out.getvalue()
+
+
+def test_dhash_is_a_64_bit_value_and_is_deterministic() -> None:
+    value = imaging.dhash(noise_png(1), 0)
+    assert 0 <= value < 2**64 and value == imaging.dhash(noise_png(1), 0)
+
+
+def test_dhash_distance_is_small_for_a_slightly_changed_picture_and_large_for_another() -> None:
+    a = imaging.dhash(noise_png(1), 0)
+    brighter = imaging.dhash(noise_png(1, brighten=20), 0)
+    other = imaging.dhash(noise_png(2), 0)
+    assert imaging.hamming(a, brighter) <= 4
+    assert imaging.hamming(a, other) >= 16
+    assert imaging.hamming(a, a) == 0
+
+
+def test_dhash_refuses_hostile_images_like_the_decoder() -> None:
+    with pytest.raises(ImageDecodeError):
+        imaging.dhash(b"garbage", 5)
+    with pytest.raises(ImageDecodeError) as err:
+        imaging.dhash(png_claiming(40_000, 40_000), 1)
+    assert err.value.reason == "too_many_pixels"

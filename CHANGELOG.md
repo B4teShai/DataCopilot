@@ -70,6 +70,15 @@ once a release is tagged.
   (`[embed]`) used above 20,000 rows when installed and equal within 1e-4 in similarity.
   Measured: 50,000 x 768, k = 10: 15.9 s, 0.83 GB peak RSS (NumPy, Apple M4 Pro).
 
+- Embedding checks `near_duplicates` (WARN clusters), `leakage` (CRITICAL cross-split near-duplicates,
+  searched only across splits, and `group_id` overlap) and `outliers` (INFO, per-class robust
+  z-score of the mean neighbour distance), fed by `audit/embedding.py`: authenticated cache with a
+  sampled re-embedding check, reads confined to the dataset root, files must hash to their image id,
+  batch and byte budgets, per-image decode isolation. They fail closed: a missing embedder, an
+  embedder error, images without embeddings, an incomplete run and a distrusted cache are findings
+  of every embedding check. Optional perceptual-hash prefilter (`near_duplicate_phash_max_distance`).
+  `--checks all` includes the embedding checks only with an embedder; `registry.EMBEDDING_CHECKS`.
+
 ### Changed
 
 - Core dependencies `pyarrow`, `numpy` and `jinja2` added (development: `hypothesis`); see ADR-0003.

@@ -33,12 +33,24 @@ _DESCRIPTIONS: dict[str, str] = {
     "boxes/conflicting_class": "Same box labelled with different classes",
     "boxes/pairwise_skipped": "Pair search skipped for images with too many boxes",
     "boxes/boxes_truncated": "Findings of one rule were truncated",
+    "near_duplicates/near_duplicate": "Images with near-identical embeddings",
+    "near_duplicates/phash_not_applied": "Perceptual-hash prefilter could not hash some images",
+    "leakage/cross_split_near_duplicate": "Near-identical images in different splits",
+    "leakage/group_overlap": "A group appears in more than one split",
+    "outliers/outlier": "Image is unlike the rest of its class",
+    "outliers/classes_skipped": "Classes too small for the outlier check",
+    "outliers/images_without_class": "Images without annotations were not scored",
 }
 
 
 _GENERIC: dict[str, str] = {
     "findings_truncated": "Findings of this check were truncated at the per-check cap",
     "audit_incomplete": "The check ended before examining every image (budget reached)",
+    "embedder_missing": "No embedder was configured for a check that needs one",
+    "embedder_error": "The embedder failed; images were not compared",
+    "images_not_embedded": "Some images have no embedding and were not compared",
+    "embedding_cache_rejected": "Part of the embedding cache failed verification and was ignored",
+    "embedding_cache_mismatch": "Cached embeddings disagreed with the images and were discarded",
 }
 
 
