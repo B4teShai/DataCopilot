@@ -1,0 +1,77 @@
+site_name: DataCopilot
+site_description: Headless dataset doctor for detection and classification datasets.
+docs_dir: docs
+site_dir: site
+strict: true
+use_directory_urls: true
+exclude_docs: |
+  diagrams/*.mjs
+  diagrams/*.excalidraw
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+theme:
+  name: material
+  language: en
+  font: false
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+extra:
+  generator: false
+nav:
+  - Home: index.md
+  - Tutorial: tutorial.md
+  - User guide:
+      - Install: guide/install.md
+      - Concepts: guide/concepts.md
+      - Formats: guide/formats.md
+      - Audit in CI: guide/audit-ci.md
+      - Embeddings: guide/embeddings.md
+      - Python API: guide/python-api.md
+      - Trust model: guide/trust-model.md
+  - Reference:
+      - CLI: reference/cli.md
+  - Architecture:
+      - architecture/README.md
+      - Overview: architecture/01-overview.md
+      - Components: architecture/02-components.md
+      - Data model: architecture/03-data-model.md
+      - Flows: architecture/04-flows.md
+      - Runtime: architecture/05-runtime.md
+      - Cross-cutting: architecture/06-cross-cutting.md
+  - Decisions:
+      - adr/README.md
+      - adr/0000-template.md
+      - adr/0001-scope-and-license.md
+      - adr/0002-logging.md
+      - adr/0003-repo-and-tooling.md
+      - adr/0004-layering-and-dependency-rule.md
+      - adr/0005-plugin-system.md
+      - adr/0006-dataset-format.md
+      - adr/0007-embedding-cache-and-index.md
+  - Engineering:
+      - engineering/README.md
+      - Standards: engineering/standards.md
+      - Testing: engineering/testing.md
+      - Errors and logging: engineering/errors-and-logging.md
+      - Dependencies and licensing: engineering/dependencies-and-licensing.md
+      - Workflow: engineering/workflow.md
+      - Release runbook: engineering/release.md
