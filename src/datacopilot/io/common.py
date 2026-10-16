@@ -22,6 +22,15 @@ NATIVE_KEY = "format"
 """Key in ``source`` naming the format that produced the row. Metadata, never counted as loss."""
 
 
+def natural_key(text: str) -> list[str | int]:
+    """Sort key that orders ``a:2`` before ``a:10`` (digit runs compare as numbers).
+
+    Annotation ids of YOLO and VOC end in the position of the box in its file; the writers keep
+    that order so that reading their output back gives the same ids.
+    """
+    return [int(part) if n % 2 else part for n, part in enumerate(re.split(r"(\d+)", text))]
+
+
 def build_row(model: type[M], ref: str, **fields: object) -> M:
     """Construct a schema row; a violated invariant becomes a ValidationError naming ``ref``."""
     try:

@@ -25,6 +25,7 @@ from datacopilot.io.common import (
     foreign_source_drops,
     is_native,
     make_image,
+    natural_key,
     require_empty_dir,
     require_task,
 )
@@ -210,7 +211,7 @@ class YoloFormat:
             if not is_native(image.source, NAME):
                 foreign_source_drops(dropped, "images", image.source, _NAME_HINTS)
         anns_of: dict[str, list[Annotation]] = {}
-        for ann in sorted(ds.annotations, key=lambda a: a.ann_id):
+        for ann in sorted(ds.annotations, key=lambda a: natural_key(a.ann_id)):
             anns_of.setdefault(ann.image_id, []).append(ann)
 
         for image in ds.images:
