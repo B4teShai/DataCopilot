@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -128,6 +129,30 @@ def test_ingest_fails_with_exit_1_one_human_line_and_one_log_when_output_exists(
     (rec,) = logs(err)
     assert rec["message"] == "command_failed" and rec["command"] == "ingest"
     assert (dcp / "manifest.json").read_text() == before
+
+
+def test_unwritable_output_directory_exits_1_with_one_human_error_line(
+    tmp_path: Path,
+    coco: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    try:
+        if os.access(locked, os.W_OK):  # running as root: the directory is writable anyway
+            pytest.skip("directory permissions are not enforced for this user")
+        assert run(monkeypatch, "ingest", coco, "-f", "coco", "-o", locked / "out.dcp") == 1
+    finally:
+        locked.chmod(0o755)
+    out, err = capsys.readouterr()
+    assert out == ""
+    (line,) = human(err)
+    assert line.startswith("error:") and "ermission denied" in line
+    assert str(tmp_path) not in line and "Traceback" not in line
+    (rec,) = logs(err)
+    assert rec["message"] == "command_failed" and rec["command"] == "ingest"
 
 
 @pytest.mark.parametrize(

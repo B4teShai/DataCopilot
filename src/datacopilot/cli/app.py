@@ -636,6 +636,13 @@ def _one_line(exc: Exception) -> str:
     return clean_text(str(exc), 600).lstrip(": \t")
 
 
+def _os_error_line(exc: OSError) -> str:
+    """What failed and why, without the directory (a path can carry a user name)."""
+    reason = exc.strerror or type(exc).__name__
+    name = Path(str(exc.filename)).name if exc.filename else ""
+    return _one_line(OSError(f"{reason}: {name}" if name else reason))
+
+
 def main() -> NoReturn:
     argv = sys.argv[1:]
     command = argv[0] if argv and not argv[0].startswith("-") else None
@@ -653,6 +660,8 @@ def main() -> NoReturn:
         if usage_code is None:
             if isinstance(exc, DataCopilotError):
                 typer.echo(f"error: {_one_line(exc)}", err=True)
+            elif isinstance(exc, OSError):  # unwritable output, unreadable input, full disk
+                typer.echo(f"error: {_os_error_line(exc)}", err=True)
             get_logger("datacopilot.cli").error("command_failed", command=command, exc_info=exc)
             code = 1
         else:
