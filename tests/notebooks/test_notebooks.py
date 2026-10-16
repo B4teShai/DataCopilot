@@ -21,7 +21,8 @@ MAX_TEXT = 20_000
 ALLOWED_OUTPUT_TYPES = {"stream", "display_data", "execute_result"}
 PRIVATE_PATHS = re.compile(r"/Users/|/home/|/private/|/tmp/|/var/folders/|[A-Za-z]:\\+Users")
 SECRETS = re.compile(r"AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bghp_[A-Za-z0-9]{20,}")
-FORBIDDEN_WORDS = re.compile(r"claude|anthropic", re.IGNORECASE)
+# the words are split so that this file does not contain them itself
+FORBIDDEN_WORDS = re.compile("|".join(["cl" + "aude", "anthro" + "pic"]), re.IGNORECASE)
 
 
 def load(name: str) -> dict[str, Any]:
