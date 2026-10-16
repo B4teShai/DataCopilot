@@ -151,6 +151,7 @@ def test_unwritable_output_directory_exits_1_with_one_human_error_line(
     (line,) = human(err)
     assert line.startswith("error:") and "ermission denied" in line
     assert str(tmp_path) not in line and "Traceback" not in line
+    assert line == "error: Permission denied: out.dcp"  # no temporary-file suffix, no directory
     (rec,) = logs(err)
     assert rec["message"] == "command_failed" and rec["command"] == "ingest"
 
