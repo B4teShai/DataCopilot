@@ -1,5 +1,6 @@
 """User-facing pages: every command block is executed by a test or says why it is not."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -32,5 +33,7 @@ def test_output_blocks_follow_a_run_block(page: Path) -> None:
 @pytest.mark.parametrize("page", PAGES, ids=lambda p: p.name)
 def test_pages_have_no_remote_scripts_images_or_secrets(page: Path) -> None:
     text = page.read_text(encoding="utf-8")
-    for needle in ("<script", '<img src="http', "![", "](http://"):
-        assert needle not in text or needle == "![" and "](http" not in text, (page.name, needle)
+    for needle in ("<script", "<img", "](http://"):
+        assert needle not in text, (page.name, needle)
+    remote = [t for t in re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", text) if "//" in t]
+    assert remote == [], (page.name, remote)  # images are local files of the site

@@ -38,7 +38,8 @@ def site(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def test_the_strict_build_produces_the_pages(site: Path) -> None:
     for page in ("index.html", "tutorial/index.html", "reference/cli/index.html",
                  "guide/trust-model/index.html", "architecture/03-data-model/index.html",
-                 "engineering/release/index.html"):  # fmt: skip
+                 "engineering/release/index.html", "status/index.html",
+                 "reference/settings/index.html", "diagrams/png/overview.png"):  # fmt: skip
         assert (site / page).is_file(), page
 
 

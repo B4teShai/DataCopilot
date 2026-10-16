@@ -51,12 +51,56 @@ def test_every_extra_the_readme_names_exists_and_none_is_empty() -> None:
 
 
 def test_the_readme_does_not_claim_what_is_not_built() -> None:
-    assert "DuckDB" not in README.split("## Planned usage")[0]
-    core = ("click", "jinja2", "numpy", "pyarrow", "pydantic", "structlog", "typer")
-    section = README.split("## Install")[1].split("## Usage")[0]
-    for name in core:
-        assert name in section, name
-    assert "core dependencies only" not in section
+    assert "DuckDB" not in README
+    for planned in ("datacopilot propose", "datacopilot review", "datacopilot apply",
+                    "datacopilot split", "dc.propose", "## Planned"):  # fmt: skip
+        assert planned not in README, planned
+
+
+def test_the_install_page_names_the_core_dependencies_and_no_heavy_one() -> None:
+    page = (ROOT / "docs/guide/install.md").read_text(encoding="utf-8")
+    for name in ("click", "jinja2", "numpy", "pyarrow", "pydantic", "structlog", "typer"):
+        assert name in page, name
+    assert "core dependencies only" not in page
+
+
+def _prose(text: str) -> str:
+    """The README without fenced code, HTML comments and URLs: what a reader actually reads."""
+    text = re.sub(r"```.*?```", "", text, flags=re.S)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    return re.sub(r"\]\(https?://[^)\s]+\)", "]", text)
+
+
+def test_the_readme_stays_short_enough_to_read_in_a_minute() -> None:
+    assert len(README.splitlines()) <= 90
+    assert len(_prose(README).split()) <= 450
+
+
+def test_the_readme_has_the_sections_a_newcomer_looks_for_in_order() -> None:
+    headings = [ln for ln in README.splitlines() if ln.startswith("#")]
+    assert headings == ["# DataCopilot", "## What is it?", "## Quick start", "## What you can do",
+                        "## Learn more", "## License"]  # fmt: skip
+    assert README.splitlines()[2].startswith("DataCopilot finds and fixes mistakes")
+
+
+def test_the_readme_shows_exactly_one_picture_and_it_is_the_overview() -> None:
+    images = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", README)
+    assert len(images) == 1 and images[0].endswith("/docs/diagrams/png/overview.png"), images
+    assert (ROOT / "docs/diagrams/png/overview.png").is_file()
+    assert "<img" not in README
+
+
+def test_the_readme_embeds_no_architecture_diagram() -> None:
+    for name in ("context", "containers", "components", "data-model", "flow-a", "flow-b", "runtime",
+                 "system-context"):  # fmt: skip
+        assert f"diagrams/png/{name}.png" not in README, name
+
+
+def test_the_readme_avoids_the_jargon_a_newcomer_cannot_parse() -> None:
+    prose = _prose(README).lower()
+    for word in ("headless", "sarif", "manifest.version", "hmac", "lineage", "quarantine",
+                 "embedding cache", "trust policy", "gate"):  # fmt: skip
+        assert word not in prose, word
 
 
 def test_the_install_page_carries_the_release_status_line_exactly_when_the_readme_does() -> None:
