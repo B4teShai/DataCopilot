@@ -102,6 +102,15 @@ def test_missing_image_is_skipped_and_counted(tmp_path: Path) -> None:
     assert r.skipped == {"images.file_missing": 1, "annotations.of_missing_image": 1}
 
 
+def test_an_image_in_an_unsupported_format_is_refused_not_counted_as_missing(
+    tmp_path: Path,
+) -> None:
+    root = one(tmp_path / "v", xml_doc(obj(), filename="a.webp"))
+    (root / "JPEGImages" / "a.webp").write_bytes(b"RIFF")
+    with pytest.raises(FormatError, match=r"a\.webp: unsupported image format"):
+        plugin.read(root)
+
+
 def test_declared_size_mismatch_is_counted(tmp_path: Path) -> None:
     size = "<size><width>5</width><height>5</height></size>"
     r = plugin.read(one(tmp_path / "v", xml_doc(size=size)))

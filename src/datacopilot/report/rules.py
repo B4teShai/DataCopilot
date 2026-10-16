@@ -13,6 +13,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "integrity/invalid_header": "Image header is invalid or truncated",
     "integrity/size_mismatch": "Declared size differs from the image header",
     "integrity/file_too_large": "Image file exceeds the size limit and was not read",
+    "integrity/truncated_file": "Image file is cut off: its end marker is missing",
     "integrity/unsupported_format": "Image format is not supported by the header reader",
     "integrity/exif_orientation": "Image has a non-default EXIF orientation",
     "integrity/remote_not_checked": "Remote images were not checked",

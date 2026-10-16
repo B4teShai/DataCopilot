@@ -12,7 +12,7 @@ passed|failed critical=N warn=N info=N run_id=ID
 
 | Check | Finds | Needs |
 |---|---|---|
-| `integrity` | missing or unreadable images, a header that disagrees with the declared size, EXIF orientation | |
+| `integrity` | missing or unreadable images, a header that disagrees with the declared size, a JPEG, PNG or GIF cut off after its header (`truncated_file`, WARN), EXIF orientation | |
 | `duplicates` | identical files (CRITICAL when they cross splits) | |
 | `imbalance` | long-tail ratio, effective class number, classes missing from a split or unused | |
 | `boxes` | out of bounds, zero area, tiny, extreme aspect, duplicate and conflicting boxes | |

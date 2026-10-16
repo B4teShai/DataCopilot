@@ -8,7 +8,7 @@ workflow is designed but not written yet. Anything not listed as built below doe
 | Area | What works |
 |---|---|
 | Convert | `ingest` and `export` between COCO, YOLO, Pascal VOC, CVAT for images 1.1 XML, Label Studio JSON and ImageFolder, through a versioned `dataset.dcp/` directory. Every field a conversion cannot carry is counted; `--strict` turns any loss into a failure, on `export` and on `ingest`. See [Formats](guide/formats.md). |
-| Version | An order-independent `manifest.version`: the same data gives the same version whatever the file order or source format. See [Concepts](guide/concepts.md). |
+| Version | An order-independent `manifest.version`: the same data in the same format gives the same version whatever the file order. See [Concepts](guide/concepts.md). |
 | Audit | Four checks on the CPU (integrity, exact duplicates, class imbalance, box sanity) and, with `--embedder`, three more (near-duplicates, split leakage, per-class outliers). Reports in JSON, static HTML and SARIF 2.1.0; the run is stored as `audits/<run_id>.json`. Exit code 1 when `--fail-on` matches. See [Audit in CI](guide/audit-ci.md). |
 | Embeddings | `datacopilot embed` fills the embedding cache ahead of time; `dinov2_small`, `dinov2_base` and `siglip2_base` (extra `[embed]`) and the test-only `hash` embedder. See [Embeddings](guide/embeddings.md). |
 | Diagnose | `datacopilot --version`, `formats` and `doctor` (versions, extras, settings, cache directory, FAISS and GPU; `--json` for a machine-readable report). |

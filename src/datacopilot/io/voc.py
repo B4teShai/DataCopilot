@@ -207,6 +207,7 @@ class VocFormat:
         located = next((c for c in candidates if c.is_file()), None)
         if located is None:
             return None
+        files.refuse_unsupported(located.name)
         size = tree.find("size")
         declared = None
         if size is not None:

@@ -7,9 +7,10 @@ is noted as INFO. Remote URIs are not fetched; they are counted in one INFO find
 
 Rules (``payload["rule"]``): ``file_missing``, ``unsafe_path``, ``not_a_regular_file``,
 ``unreadable``, ``empty_file``, ``invalid_header`` and ``size_mismatch`` (CRITICAL);
-``file_too_large`` (WARN); ``exif_orientation`` (INFO); ``audit_incomplete`` (CRITICAL, WARN
-without a gate: the time budget ``max_check_seconds`` ended the check before every image was
-examined); ``remote_not_checked`` and
+``file_too_large`` and ``truncated_file`` (WARN: a JPEG, PNG or GIF whose end lacks its end
+marker, so the file was cut off after its header); ``exif_orientation`` (INFO);
+``audit_incomplete`` (CRITICAL, WARN without a gate: the time budget ``max_check_seconds``
+ended the check before every image was examined); ``remote_not_checked`` and
 ``external_not_checked`` (WARN, CRITICAL when more than ``max_unchecked_fraction`` of the images
 were not checked or ``require_local_images`` is set; the latter counts images whose real path is
 outside the dataset root, which are not touched unless ``allow_external_images`` is set). An
@@ -84,6 +85,12 @@ def _inspect(image: Image, ctx: CheckContext) -> list[Finding]:
             declared=[image.width, image.height],
             actual=[actual[0], actual[1]],
         )
+    try:
+        cut_off = files.is_cut_off(path, header, nofollow=True)
+    except FormatError:
+        return found("CRITICAL", "unreadable")
+    if cut_off:
+        out += found("WARN", "truncated_file")
     if header.orientation != 1:
         out += found("INFO", "exif_orientation", orientation=header.orientation)
     return out

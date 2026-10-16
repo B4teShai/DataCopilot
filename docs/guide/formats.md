@@ -62,13 +62,26 @@ serve; use the `/data/local-files/?d=...` form in the source if you need that.
 The [loss matrix](../architecture/03-data-model.md#format-mapping-and-loss-matrix) lists, for every
 pair of formats, the columns that cannot be carried over and how many values were lost on the
 synthetic fixtures; `tests/golden/test_roundtrip_matrix.py` asserts every cell. Converting to the
-same format loses nothing and reads back field-identical with an equal `manifest.version`. In
+same format loses nothing and reads back field-identical with an equal `manifest.version`: ingest,
+export, ingest gives the version of the first ingest (a fixed point after one pass, tested for every
+format on a fixture with boxes on all four edges, tiny boxes and more than ten boxes on one image, and
+on COCO128). YOLO text keeps 7 decimals of the normalised box, so the YOLO reader snaps every box to
+what that text can hold (a box that overshoots the image edge by less than 0.001 pixel is first snapped
+onto the edge, then rounded to the 7-decimal grid, a change of at most 0.00004 pixel); this is a documented
+rounding, not a loss, and it is applied at ingest so that the version is stable. In
 practice: COCO ids, areas and segmentations do not survive YOLO or VOC, CVAT `z_order` does not
 survive COCO, YOLO, VOC or Label Studio, Label Studio result ids and annotation metadata do not
 survive the others, and classes are re-numbered where a format has no category ids. Use `--strict`
 to make any of these a failure.
 
 ## Input checks
+
+A picture in a format the header reader cannot identify (`.webp`, `.tif`, `.tiff`) is **refused** by
+every reader with one error naming the file (exit 1); it is never skipped silently, so a dataset cannot
+lose photos that the audit would then never see. Convert such files to JPEG or PNG first. A file that
+looks like a supported picture but has a bad header is refused the same way, and one that is cut off
+after its header (a JPEG without `FFD9`, a PNG without `IEND`, a GIF without its trailer) is a
+`truncated_file` warning of the `integrity` check at audit time (one 4 KiB read from the end of each file).
 
 Input is validated: paths cannot leave the dataset directory, XML with a DOCTYPE is rejected, boxes
 must lie inside their image and identical image content is reported by file name. `ingest --group-by

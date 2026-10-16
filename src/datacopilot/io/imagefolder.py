@@ -28,7 +28,6 @@ from datacopilot.io.report import ConversionReport
 
 NAME = "imagefolder"
 SPLITS = ("train", "val", "test")
-_UNSUPPORTED = frozenset({".webp", ".tif", ".tiff"})
 _NAME_HINTS = frozenset({"file_name", "filename"})
 
 
@@ -65,9 +64,7 @@ class ImageFolderFormat:
             for class_dir in _dirs(base):
                 for file in sorted(p for p in class_dir.rglob("*") if p.is_file()):
                     suffix = file.suffix.lower()
-                    if suffix in _UNSUPPORTED:
-                        skipped["images.unsupported_format"] += 1
-                        continue
+                    files.refuse_unsupported(file.name)
                     if suffix not in files.IMAGE_EXTENSIONS:
                         continue
                     rel = file.relative_to(root).as_posix()

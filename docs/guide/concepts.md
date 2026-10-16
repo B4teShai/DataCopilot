@@ -13,8 +13,9 @@ hash on every read and bounds table size and row count before decoding anything.
   not the file name. Two files with identical bytes cannot be ingested together (the tutorial shows
   how a near copy is found by an embedding check instead).
 - `manifest.version` is an order-independent content hash of the three tables (file paths excluded).
-  The same data gives the same version whatever the file order or source format; record it next to
-  a training run to reproduce it.
+  The same data in the same format gives the same version whatever the file order. The version also
+  covers where each row came from (for example COCO ids), so a COCO copy of a YOLO dataset has another
+  version although the boxes are the same. Record it next to a training run to reproduce it.
 
 ## Rows
 

@@ -27,6 +27,8 @@ MAX_CVAT_BYTES = 64 * 1024 * 1024
 MAX_LABEL_STUDIO_BYTES = 64 * 1024 * 1024
 """One Label Studio JSON export; deeper structure limits are applied after parsing."""
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".gif"})
+UNSUPPORTED_EXTENSIONS = frozenset({".webp", ".tif", ".tiff"})
+"""Image files DataCopilot recognises as pictures but cannot identify; every reader refuses them."""
 _CHUNK = 1024 * 1024
 _BMP_INFO_HEADERS = frozenset({40, 52, 56, 64, 108, 124})
 MAX_FILL_BYTES = 64
@@ -311,3 +313,41 @@ def copy_file(src: Path, dst: Path) -> None:
         shutil.copyfile(src, dst)
     except OSError:
         raise FormatError(f"cannot copy {src.name}") from None
+
+
+def refuse_unsupported(name: str) -> None:
+    """Raise if ``name`` is a picture in a format the header reader cannot identify.
+
+    An image is never skipped silently: a reader either reads it or stops with this error, so a
+    dataset cannot lose photos that the audit would then never see.
+    """
+    suffix = PurePosixPath(name).suffix.lower()
+    if suffix in UNSUPPORTED_EXTENSIONS:
+        raise FormatError(
+            f"{PurePosixPath(name).name}: unsupported image format ({suffix}); "
+            "convert it to JPEG, PNG, BMP or GIF"
+        )
+
+
+TAIL_BYTES = 4096
+"""Bytes read from the end of a file by :func:`is_cut_off` (one block, whatever the file size)."""
+
+
+def is_cut_off(path: Path, header: ImageHeader, *, nofollow: bool = False) -> bool:
+    """True if a JPEG, PNG or GIF lacks the marker that ends a complete file.
+
+    JPEG ends with ``FFD9``, PNG with an ``IEND`` chunk and GIF with ``3B``; trailing padding
+    after them is allowed (the last :data:`TAIL_BYTES` are searched). A file cut off by an
+    interrupted copy keeps its header, so the header check alone cannot see it. BMP has no end
+    marker and is never reported. This reads one block from the end of the file, no pixels.
+    """
+    marker = {"jpeg": b"\xff\xd9", "png": b"IEND", "gif": b";"}.get(header.format)
+    if marker is None:
+        return False
+    with open_regular(path, nofollow=nofollow) as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, size - TAIL_BYTES))
+        tail = handle.read(TAIL_BYTES)
+    if header.format == "gif":
+        return tail.rstrip(b"\x00")[-1:] != marker
+    return marker not in tail

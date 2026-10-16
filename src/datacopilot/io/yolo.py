@@ -36,9 +36,9 @@ from datacopilot.io.report import ConversionReport
 NAME = "yolo"
 SPLITS = ("train", "val", "test")
 CLIP_TOLERANCE_PX = 1e-3
+_CANONICAL_ROUNDS = 8
 PRECISION_TOLERANCE_PX = 1e-3
 _YAML_KEYS = frozenset({"path", "train", "val", "test", "nc", "names"})
-_UNSUPPORTED = frozenset({".webp", ".tif", ".tiff"})
 _NAME_HINTS = frozenset({"file_name", "filename"})
 
 
@@ -104,9 +104,7 @@ class YoloFormat:
         annotations: list[Annotation] = []
         for file in sorted(p for p in image_root.rglob("*") if p.is_file()):
             suffix = file.suffix.lower()
-            if suffix in _UNSUPPORTED:
-                skipped["images.unsupported_format"] += 1
-                continue
+            files.refuse_unsupported(file.name)
             if suffix not in files.IMAGE_EXTENSIONS:
                 continue
             rel = files.safe_join(root, file.relative_to(root).as_posix())
@@ -156,13 +154,16 @@ class YoloFormat:
                 raise FormatError(f"{where}: class {cls} is not defined in data.yaml")
             values = [_number(t, where) for t in tokens[1:]]
             try:
-                box = geometry.clip_to_image(
-                    geometry.cxcywh_norm_to_xyxy(
-                        (values[0], values[1], values[2], values[3]), image.width, image.height
+                box = _canonical(
+                    geometry.clip_to_image(
+                        geometry.cxcywh_norm_to_xyxy(
+                            (values[0], values[1], values[2], values[3]), image.width, image.height
+                        ),
+                        image.width,
+                        image.height,
+                        tol=CLIP_TOLERANCE_PX,
                     ),
-                    image.width,
-                    image.height,
-                    tol=CLIP_TOLERANCE_PX,
+                    image,
                 )
             except ValueError:
                 raise FormatError(f"{where}: box lies outside the image") from None
@@ -280,6 +281,32 @@ class YoloFormat:
         if ann.score is not None:
             fields.append(repr(ann.score))
         return " ".join(fields)
+
+
+def _canonical(box: geometry.Box, image: Image) -> geometry.Box:
+    """The box this format can represent exactly: what the writer would print, read back.
+
+    A box that was snapped onto the image edge no longer sits on the 7-decimal grid of the text
+    files, so writing it and reading it again would move it by a few hundred-thousandths of a
+    pixel. Applying "print, read, snap" until nothing changes (at most a few rounds) makes
+    ingest, export, ingest a fixed point. A box that was already on the grid is returned unchanged.
+    """
+    for _ in range(_CANONICAL_ROUNDS):
+        text = [_fmt(v) for v in geometry.xyxy_to_cxcywh_norm(box, image.width, image.height)]
+        back = geometry.clip_to_image(
+            geometry.cxcywh_norm_to_xyxy(
+                (float(text[0]), float(text[1]), float(text[2]), float(text[3])),
+                image.width,
+                image.height,
+            ),
+            image.width,
+            image.height,
+            tol=CLIP_TOLERANCE_PX,
+        )
+        if back == box:
+            break
+        box = back
+    return box
 
 
 def _quote(name: str) -> str:

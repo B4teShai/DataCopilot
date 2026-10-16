@@ -6,6 +6,26 @@ once a release is tagged.
 
 ## Unreleased
 
+### Fixed
+
+- The command line prints one `error:` line (no directory, no temporary-file suffix) when the output
+  folder cannot be written, instead of only a JSON log with a traceback.
+- YOLO and VOC writers kept annotation order by comparing ids as text, so an image with more than ten
+  boxes came back reordered and with another `manifest.version`; they now use a natural order.
+- YOLO: ingest, export, ingest is now a fixed point. Boxes snapped onto an image edge drifted by up to
+  0.00003 pixel on every pass until the second round trip; the reader now snaps boxes to the 7-decimal
+  grid the writer prints (a documented rounding, not a loss). `manifest.version` of YOLO datasets that
+  have boxes overshooting the edge therefore changes once (COCO128: `0bce2115...` to `d9105ffb...`).
+- Every reader now refuses a picture in an unsupported format (`.webp`, `.tif`, `.tiff`) with an error
+  naming the file; YOLO and ImageFolder used to skip and count it (`images.unsupported_format`), so
+  neither the audit nor a gate saw the missing photo.
+
+### Added
+
+- `integrity` rule `truncated_file` (WARN): a JPEG, PNG or GIF whose last 4 KiB lack the end marker. It
+  adds one small read per image (about 0.07 ms per photo on COCO128, 9 ms for all 128).
+- Docs: `concepts.md` and `status.md` no longer say that the version is the same across source formats.
+
 ## 0.1.0 - 2026-10-15
 
 First release candidate. Before 1.0 a minor version may break the public API.

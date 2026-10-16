@@ -232,3 +232,27 @@ def test_no_pixel_data_is_decoded(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(integrity.files, "open_regular", lambda p, **kw: Spy(real(p, **kw)))
     assert run(ds, tmp_path) == []
     assert reads and all(0 < n <= 65_536 for n in reads)
+
+
+@pytest.mark.parametrize(
+    ("name", "good", "cut"),
+    [
+        ("a.jpg", jpeg_bytes(64, 48), lambda b: b[:-2]),
+        ("a.png", png_bytes(64, 48, 3), lambda b: b[:-20]),
+    ],
+)
+def test_a_cut_off_file_with_an_intact_header_is_a_warning(
+    tmp_path: Path, name: str, good: bytes, cut: Any
+) -> None:
+    ds = build(tmp_path, [Img(name, data=good), Img("ok.png")])
+    assert run(ds, tmp_path) == []  # the whole file passes
+    Path(ds.images[0].file_path).write_bytes(cut(good))
+    (finding,) = run(ds, tmp_path)
+    assert finding.severity == "WARN" and finding.payload["rule"] == "truncated_file"
+    assert finding.image_id == ds.images[0].image_id
+    assert finding.payload["file_name"] == name
+
+
+def test_trailing_padding_after_the_end_marker_is_not_truncation(tmp_path: Path) -> None:
+    ds = build(tmp_path, [Img("a.jpg", data=jpeg_bytes(64, 48) + b"\x00" * 100)])
+    assert run(ds, tmp_path) == []

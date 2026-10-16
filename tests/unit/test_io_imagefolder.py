@@ -60,10 +60,9 @@ def test_loose_files_unsupported_images_and_nested_dirs(tmp_path: Path) -> None:
     root = synth.build_imagefolder(tmp_path / "r", split_dirs=False)
     synth.write_png(root / "stray.png", 8, 8, 99)
     synth.write_png(root / "cat" / "sub" / "deep.png", 8, 8, 98)
-    (root / "cat" / "x.webp").write_bytes(b"RIFF")
     (root / "cat" / "notes.txt").write_text("hi")
     r = plugin.read(root)
-    assert r.skipped == {"images.without_class": 1, "images.unsupported_format": 1}
+    assert r.skipped == {"images.without_class": 1}
     assert "sub/deep.png" in {i.source["file_name"] for i in r.images}
 
 
@@ -235,3 +234,10 @@ def test_same_basename_in_one_class_does_not_collide(tmp_path: Path) -> None:
     out.mkdir()
     plugin.write(ds, out)
     assert len(list((out / "x").iterdir())) == 2
+
+
+def test_an_image_in_an_unsupported_format_is_refused_not_skipped(tmp_path: Path) -> None:
+    root = synth.build_imagefolder(tmp_path / "r", split_dirs=False)
+    (root / "cat" / "x.webp").write_bytes(b"RIFF")
+    with pytest.raises(FormatError, match=r"x\.webp: unsupported image format"):
+        plugin.read(root)

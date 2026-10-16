@@ -354,7 +354,8 @@ Format-specific rules for the two newest readers (both treat their input as untr
 Dropped-field counts for the synthetic fixtures (`tests/fixtures/synth.py`), asserted by
 `tests/golden/test_roundtrip_matrix.py`. Rows are the source format, columns the target;
 same-format conversions drop nothing and read back field-identical with an equal
-`manifest.version`.
+`manifest.version` (ingest, export, ingest is a fixed point: the YOLO reader snaps boxes to the
+7-decimal grid its writer prints, `tests/golden/test_roundtrip_fixed_point.py`).
 
 | Source \ target | COCO | YOLO | VOC | CVAT XML | Label Studio |
 |---|---|---|---|---|---|

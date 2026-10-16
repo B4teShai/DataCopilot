@@ -76,11 +76,19 @@ def test_float_noise_at_the_border_is_snapped_not_rejected(tmp_path: Path) -> No
     assert ann.bbox_xyxy_abs == (0.0, 0.0, 100.0, 50.0)
 
 
-def test_extra_yaml_keys_and_unsupported_images_are_counted(tmp_path: Path) -> None:
+def test_extra_yaml_keys_are_counted(tmp_path: Path) -> None:
     root = one_image(tmp_path / "y", "", "names: [a]\nroboflow: x\nnc: 1\n")
-    (root / "images" / "train" / "z.webp").write_bytes(b"RIFF")
-    r = plugin.read(root)
-    assert r.dropped == {"dataset.roboflow": 1} and r.skipped == {"images.unsupported_format": 1}
+    assert plugin.read(root).dropped == {"dataset.roboflow": 1}
+
+
+@pytest.mark.parametrize("suffix", [".webp", ".tif", ".tiff"])
+def test_an_image_in_an_unsupported_format_is_refused_not_skipped(
+    tmp_path: Path, suffix: str
+) -> None:
+    root = one_image(tmp_path / "y", "")
+    (root / "images" / "train" / f"z{suffix}").write_bytes(b"RIFF")
+    with pytest.raises(FormatError, match=rf"z{suffix}: unsupported image format"):
+        plugin.read(root)
 
 
 @pytest.mark.parametrize(
