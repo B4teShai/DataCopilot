@@ -32,6 +32,18 @@ Exit codes: `0` gate passed (or no gate); `1` a match, an empty or unreadable da
 that is not allowed or fails; `2` a usage or configuration error. Reports are written even when the
 gate fails.
 
+## Options
+
+`--checks all|integrity,duplicates,imbalance,boxes` chooses the checks (`all` adds the three embedding
+checks only when an embedder is given). `--fail-on` is described above. `--report report.html` sets
+where the HTML goes (JSON and SARIF are written next to it unless `--json` and `--sarif` are given).
+`--workers N` sets the threads, `--hash-cache/--no-hash-cache` the file-hash cache,
+`--require-local-images` makes any image that could not be examined CRITICAL,
+`--allow-external-images` allows images outside the dataset's parent directory (refused when `CI` is
+set unless `--allow-external-images-in-ci` is added) and `--no-store-audit` skips writing
+`audits/<run_id>.json`. The [CLI reference](../reference/cli.md) has every option and
+[Settings](../reference/settings.md) the environment variables.
+
 ## Model-generated annotations
 
 Annotations whose provenance is `model` (Label Studio predictions, a model's pre-annotations) are left out of every check unless you pass
@@ -41,6 +53,8 @@ were left out. Accepted proposals are audited like human labels.
 
 ## Recommended CI settings
 
+- The default gate is `--fail-on critical`. An empty dataset, or one whose images cannot be examined
+  (more than half remote or outside the dataset's parent directory), fails it.
 - Pass `--no-hash-cache` (or set `DATACOPILOT_HASH_CACHE=false`). Never restore the hash cache from
   an untrusted ref. When `CI` is set the cache is disabled unless `DATACOPILOT_CACHE_KEY` supplies an
   out-of-band key.

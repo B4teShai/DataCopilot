@@ -1,25 +1,33 @@
 # DataCopilot
 
-Headless dataset doctor for detection and classification datasets: lossless format conversion, an
-audit that can gate CI, and (planned) model-generated fix proposals that a person reviews before
-they touch a label.
+DataCopilot finds and fixes mistakes in computer-vision datasets (object detection and
+classification) before you train on them. It converts between COCO, YOLO, Pascal VOC, CVAT and
+Label Studio without silently losing information, and it can fail your CI build when a dataset is bad.
 
-**Built and tested in 0.1:** `ingest` and `export` between COCO, YOLO, Pascal VOC, CVAT for images
-1.1 XML, Label Studio JSON and ImageFolder, with a count of every field a conversion cannot carry;
-`audit` with seven checks (integrity, exact duplicates, class imbalance, box sanity, and with an
-embedder near-duplicates, split leakage and outliers) and reports in HTML, JSON and SARIF; `embed`;
-`doctor`; and a three-function Python API. Label noise, split, propose, review and apply are not
-implemented yet: see the [architecture](architecture/README.md) for what is planned.
+It audits a dataset for broken boxes, duplicate and leaked images between train and test, class
+imbalance and missing files. Everything runs on your machine from the command line or Python; no
+server, and no GPU for the core.
 
-## Where to start
+![DataCopilot reads your dataset, converts and audits it, and gives you a clean dataset and a pass or fail for CI](diagrams/png/overview.png)
 
-- [Tutorial](tutorial.md): audit, gate and convert a synthetic dataset in ten minutes. Every
-  command on the page is executed by the test suite.
-- [Install](guide/install.md), [Concepts](guide/concepts.md), [Formats](guide/formats.md).
-- [Audit in CI](guide/audit-ci.md), [Embeddings](guide/embeddings.md).
-- [Trust model](guide/trust-model.md): what happens with files you do not control.
-- [Python API](guide/python-api.md) and [CLI reference](reference/cli.md).
-- Design documents: [architecture](architecture/README.md), [engineering guide](engineering/README.md),
-  [decision records](adr/README.md).
+*A dataset goes in; a clean dataset and a pass or fail come out.*
 
-DataCopilot is Apache-2.0 licensed; see `LICENSE` and `NOTICE` in the repository.
+## I want to try it
+
+- [Install](guide/install.md)
+- [Quick start](tutorial.md#1-generate-the-dataset): the first commands, on a generated demo dataset
+- [Tutorial](tutorial.md): audit, fail a build and convert, in ten minutes
+
+## I want to understand it
+
+- [Concepts](guide/concepts.md)
+- [How it works](architecture/README.md)
+- [Formats](guide/formats.md)
+- [Audit and CI](guide/audit-ci.md)
+- [What is built and what is planned](status.md)
+
+## I want to contribute
+
+- [Contributing](https://github.com/B4teShai/DataCopilot/blob/main/CONTRIBUTING.md)
+- [Engineering guide](engineering/README.md)
+- [Architecture decisions](adr/README.md)

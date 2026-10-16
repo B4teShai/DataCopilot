@@ -32,6 +32,18 @@ if not run.passed:
 dc.export(ds, "yolo", "./yolo_ready", strict=True)
 ```
 
+A complete round trip, as in the tutorial:
+
+<!-- skip: illustrative; the tutorial runs the same calls on its generated dataset -->
+```python
+import datacopilot as dc
+
+ds = dc.load("shop", format="coco")  # in memory; nothing is written
+run = dc.audit(ds, fail_on=("warn",))  # run.passed is the gate's verdict
+report = dc.export(ds, "label_studio", "shop_ls")
+print(ds.manifest.image_count, run.passed, sorted(report.dropped))
+```
+
 ## Behaviour
 
 - `load` of a source dataset needs `format`; a `.dcp` directory needs none. `strict=True` raises

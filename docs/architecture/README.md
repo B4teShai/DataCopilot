@@ -1,5 +1,15 @@
 # DataCopilot architecture
 
+## The 30-second picture
+
+![DataCopilot reads your dataset, converts and audits it, and gives you a clean dataset and a pass or fail for CI](../diagrams/png/overview.png)
+
+- You give it a dataset in COCO, YOLO, Pascal VOC, CVAT or Label Studio format.
+- It reads the dataset into one internal format, a `dataset.dcp/` folder.
+- It can write that dataset back out in any format and counts whatever a format cannot hold.
+- It audits the dataset and writes a report; the exit code says pass or fail, so CI can stop a bad dataset.
+- Image models are optional and only add near-duplicate and leak checks. The sections below are the technical detail.
+
 This directory is the single source of truth for how DataCopilot is built. It follows the
 [C4 model](https://c4model.com) from the outside in, then covers data, runtime behaviour,
 deployment and cross-cutting concerns. Decisions that shaped it are recorded as ADRs.

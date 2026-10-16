@@ -40,3 +40,13 @@ leakage. Group ids come from file paths, so leakage findings show only a hashed 
 ```bash
 datacopilot audit shop.dcp --embedder dinov2_base --fail-on leakage,critical
 ```
+
+## Demo and tests
+
+The `hash` embedder is how the tutorial finds its planted leak without a download. Real DINOv2-small
+and SigLIP2 runs and real FAISS are covered by `uv run --extra embed pytest -m real_model tests/real`,
+which downloads about 1.6 GB and is not part of the default test run. Model weights are never
+redistributed: you download them, and each model's license is listed in `THIRD_PARTY_MODELS.md` and
+shown by the model registry before first use. `datacopilot embed clean.dcp --embedder hash` prints
+`embedded=13 total=13 cached=13 missing=0 model=hash@1 run_id=...`; an embedder whose license is
+not in `DATACOPILOT_ALLOWED_LICENSES` exits 1 before anything is downloaded or read.

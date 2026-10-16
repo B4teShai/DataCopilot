@@ -1,5 +1,5 @@
 site_name: DataCopilot
-site_description: Headless dataset doctor for detection and classification datasets.
+site_description: Find and fix mistakes in computer-vision datasets before you train on them.
 docs_dir: docs
 site_dir: site
 strict: true
@@ -39,6 +39,7 @@ extra:
 nav:
   - Home: index.md
   - Tutorial: tutorial.md
+  - What is built and planned: status.md
   - User guide:
       - Install: guide/install.md
       - Concepts: guide/concepts.md
@@ -49,6 +50,7 @@ nav:
       - Trust model: guide/trust-model.md
   - Reference:
       - CLI: reference/cli.md
+      - Settings and exit codes: reference/settings.md
   - Architecture:
       - architecture/README.md
       - Overview: architecture/01-overview.md

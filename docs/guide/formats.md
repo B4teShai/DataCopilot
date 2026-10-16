@@ -67,3 +67,11 @@ practice: COCO ids, areas and segmentations do not survive YOLO or VOC, CVAT `z_
 survive COCO, YOLO, VOC or Label Studio, Label Studio result ids and annotation metadata do not
 survive the others, and classes are re-numbered where a format has no category ids. Use `--strict`
 to make any of these a failure.
+
+## Input checks
+
+Input is validated: paths cannot leave the dataset directory, XML with a DOCTYPE is rejected, boxes
+must lie inside their image and identical image content is reported by file name. `ingest --group-by
+"re:^images/(?P<g>[^/_]+)"` assigns a group (for example a camera or a session) from the file path,
+so that leakage findings can tell which images belong together. ImageFolder is classification only.
+The exit codes are in [Settings](../reference/settings.md#exit-codes).
