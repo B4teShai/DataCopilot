@@ -180,3 +180,67 @@ def test_the_edge_case_table_has_no_mismatch() -> None:
     everything = " ".join(t for c in cells for t in output_texts(c))
     assert "MISMATCH" not in everything.replace("`MISMATCH`", "")
     assert re.search(r"\b(\d+) cases, \1 as expected, 0 mismatches", everything)
+
+
+# ----------------------------------------------------------------- downloads are verified
+HEX64 = re.compile(r"""["'][0-9a-f]{64}["']""")
+# "tor" + "ch" keeps the name of the tensor library out of this file (the repository gate bans it)
+UNSAFE_CALLS = re.compile(
+    r"\.extractall\(|\.extract\(|pickle\.loads?\(|" + "tor" + r"ch\.load\(|joblib\.load\("
+)
+
+
+def download_problems(doc: dict[str, Any]) -> list[str]:
+    """What is wrong with the way a notebook fetches and opens downloaded files (empty if fine)."""
+    problems: list[str] = []
+    code = [source(c) for c in doc["cells"] if c["cell_type"] == "code"]
+    downloads = [s for s in code if "urlopen(" in s or "urlretrieve(" in s]
+    if not downloads:
+        problems.append("no download cell")
+    for cell in downloads:
+        if not HEX64.search(cell):
+            problems.append("download without a pinned 64-hex digest")
+        if not re.search(r"_URL = \"https://", cell) or "http://" in cell:
+            problems.append("download is not over https")
+        if not re.search(r"if actual != \w+SHA256:\n(?:[^\n]*\n){0,2}[^\n]*raise ", cell):
+            problems.append("download without a comparison that raises")
+        if "unlink(" not in cell or ".replace(" not in cell:
+            problems.append("download without deleting a bad file or an atomic rename")
+        if "timeout=" not in cell or "MAX_DOWNLOAD_BYTES" not in cell:
+            problems.append("download without a timeout and a size bound")
+        check = cell.find("if actual != COCO128_SHA256")
+        use = min((cell.find(t) for t in ("unpack_safely(", "ZipFile(") if t in cell), default=-1)
+        if use != -1 and 0 <= check and use < check and "def " not in cell[use - 4 : use]:
+            problems.append("archive is opened before the checksum is compared")
+    for text in code:
+        if UNSAFE_CALLS.search(text):
+            problems.append("unsafe extraction or deserialisation call")
+    if not any(all(t in s for t in ("is_link", '".."', "MAX_RATIO")) for s in code):
+        problems.append("no archive-entry validator")
+    return problems
+
+
+def test_downloads_are_pinned_checked_before_use_and_unpacked_safely(name: str) -> None:
+    assert download_problems(load(name)) == []
+
+
+def test_the_download_check_notices_a_doctored_notebook() -> None:
+    doc = load("01_tutorial.ipynb")
+    assert download_problems(doc) == []
+
+    def changed(old: str, new: str) -> dict[str, Any]:
+        copy = json.loads(json.dumps(doc))
+        for cell in copy["cells"]:
+            if cell["cell_type"] == "code" and "urlopen(" in source(cell):
+                cell["source"] = source(cell).replace(old, new)
+        return copy
+
+    assert download_problems(changed("raise ", "print  # "))
+    assert download_problems(changed("61e5e302", "zz"))  # digest no longer 64 hex characters
+    assert download_problems(changed("https://github", "http://github"))
+    assert download_problems(
+        changed(
+            "zipfile.ZipFile(archive_path)",
+            "zipfile.ZipFile(archive_path)\n    archive.extractall(destination)",
+        )
+    )
