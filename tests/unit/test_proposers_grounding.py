@@ -446,6 +446,14 @@ def test_an_unusable_model_result_is_a_model_error(fakes: type[Fakes], result: A
         make().detect(IMG, ["a"], SIZE, min_score=0.3)
 
 
+def test_a_photo_without_detections_returns_nothing_even_though_the_library_reports_one_empty_label(
+    fakes: type[Fakes],
+) -> None:
+    # real output for a photo with no box: no boxes, no scores, and text_labels == [""]
+    Fakes.results = [[_result([], [], [""])]]
+    assert make().detect(IMG, ["cat"], SIZE, min_score=0.3) == []
+
+
 def test_non_finite_numbers_are_passed_on_for_the_caller_to_reject(fakes: type[Fakes]) -> None:
     # validation is proposals/run.py's job; the backend must simply not crash or hide them
     Fakes.results = [[_result([[np.nan, 0, 5, 5]], [np.inf], ["a"])]]

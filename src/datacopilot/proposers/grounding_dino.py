@@ -169,6 +169,8 @@ def _candidates(results: Any, model_id: str) -> list[Candidate]:
         labels = [str(label) for label in result["text_labels"]]
         if boxes.ndim != 2 or boxes.shape[1] != 4 or scores.shape != (len(boxes),):
             raise ValueError("shape")
+        if len(boxes) == 0:  # the library reports one empty label ([""]) for a photo without a box
+            return []
         if len(labels) != len(boxes):
             raise ValueError("labels")
     except Exception as exc:  # noqa: BLE001
