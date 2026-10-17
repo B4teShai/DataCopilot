@@ -81,16 +81,26 @@ def _usage(name: str, command: Any) -> str:
     return " ".join(parts)
 
 
+def commands_of(group: Any, prefix: str = "") -> dict[str, Any]:
+    """Every leaf command of the application, a sub-command named ``group command``."""
+    found: dict[str, Any] = {}
+    for name, command in group.commands.items():
+        if hasattr(command, "commands"):
+            found.update(commands_of(command, f"{prefix}{name} "))
+        else:
+            found[f"{prefix}{name}"] = command
+    return found
+
+
 def render() -> str:
-    group = typer.main.get_command(app)
-    commands = dict(sorted(group.commands.items()))
+    commands = dict(sorted(commands_of(typer.main.get_command(app)).items()))
     out = [HEADER]
     out.append("## datacopilot\n")
     out.append("`datacopilot [--version] COMMAND [ARGS]...`\n")
     out.append("| Command | Purpose |\n|---|---|")
     for name, command in commands.items():
         first = (command.help or "").strip().splitlines()[0] if command.help else ""
-        out.append(f"| [`{name}`](#datacopilot-{name}) | {_cell(first)} |")
+        out.append(f"| [`{name}`](#datacopilot-{name.replace(' ', '-')}) | {_cell(first)} |")
     out.append("\n`--version` prints the version and exits.\n")
     for name, command in commands.items():
         out.append(f"## datacopilot {name}\n")

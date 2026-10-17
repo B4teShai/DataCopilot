@@ -1,6 +1,6 @@
-"""The public Python API: ``load``, ``audit`` and ``export``.
+"""The public Python API: ``load``, ``audit``, ``export``, ``propose`` and ``apply``.
 
-Three thin functions over the use cases the command line uses, with the same validation, limits
+Five thin functions over the use cases the command line uses, with the same validation, limits
 and fail-closed behaviour. Everything importable from the top-level ``datacopilot`` package and
 listed in ``datacopilot.__all__`` is the public API; anything else (including this module's
 helpers and the sub-packages) may change in any release. Before 1.0 a minor version may break the
@@ -17,7 +17,7 @@ afterwards; to control logging yourself call :func:`datacopilot.logging.configur
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -28,13 +28,16 @@ from datacopilot.audit.context import CheckConfig, CheckContext
 from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, PipelineProvider
 from datacopilot.audit.registry import EMBEDDING_CHECKS
 from datacopilot.audit.usecase import check_threshold, embedder_label, resolve_embedder
-from datacopilot.core.schema import AuditRun, Dataset
+from datacopilot.core.proposals import ProposalSet
+from datacopilot.core.schema import AuditRun, Dataset, DatasetManifest
 from datacopilot.io.report import ConversionReport
 from datacopilot.logging import clear_request_context, configure_logging, current_request_id
+from datacopilot.proposals import run as proposal_run
+from datacopilot.proposals import usecase as proposal_usecase
 from datacopilot.settings import Settings, load_settings
 from datacopilot.store import DatasetStore, StoreLimits
 
-__all__ = ["audit", "export", "load"]
+__all__ = ["apply", "audit", "export", "load", "propose"]
 
 DCP_FORMAT = "dcp"
 
@@ -242,3 +245,88 @@ def audit(
             ),
         )
         return engine.run_audit(ds, names, ctx, gate)
+
+
+def propose(
+    dataset: str | Path,
+    proposer: str = "grounding_dino",
+    *,
+    classes: Sequence[str] | None = None,
+    min_score: float = proposal_run.DEFAULT_MIN_SCORE,
+    class_min_score: Mapping[str, float] | None = None,
+    time_budget_seconds: float = proposal_run.DEFAULT_TIME_BUDGET_SECONDS,
+) -> ProposalSet:
+    """Find boxes the dataset is probably missing and store them as a proposal set.
+
+    Nothing is applied and the dataset's version is not changed: the set is written to the
+    dataset directory's ``proposals/`` and returned. Review it (``datacopilot review export`` and
+    ``review import``), then :func:`apply` the reviewed set.
+
+    Args:
+        dataset: the path of a ``.dcp`` directory (the set has to be stored somewhere).
+        proposer: ``grounding_dino`` (needs ``pip install "datacopilot[vlm]"``; the license guard
+            runs first) or ``test_boxes``, a test double.
+        classes: class names to look for (default: all).
+        min_score: lowest confidence kept, above 0 and at most 1.
+        class_min_score: ``class name -> lowest confidence`` for single classes.
+        time_budget_seconds: wall time after which the run stops; the set is then marked
+            incomplete (``ProposalSet.incomplete``) and ``apply`` refuses it unless asked.
+
+    Raises:
+        ValueError: an unknown proposer or class, an invalid option, or an in-memory dataset.
+        LicenseError: the model's license is not in ``DATACOPILOT_ALLOWED_LICENSES``.
+        FormatError, ValidationError, StoreError, ModelError: unusable proposer, dataset or model.
+    """
+    if isinstance(dataset, Dataset):
+        raise ValueError("propose needs the path of a .dcp directory: the set is stored there")
+    settings = load_settings()
+    with _request(settings):
+        ps, _ = proposal_usecase.propose_dataset(
+            Path(dataset),
+            proposer,
+            settings=settings,
+            classes=classes,
+            min_score=min_score,
+            class_min_score=class_min_score,
+            time_budget_seconds=time_budget_seconds,
+        )
+        return ps
+
+
+def apply(
+    dataset: str | Path,
+    proposals: str,
+    out: str | Path,
+    *,
+    allow_incomplete: bool = False,
+) -> DatasetManifest:
+    """Write the accepted proposals of a reviewed set as a NEW dataset; the original is untouched.
+
+    The new dataset records the old version in ``lineage``; each new box has provenance
+    ``proposal_accepted``. Pending and rejected proposals are never applied.
+
+    Args:
+        dataset: the path of the ``.dcp`` directory the set was made for.
+        proposals: the set id (``ProposalSet.set_id`` of a reviewed set).
+        out: a new ``.dcp`` path outside ``dataset``.
+        allow_incomplete: also apply a set from a run that did not reach every image.
+
+    Returns:
+        The new dataset's manifest.
+
+    Raises:
+        ValidationError: a set for another version, made by another model than the pinned one,
+            incomplete (without ``allow_incomplete``), with nothing accepted, or an output inside
+            the source.
+        LicenseError, FormatError: the model is not allowed or its proposer not installed.
+        StoreError: unknown or tampered set, or the output exists.
+    """
+    settings = load_settings()
+    with _request(settings):
+        return proposal_usecase.apply_set(
+            Path(dataset),
+            proposals,
+            Path(out),
+            settings=settings,
+            allow_incomplete=allow_incomplete,
+        )

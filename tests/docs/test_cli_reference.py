@@ -29,9 +29,9 @@ def test_every_command_and_option_is_documented() -> None:
     from datacopilot.cli.app import app
 
     page = (ROOT / "docs/reference/cli.md").read_text(encoding="utf-8")
-    group = typer.main.get_command(app)
-    for name, command in group.commands.items():
-        assert f"## datacopilot {name}" in page
+    gen = _generator()
+    for name, command in gen.commands_of(typer.main.get_command(app)).items():
+        assert f"## datacopilot {name}\n" in page
         for param in command.params:
             for opt in [*param.opts, *param.secondary_opts]:
                 assert opt in page or not opt.startswith("-"), (name, opt)

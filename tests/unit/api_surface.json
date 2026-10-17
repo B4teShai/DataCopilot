@@ -116,6 +116,24 @@
   "BaseException",
   "object"
  ],
+ "ProposalSet": {
+  "class_min_score": "dict[str, float]=required",
+  "dataset_version": "<class 'str'>=required",
+  "images_done": "<class 'int'>=required",
+  "images_total": "<class 'int'>=required",
+  "incomplete_reason": "typing.Optional[typing.Literal['time_budget', 'images_skipped', 'proposal_cap']]=required",
+  "min_score": "<class 'float'>=required",
+  "model_id": "<class 'str'>=required",
+  "model_revision": "<class 'str'>=required",
+  "overlap_iou": "<class 'float'>=required",
+  "parent_set_id": "str | None=None",
+  "prompt_hash": "<class 'str'>=required",
+  "proposals": "tuple[datacopilot.core.proposals.Proposal, ...]=required",
+  "proposer": "<class 'str'>=required",
+  "rejected": "dict[str, typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0)])]]=required",
+  "set_id": "<class 'str'>=required",
+  "weights": "dict[str, str]=required"
+ },
  "SettingsError": [
   "SettingsError",
   "ValueError",
@@ -138,7 +156,9 @@
   "object"
  ],
  "__version__": "str",
+ "apply": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:proposals: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:allow_incomplete: bool=False) -> DatasetManifest",
  "audit": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:checks: Sequence[str] | Literal['all']='all', KEYWORD_ONLY:fail_on: Sequence[str]=('critical',), KEYWORD_ONLY:embedder: str | None=None, KEYWORD_ONLY:embed_batch: int | None=None, KEYWORD_ONLY:similarity_threshold: float | None=None, KEYWORD_ONLY:allow_test_embedder: bool=False, KEYWORD_ONLY:root: str | Path | None=None, KEYWORD_ONLY:workers: int | None=None, KEYWORD_ONLY:require_local_images: bool=False, KEYWORD_ONLY:include_model_annotations: bool=False) -> AuditRun",
  "export": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:format: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:strict: bool=False) -> ConversionReport",
- "load": "(POSITIONAL_OR_KEYWORD:path: str | Path, POSITIONAL_OR_KEYWORD:format: str | None=None, KEYWORD_ONLY:group_by: str | None=None, KEYWORD_ONLY:strict: bool=False) -> Dataset"
+ "load": "(POSITIONAL_OR_KEYWORD:path: str | Path, POSITIONAL_OR_KEYWORD:format: str | None=None, KEYWORD_ONLY:group_by: str | None=None, KEYWORD_ONLY:strict: bool=False) -> Dataset",
+ "propose": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:proposer: str='grounding_dino', KEYWORD_ONLY:classes: Sequence[str] | None=None, KEYWORD_ONLY:min_score: float=0.35, KEYWORD_ONLY:class_min_score: Mapping[str, float] | None=None, KEYWORD_ONLY:time_budget_seconds: float=3600.0) -> ProposalSet"
 }

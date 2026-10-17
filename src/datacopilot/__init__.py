@@ -15,7 +15,7 @@ import datacopilot.audit as _audit_package
 __version__ = "0.1.0"
 
 if _typing.TYPE_CHECKING:
-    from datacopilot.api import audit, export, load
+    from datacopilot.api import apply, audit, export, load, propose
     from datacopilot.core.errors import (
         ConversionLossError,
         DataCopilotError,
@@ -26,6 +26,7 @@ if _typing.TYPE_CHECKING:
         StoreError,
         ValidationError,
     )
+    from datacopilot.core.proposals import ProposalSet
     from datacopilot.core.schema import (
         Annotation,
         AuditRun,
@@ -53,18 +54,24 @@ __all__ = [
     "Image",
     "LicenseError",
     "ModelError",
+    "ProposalSet",
     "SettingsError",
     "StoreError",
     "ValidationError",
     "__version__",
+    "apply",
     "audit",
     "export",
     "load",
+    "propose",
 ]
 
 _LAZY = {
+    "apply": "datacopilot.api",
     "export": "datacopilot.api",
     "load": "datacopilot.api",
+    "propose": "datacopilot.api",
+    "ProposalSet": "datacopilot.core.proposals",
     "ConversionReport": "datacopilot.io.report",
     "SettingsError": "datacopilot.settings",
     **{

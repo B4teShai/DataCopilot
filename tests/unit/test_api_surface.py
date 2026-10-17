@@ -174,8 +174,8 @@ def test_unknown_attributes_raise_attribute_error() -> None:
         from datacopilot import nope  # type: ignore[attr-defined]  # noqa: F401
 
 
-def test_api_module_exports_exactly_the_three_functions() -> None:
-    assert api.__all__ == ["audit", "export", "load"]
+def test_api_module_exports_exactly_the_five_functions() -> None:
+    assert api.__all__ == ["apply", "audit", "export", "load", "propose"]
 
 
 def test_audit_is_callable_whether_or_not_the_subpackage_was_imported() -> None:

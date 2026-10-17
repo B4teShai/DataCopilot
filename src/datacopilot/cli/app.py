@@ -607,6 +607,229 @@ def embed(
         raise typer.Exit(1)
 
 
+_SET_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _set_id(value: str) -> str:
+    if not _SET_ID.fullmatch(value):
+        raise typer.BadParameter(
+            "a proposal set id is 32 lower-case hex digits (printed by `propose`)",
+            param_hint="--proposals",
+        )
+    return value
+
+
+def _threshold_pairs(values: list[str] | None) -> dict[str, float]:
+    found: dict[str, float] = {}
+    for item in values or []:
+        name, sep, number = item.rpartition("=")
+        try:
+            score = float(number)
+        except ValueError:
+            score = float("nan")
+        if not (sep and name and score == score):
+            raise typer.BadParameter("use CLASS=SCORE", param_hint="--min-score-for")
+        found[name] = score
+    return found
+
+
+@app.command()
+def propose(
+    dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
+    proposer: Annotated[
+        str,
+        typer.Option(
+            "--proposer",
+            help="Proposer name; grounding_dino needs the [vlm] extra (and downloads its model "
+            "once), test_boxes is a test double.",
+        ),
+    ] = "grounding_dino",
+    classes: Annotated[
+        str | None,
+        typer.Option("--classes", help="Comma-separated class names to look for (default: all)."),
+    ] = None,
+    min_score: Annotated[
+        float,
+        typer.Option("--min-score", help="Lowest confidence kept (above 0, at most 1)."),
+    ] = 0.35,
+    min_score_for: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--min-score-for",
+            help="CLASS=SCORE: a lowest confidence for one class; repeat for more classes.",
+        ),
+    ] = None,
+    time_budget: Annotated[
+        float,
+        typer.Option(
+            "--time-budget", help="Seconds after which the run stops with an incomplete set."
+        ),
+    ] = 3600.0,
+) -> None:
+    """Find boxes a dataset is probably missing and store them as a proposal set.
+
+    Nothing is applied and the dataset is not changed. The model is asked about every class (or
+    --classes) in every image. A box is proposed only if the image has no box of that class at the
+    same place already (IoU 0.5). Prints one line
+    (`proposed=N images=DONE/TOTAL set=ID model=ID@REV run_id=ID`); the set id is what `review` and
+    `apply` take. Exit codes: 0 the run reached every image; 1 the run is incomplete (the time
+    budget ended it, an image could not be read; the partial set is stored and `apply` refuses it
+    without --allow-incomplete), a model that is not allowed (DATACOPILOT_ALLOWED_LICENSES) or
+    fails, a missing extra, or an unreadable or non-detection dataset; 2 bad option.
+    """
+    from datacopilot.proposals import usecase
+
+    settings = load_settings()
+    names = None if classes is None else _split_option(classes, "--classes")
+    thresholds = _threshold_pairs(min_score_for)
+    try:
+        ps, test_only = usecase.propose_dataset(
+            dataset,
+            proposer,
+            settings=settings,
+            classes=names,
+            min_score=min_score,
+            class_min_score=thresholds,
+            time_budget_seconds=time_budget,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--proposer/--classes/--min-score") from None
+    run_id = current_request_id()
+    if test_only:
+        typer.echo(
+            f"warning: proposer {proposer!r} is a test double: its boxes say nothing about the "
+            "pictures",
+            err=True,
+        )
+    typer.echo(
+        f"proposed={len(ps.proposals)} images={ps.images_done}/{ps.images_total} set={ps.set_id} "
+        f"model={ps.model_id}@{ps.model_revision[:12]} run_id={run_id}"
+    )
+    if ps.incomplete:
+        typer.echo(
+            f"error: the run is incomplete ({ps.incomplete_reason}: {ps.images_done} of "
+            f"{ps.images_total} images); `apply` needs --allow-incomplete for this set",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+review_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Send proposals to an annotation tool and read the decisions back.",
+)
+app.add_typer(review_app, name="review")
+
+
+@review_app.command("export")
+def review_export(
+    dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
+    proposals: Annotated[
+        str, typer.Option("--proposals", help="Proposal set id (from `propose`).")
+    ],
+    to: Annotated[str, typer.Option("--to", help="Annotation tool; only `cvat` is built.")],
+    output: Annotated[Path, typer.Option("--output", "-o", help="Empty or new output directory.")],
+) -> None:
+    """Write the proposals as a separate layer of a CVAT dataset, next to the dataset's own boxes.
+
+    Open the output in CVAT (import it as "CVAT for images 1.1"). The proposals are boxes whose
+    label is the class name plus `__proposed`; each has a `decision` attribute: type `accepted` or
+    `rejected` (empty means undecided) and move the box first to correct it. Deleting a box decides
+    nothing. Prints the output directory. Exit codes: 0 success; 1 unreadable dataset, an unknown,
+    tampered or mismatching set, a non-empty output; 2 bad option.
+    """
+    from datacopilot.proposals import usecase
+
+    _set_id(proposals)
+    if to != "cvat":
+        raise typer.BadParameter("only `cvat` is built", param_hint="--to")
+    usecase.export_review_set(dataset, proposals, output, settings=load_settings())
+    typer.echo(str(output))
+
+
+@review_app.command("import")
+def review_import(
+    dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
+    directory: Annotated[Path, typer.Argument(help="The reviewed CVAT export (a directory).")],
+    proposals: Annotated[
+        str, typer.Option("--proposals", help="Proposal set id that was exported.")
+    ],
+    source: Annotated[str, typer.Option("--from", help="Annotation tool; only `cvat` is built.")],
+) -> None:
+    """Read the decisions of a reviewed CVAT export into a new, reviewed proposal set.
+
+    The original set is not changed: a new set names it as its parent, and its id is printed. Only
+    the proposal layer is read; edits to the dataset's own boxes are ignored and counted. A decision
+    file that names an unknown, repeated or foreign proposal, changes a class, uses an invalid
+    decision or moves an accepted box outside its image is refused as a whole. Prints
+    `accepted=N rejected=N pending=N edited=N edited_pending=N ignored=N set=ID`. Exit codes: 0
+    success; 1 unreadable dataset or file, a refused decision file or no decision in it; 2 bad
+    option.
+    """
+    from datacopilot.proposals import usecase
+
+    _set_id(proposals)
+    if source != "cvat":
+        raise typer.BadParameter("only `cvat` is built", param_hint="--from")
+    reviewed, summary = usecase.import_review_set(
+        dataset, proposals, directory, settings=load_settings()
+    )
+    typer.echo(
+        f"accepted={summary.accepted} rejected={summary.rejected} pending={summary.pending} "
+        f"edited={summary.edited} edited_pending={summary.edited_pending} "
+        f"ignored={summary.ignored_boxes} set={reviewed.set_id}"
+    )
+    if summary.edited_pending:
+        typer.echo(
+            f"note: {summary.edited_pending} proposal box(es) were moved but have no decision; "
+            "they stay pending",
+            err=True,
+        )
+    if summary.ignored_boxes:
+        typer.echo(
+            f"note: {summary.ignored_boxes} box(es) of the dataset's own layer were ignored "
+            "(labels are never edited by a review)",
+            err=True,
+        )
+
+
+@app.command()
+def apply(
+    dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
+    proposals: Annotated[
+        str, typer.Option("--proposals", help="Reviewed proposal set id (from `review import`).")
+    ],
+    output: Annotated[Path, typer.Option("--output", "-o", help="New dataset directory (*.dcp).")],
+    allow_incomplete: Annotated[
+        bool,
+        typer.Option(
+            "--allow-incomplete",
+            help="Also apply a set from a run that did not reach every image.",
+        ),
+    ] = False,
+) -> None:
+    """Write the accepted proposals as a NEW dataset; the original is not changed.
+
+    Only accepted proposals are applied (pending and rejected ones never are). The new dataset
+    records the old version in its lineage, and each new box has provenance `proposal_accepted`
+    with the proposal and set ids. Refused, writing nothing: a set made for another dataset version
+    or by a model that is not the pinned one or not allowed (DATACOPILOT_ALLOWED_LICENSES), a
+    tampered set, an incomplete run (without --allow-incomplete), a set with nothing accepted, an
+    output that exists or lies inside the dataset. Prints the new version. Exit codes: 0 success; 1
+    refused or unreadable; 2 bad option.
+    """
+    from datacopilot.proposals import usecase
+
+    _set_id(proposals)
+    if output.suffix != ".dcp":
+        raise typer.BadParameter("must end with .dcp", param_hint="--output")
+    manifest = usecase.apply_set(
+        dataset, proposals, output, settings=load_settings(), allow_incomplete=allow_incomplete
+    )
+    typer.echo(manifest.version)
+
+
 @app.command()
 def formats() -> None:
     """List registered formats as name, capabilities, license and extra (tab separated)."""

@@ -15,14 +15,44 @@ ran and failed (unreadable or invalid input, a gate that matched, a lossy `--str
 
 | Command | Purpose |
 |---|---|
+| [`apply`](#datacopilot-apply) | Write the accepted proposals as a NEW dataset; the original is not changed. |
 | [`audit`](#datacopilot-audit) | Audit a dataset.dcp, write reports and exit with the gate's verdict. |
 | [`doctor`](#datacopilot-doctor) | Check the installation: versions, extras, settings, cache directory, FAISS and GPU. |
 | [`embed`](#datacopilot-embed) | Compute and store the embeddings of every image so that `audit --embedder` can reuse them. |
 | [`export`](#datacopilot-export) | Write a dataset.dcp in another format and print the output directory. |
 | [`formats`](#datacopilot-formats) | List registered formats as name, capabilities, license and extra (tab separated). |
 | [`ingest`](#datacopilot-ingest) | Convert a dataset into a versioned dataset.dcp directory and print its version. |
+| [`propose`](#datacopilot-propose) | Find boxes a dataset is probably missing and store them as a proposal set. |
+| [`review export`](#datacopilot-review-export) | Write the proposals as a separate layer of a CVAT dataset, next to the dataset's own boxes. |
+| [`review import`](#datacopilot-review-import) | Read the decisions of a reviewed CVAT export into a new, reviewed proposal set. |
 
 `--version` prints the version and exits.
+
+## datacopilot apply
+
+Write the accepted proposals as a NEW dataset; the original is not changed.
+
+Only accepted proposals are applied (pending and rejected ones never are). The new dataset records
+the old version in its lineage, and each new box has provenance `proposal_accepted` with the
+proposal and set ids. Refused, writing nothing: a set made for another dataset version or by a model
+that is not the pinned one or not allowed (DATACOPILOT_ALLOWED_LICENSES), a tampered set, an
+incomplete run (without --allow-incomplete), a set with nothing accepted, an output that exists or
+lies inside the dataset. Prints the new version. Exit codes: 0 success; 1 refused or unreadable; 2
+bad option.
+
+```text
+datacopilot apply [OPTIONS] DATASET
+```
+
+| Argument | Description |
+|---|---|
+| `DATASET` | A dataset.dcp directory. |
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `--proposals` (required) | `TEXT` |  | Reviewed proposal set id (from `review import`). |
+| `--output` / `-o` (required) | `PATH` |  | New dataset directory (*.dcp). |
+| `--allow-incomplete` |  | off | Also apply a set from a run that did not reach every image. |
 
 ## datacopilot audit
 
@@ -159,3 +189,81 @@ datacopilot ingest [OPTIONS] PATH
 | `--name` | `TEXT` |  | Dataset name (default: input name). |
 | `--strict` |  | off | Fail (nothing is written) if the reader skipped or dropped anything. |
 | `--keep-task-data` |  | off | label_studio only: also keep the task data fields other than `image` (they are dropped and counted by default because they can hold personal data or URLs). |
+
+## datacopilot propose
+
+Find boxes a dataset is probably missing and store them as a proposal set.
+
+Nothing is applied and the dataset is not changed. The model is asked about every class (or
+--classes) in every image. A box is proposed only if the image has no box of that class at the same
+place already (IoU 0.5). Prints one line (`proposed=N images=DONE/TOTAL set=ID model=ID@REV
+run_id=ID`); the set id is what `review` and `apply` take. Exit codes: 0 the run reached every
+image; 1 the run is incomplete (the time budget ended it, an image could not be read; the partial
+set is stored and `apply` refuses it without --allow-incomplete), a model that is not allowed
+(DATACOPILOT_ALLOWED_LICENSES) or fails, a missing extra, or an unreadable or non-detection dataset;
+2 bad option.
+
+```text
+datacopilot propose [OPTIONS] DATASET
+```
+
+| Argument | Description |
+|---|---|
+| `DATASET` | A dataset.dcp directory. |
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `--proposer` | `TEXT` | `grounding_dino` | Proposer name; grounding_dino needs the [vlm] extra (and downloads its model once), test_boxes is a test double. |
+| `--classes` | `TEXT` |  | Comma-separated class names to look for (default: all). |
+| `--min-score` | `FLOAT` | `0.35` | Lowest confidence kept (above 0, at most 1). |
+| `--min-score-for` | `TEXT` |  | CLASS=SCORE: a lowest confidence for one class; repeat for more classes. |
+| `--time-budget` | `FLOAT` | `3600.0` | Seconds after which the run stops with an incomplete set. |
+
+## datacopilot review export
+
+Write the proposals as a separate layer of a CVAT dataset, next to the dataset's own boxes.
+
+Open the output in CVAT (import it as "CVAT for images 1.1"). The proposals are boxes whose label is
+the class name plus `__proposed`; each has a `decision` attribute: type `accepted` or `rejected`
+(empty means undecided) and move the box first to correct it. Deleting a box decides nothing. Prints
+the output directory. Exit codes: 0 success; 1 unreadable dataset, an unknown, tampered or
+mismatching set, a non-empty output; 2 bad option.
+
+```text
+datacopilot review export [OPTIONS] DATASET
+```
+
+| Argument | Description |
+|---|---|
+| `DATASET` | A dataset.dcp directory. |
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `--proposals` (required) | `TEXT` |  | Proposal set id (from `propose`). |
+| `--to` (required) | `TEXT` |  | Annotation tool; only `cvat` is built. |
+| `--output` / `-o` (required) | `PATH` |  | Empty or new output directory. |
+
+## datacopilot review import
+
+Read the decisions of a reviewed CVAT export into a new, reviewed proposal set.
+
+The original set is not changed: a new set names it as its parent, and its id is printed. Only the
+proposal layer is read; edits to the dataset's own boxes are ignored and counted. A decision file
+that names an unknown, repeated or foreign proposal, changes a class, uses an invalid decision or
+moves an accepted box outside its image is refused as a whole. Prints `accepted=N rejected=N
+pending=N edited=N edited_pending=N ignored=N set=ID`. Exit codes: 0 success; 1 unreadable dataset
+or file, a refused decision file or no decision in it; 2 bad option.
+
+```text
+datacopilot review import [OPTIONS] DATASET DIRECTORY
+```
+
+| Argument | Description |
+|---|---|
+| `DATASET` | A dataset.dcp directory. |
+| `DIRECTORY` | The reviewed CVAT export (a directory). |
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `--proposals` (required) | `TEXT` |  | Proposal set id that was exported. |
+| `--from` (required) | `TEXT` |  | Annotation tool; only `cvat` is built. |
