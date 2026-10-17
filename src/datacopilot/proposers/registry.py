@@ -74,8 +74,8 @@ def _plugin(name: str, allowed_licenses: frozenset[str]) -> ProposerPlugin:
     return plugin
 
 
-def check_proposer(name: str, allowed_licenses: frozenset[str]) -> PluginSpec:
-    """The plugin's spec after the license guard, without creating the proposer.
+def check_proposer(name: str, allowed_licenses: frozenset[str]) -> ProposerPlugin:
+    """The plugin after the license guard, without creating the proposer (``.spec`` describes it).
 
     ``apply`` calls this: it needs to know the proposer is installed and allowed, not to run it.
 
@@ -84,7 +84,7 @@ def check_proposer(name: str, allowed_licenses: frozenset[str]) -> PluginSpec:
             dependency, or a plugin that does not satisfy the contract.
         LicenseError: the model or plugin license is not in ``allowed_licenses``.
     """
-    return _plugin(name, allowed_licenses).spec
+    return _plugin(name, allowed_licenses)
 
 
 def get_proposer(name: str, allowed_licenses: frozenset[str]) -> Proposer:

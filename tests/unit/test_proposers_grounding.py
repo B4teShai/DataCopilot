@@ -492,3 +492,58 @@ def test_a_phrase_less_call_does_nothing(fakes: type[Fakes]) -> None:
 
 def test_the_plugin_creates_a_valid_proposer(fakes: type[Fakes]) -> None:
     assert isinstance(make(), Proposer)
+
+
+# ----------------------------------------------------------------------------- thresholds and sizes
+def test_the_text_threshold_follows_a_low_min_score(fakes: type[Fakes]) -> None:
+    # with the fixed library default of 0.25 a min_score of 0.1 silently did nothing
+    make().detect(IMG, ["cat"], SIZE, min_score=0.1)
+    make().detect(IMG, ["cat"], SIZE, min_score=0.6)
+    low, high = calls("post_process")
+    assert low["threshold"] == 0.1 and low["text_threshold"] == 0.1
+    assert high["threshold"] == 0.6 and high["text_threshold"] == gd.TEXT_THRESHOLD
+
+
+def test_boxes_between_the_thresholds_are_returned_when_the_caller_asked_for_them(
+    fakes: type[Fakes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = [([1, 2, 21, 22], 0.2, "cat"), ([2, 3, 20, 25], 0.4, "cat")]
+
+    def post(self: FakeProcessor, outputs: Any, input_ids: Any, **kw: Any) -> Any:
+        Fakes.calls.append(("post_process", kw))
+        keep = [r for r in raw if r[1] >= max(kw["threshold"], kw["text_threshold"])]
+        return [_result([r[0] for r in keep], [r[1] for r in keep], [r[2] for r in keep])]
+
+    monkeypatch.setattr(FakeProcessor, "post_process_grounded_object_detection", post)
+    assert [round(c.score, 2) for c in make().detect(IMG, ["cat"], SIZE, min_score=0.1)] == [
+        0.2,
+        0.4,
+    ]
+    assert [round(c.score, 2) for c in make().detect(IMG, ["cat"], SIZE, min_score=0.3)] == [0.4]
+
+
+def test_an_image_whose_decoded_size_differs_from_the_recorded_size_is_skipped(
+    fakes: type[Fakes],
+) -> None:
+    with pytest.raises(ImageDecodeError) as err:
+        make().detect(IMG, ["cat"], (30, 40), min_score=0.3)  # recorded as rotated
+    assert err.value.reason == "size_mismatch" and Fakes.calls == []
+
+
+def test_the_prompt_chunks_are_computed_once_per_run(fakes: type[Fakes]) -> None:
+    proposer = make()
+    proposer.detect(IMG, ["cat", "dog"], SIZE, min_score=0.3)
+    proposer.detect(IMG, ["cat", "dog"], SIZE, min_score=0.3)
+    tokenised = []
+    original = FakeProcessor._Tokenizer.__call__
+
+    def spy(self: Any, text: str) -> Any:
+        tokenised.append(text)
+        return original(self, text)
+
+    FakeProcessor._Tokenizer.__call__ = spy  # type: ignore[method-assign]
+    try:
+        proposer.detect(IMG, ["cat", "dog"], SIZE, min_score=0.3)
+    finally:
+        FakeProcessor._Tokenizer.__call__ = original  # type: ignore[method-assign]
+    assert tokenised == []

@@ -74,6 +74,7 @@ def make_set(ds: Dataset, **kw: object) -> ProposalSet:
         "images_done": 2,
         "incomplete_reason": None,
         "rejected": {},
+        "test_only": False,
         "proposals": props,
     }
     return ProposalSet.build(**{**fields, **kw})  # type: ignore[arg-type]
@@ -206,7 +207,7 @@ def test_a_round_trip_with_everything_accepted_changes_nothing_but_the_status(
     ds, ps, out = exported(tmp_path)
     decide(out, {pid: "accepted" for pid in IDS})
     reviewed, summary = import_review(ds, ps, out)
-    assert summary == ReviewSummary(4, 0, 0, 0, 0, 2)
+    assert summary == ReviewSummary(4, 0, 0, 0, 0, 2, 0)
     assert reviewed.parent_set_id == ps.set_id and reviewed.dataset_version == ps.dataset_version
     assert [(p.proposal_id, p.bbox_xyxy_abs, p.score) for p in reviewed.proposals] == [
         (p.proposal_id, p.bbox_xyxy_abs, p.score) for p in ps.proposals
@@ -483,7 +484,7 @@ def test_decisions_of_another_dataset_are_refused(tmp_path: Path) -> None:
             **{k: getattr(ps, k) for k in (
                 "proposer", "model_id", "model_revision", "weights", "prompt_hash", "min_score",
                 "class_min_score", "overlap_iou", "images_total", "images_done",
-                "incomplete_reason", "rejected")},  # fmt: skip
+                "incomplete_reason", "rejected", "test_only")},  # fmt: skip
             "dataset_version": other.manifest.version,
             "proposals": [
                 Proposal(proposal_id="9" * 16, image_id=a.image_id, category_id=1,
@@ -534,3 +535,94 @@ def test_a_non_finite_coordinate_is_refused(tmp_path: Path) -> None:
     edit(out, poison)
     with pytest.raises(FormatError):
         import_review(ds, ps, out)
+
+
+# ------------------------------------------------------------ skipped and oversized input
+def test_an_image_missing_from_the_review_folder_refuses_the_import(tmp_path: Path) -> None:
+    ds, ps, out = exported(tmp_path)
+    decide(out, {IDS[0]: "accepted"})
+    next((out / "images").glob("*.png")).unlink()  # the images must travel with the review
+    with pytest.raises(ValidationError, match="images must travel"):
+        import_review(ds, ps, out)
+
+
+def test_a_rotated_proposal_box_refuses_the_import_instead_of_vanishing(tmp_path: Path) -> None:
+    ds, ps, out = exported(tmp_path)
+    decide(out, {IDS[0]: "accepted"})
+
+    def rotate(root: ET.Element) -> None:
+        box = proposal_boxes(root).get(IDS[0])
+        if box is not None:
+            box.set("rotation", "15")
+
+    edit(out, rotate)
+    with pytest.raises(ValidationError, match="rotated"):
+        import_review(ds, ps, out)
+
+
+def test_other_unsupported_shapes_are_counted_not_silent(tmp_path: Path) -> None:
+    ds, ps, out = exported(tmp_path)
+    decide(out, {IDS[0]: "accepted"})
+
+    def draw(root: ET.Element) -> None:
+        for image in root.iter("image"):
+            ET.SubElement(image, "polygon", {"label": "cat", "points": "1,1;5,1;5,5"})
+            return
+
+    edit(out, draw)
+    _, summary = import_review(ds, ps, out)
+    assert summary.skipped_shapes == len(xml_files(out))  # one polygon per document
+
+
+def test_an_edited_box_is_held_to_the_minimum_size(tmp_path: Path) -> None:
+    ds, ps, out = exported(tmp_path)
+    decide(out, {IDS[0]: "accepted"})
+
+    def squash(root: ET.Element) -> None:
+        box = proposal_boxes(root).get(IDS[0])
+        if box is not None:
+            box.set("xtl", str(float(box.get("xbr", "0")) - 1.0))
+
+    edit(out, squash)
+    with pytest.raises(ValidationError, match="too small"):
+        import_review(ds, ps, out)
+
+
+def test_a_file_with_more_boxes_than_the_dataset_and_set_can_explain_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(review, "MAX_EXTRA_BOXES", 0)
+    ds, ps, out = exported(tmp_path)
+    decide(out, {IDS[0]: "accepted"})
+
+    def add(root: ET.Element) -> None:
+        for image in root.iter("image"):
+            box = copy.deepcopy(next(image.iter("box")))
+            image.append(box)
+            return
+
+    edit(out, add)
+    with pytest.raises(ValidationError, match="more boxes"):
+        import_review(ds, ps, out)
+
+
+def test_two_images_with_the_same_name_in_the_file_are_refused(tmp_path: Path) -> None:
+    ds, ps, out = exported(tmp_path)
+    decide(out, {IDS[0]: "accepted"})
+
+    def twin(root: ET.Element) -> None:
+        for image in list(root.iter("image")):
+            clone = copy.deepcopy(image)
+            clone.set("id", "9999")
+            for child in list(clone):
+                clone.remove(child)
+            root.append(clone)
+            return
+
+    edit(out, twin)
+    with pytest.raises(ValidationError, match="same name"):
+        import_review(ds, ps, out)
+
+
+def test_the_summary_counts_skipped_shapes_in_the_cli_line_field() -> None:
+    assert ReviewSummary(1, 0, 0, 0, 0, 0, 2).skipped_shapes == 2

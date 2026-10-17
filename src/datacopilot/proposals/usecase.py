@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from datacopilot.core.errors import StoreError, ValidationError
 from datacopilot.core.proposals import ProposalSet
 from datacopilot.core.schema import Dataset, DatasetManifest
 from datacopilot.io.report import ConversionReport
@@ -59,7 +60,7 @@ def propose_dataset(
     """
     available = registry.proposer_names()
     if not _NAME.fullmatch(proposer_name) or proposer_name not in available:
-        raise ValueError(f"unknown proposer; available: {', '.join(available) or 'none'}")
+        raise run.OptionError(f"unknown proposer; available: {', '.join(available) or 'none'}")
     proposer = registry.get_proposer(proposer_name, settings.allowed_licenses)
     store, ds = _open(dataset, settings)
     ps = run.propose(
@@ -110,15 +111,27 @@ def apply_set(
     *,
     settings: Settings,
     allow_incomplete: bool = False,
+    allow_test_proposer: bool = False,
 ) -> DatasetManifest:
     """Write the accepted proposals of the set as the new dataset ``out`` (see ``apply.py``)."""
     store, ds = _open(dataset, settings)
+    ps = store.read_proposals(set_id)
+    parent = None
+    if ps.parent_set_id is not None:
+        try:
+            parent = store.read_proposals(ps.parent_set_id)
+        except StoreError:
+            raise ValidationError(
+                "the set this review was made from is not in the dataset: apply needs both"
+            ) from None
     return apply_module.apply_proposals(
         ds,
-        store.read_proposals(set_id),
+        ps,
         out,
         allowed_licenses=settings.allowed_licenses,
         allow_incomplete=allow_incomplete,
+        allow_test_proposer=allow_test_proposer,
         source=Path(dataset),
+        parent=parent,
         limits=_limits(settings),
     )

@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 import tempfile
 import time
+import unicodedata
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -43,7 +45,7 @@ from datacopilot.embed.protocol import ImageDecodeError
 from datacopilot.logging import get_logger
 from datacopilot.proposers.protocol import MAX_PHRASES, Candidate, Proposer, normalize_phrase
 
-__all__ = ["MAX_PHRASES", "MAX_PROPOSALS", "propose"]
+__all__ = ["MAX_PHRASES", "MAX_PROPOSALS", "OptionError", "propose"]
 
 DEFAULT_MIN_SCORE = 0.35
 """Confidence below which a candidate is dropped unless a class has its own threshold."""
@@ -58,57 +60,122 @@ MIN_BOX_SIDE_PX = 2.0
 CLIP_TOLERANCE_PX = 1.0
 """A box that overshoots the image by at most this many pixels is clipped; more is dropped."""
 PROGRESS_EVERY = 25
-_WARNED = ("invalid_candidate", "unknown_label", "box_outside_image", "box_too_small",
-           "unusable_class_name", "ambiguous_class_name")  # fmt: skip
+MAX_CLASS_NAME_CHARS = 64
+"""Longest class name a stored set can hold as a threshold key."""
+MAX_LABEL_CHARS = 256
+"""Longest model label that is interpreted at all; a longer one is counted as unknown."""
+SCORE_DECIMALS = 4
+"""Scores are stored rounded to this many decimals, so a model rerun gives the same set id."""
+_WARNED = ("invalid_candidate", "unknown_label", "ambiguous_label", "box_outside_image",
+           "box_too_small", "unusable_class_name", "ambiguous_class_name")  # fmt: skip
+_PUNCT = re.compile(r"\s*([-'/&])\s*")
 _Box = tuple[float, float, float, float]
 
 
+class OptionError(ValueError):
+    """A usage mistake found before the model runs (the command line exits 2 for it)."""
+
+
+def _printable_line(text: str) -> bool:
+    return all(
+        unicodedata.category(c) not in ("Cc", "Cf", "Cs", "Zl", "Zp") and c.isprintable()
+        for c in text
+    )
+
+
+def _squash(phrase: str) -> str:
+    """``t - shirt`` and ``t-shirt`` are the same phrase: no spaces around ``- ' / &``."""
+    return _PUNCT.sub(r"\1", phrase)
+
+
 def _phrases(ds: Dataset, classes: Sequence[str] | None, rejected: Counter[str]) -> dict[str, int]:
-    """``phrase -> category id`` for the selected classes, from their names and aliases."""
+    """``phrase -> category id`` for the selected classes, from their names and aliases.
+
+    A phrase that two classes share is dropped for both (nobody is guessed) and counted.
+    """
     categories = sorted(ds.categories, key=lambda c: c.id)
     if classes is not None:
         wanted = set(classes)
         unknown = sorted(wanted - {c.name for c in categories})
         if unknown:
-            raise ValueError(
-                f"unknown class {unknown[0][:40]!r}; see the categories of the dataset"
-            )
+            raise OptionError(f"unknown class {unknown[0][:40]!r}; see the dataset's categories")
         categories = [c for c in categories if c.name in wanted]
-    found: dict[str, int] = {}
+    owners: dict[str, set[int]] = {}
     for category in categories:
         for text in (category.name, *category.aliases):
             phrase = normalize_phrase(text)
             if phrase is None:
                 rejected["unusable_class_name"] += 1
-            elif found.get(phrase, category.id) != category.id:
-                rejected["ambiguous_class_name"] += 1
             else:
-                found[phrase] = category.id
+                owners.setdefault(phrase, set()).add(category.id)
+    found: dict[str, int] = {}
+    for phrase, ids in owners.items():
+        if len(ids) > 1:
+            rejected["ambiguous_class_name"] += len(ids)
+        else:
+            found[phrase] = next(iter(ids))
     if not found:
-        raise ValueError("the dataset has no usable class names to ask a model about")
+        raise OptionError("the dataset has no usable class names to ask a model about")
     if len(found) > MAX_PHRASES:
-        raise ValueError(
+        raise OptionError(
             f"{len(found)} class names are too many to ask about at once (at most {MAX_PHRASES}); "
             "select some with --classes"
         )
     return found
 
 
+class _Labels:
+    """Turns what a model says into the class that was asked about, or says why it cannot.
+
+    The decoder returns the words whose score passed its text threshold: usually one asked phrase,
+    but also two classes in one label (``bicycle motorcycle``), a piece of a phrase
+    (``bench dining``, ``##s snowboard``) and spacing around punctuation (``t - shirt``). A label is
+    matched when it is an asked phrase or is made up entirely of asked phrases of ONE class
+    (longest first); two classes in one label is ``ambiguous_label``, anything else (a fragment, an
+    empty label) is ``unknown_label``. Nothing is guessed.
+    """
+
+    def __init__(self, phrase_class: Mapping[str, int]) -> None:
+        self.by_phrase: dict[str, tuple[int, str]] = {}
+        for phrase, category in phrase_class.items():
+            self.by_phrase.setdefault(_squash(phrase), (category, phrase))
+        self.by_words = {tuple(k.split(" ")): v for k, v in self.by_phrase.items()}
+        self.longest = max(len(w) for w in self.by_words)
+
+    def resolve(self, label: str) -> tuple[int, str] | str:
+        text = _squash(" ".join(unicodedata.normalize("NFKC", label).lower().split()))
+        exact = self.by_phrase.get(text)
+        if exact is not None:
+            return exact
+        words = text.split(" ")
+        covered = [False] * len(words)
+        hits: list[tuple[int, str]] = []
+        for size in range(min(self.longest, len(words)), 0, -1):
+            for i in range(len(words) - size + 1):
+                hit = self.by_words.get(tuple(words[i : i + size]))
+                if hit is not None and not any(covered[i : i + size]):
+                    covered[i : i + size] = [True] * size
+                    hits.append(hit)
+        if not hits or not all(covered):
+            return "unknown_label"
+        return hits[0] if len({h[0] for h in hits}) == 1 else "ambiguous_label"
+
+
 def _check_options(
     min_score: float, class_min_score: Mapping[str, float], overlap_iou: float, budget: float
 ) -> None:
     if not (math.isfinite(min_score) and 0 < min_score <= 1):
-        raise ValueError("min_score must be above 0 and at most 1")
+        raise OptionError("min_score must be above 0 and at most 1")
     if not all(math.isfinite(v) and 0 < v <= 1 for v in class_min_score.values()):
-        raise ValueError("a class threshold must be above 0 and at most 1")
+        raise OptionError("a class threshold must be above 0 and at most 1")
     if not (math.isfinite(overlap_iou) and 0 < overlap_iou <= 1):
-        raise ValueError("overlap_iou must be above 0 and at most 1")
+        raise OptionError("overlap_iou must be above 0 and at most 1")
     if not (math.isfinite(budget) and budget > 0):
-        raise ValueError("the time budget must be a positive number of seconds")
+        raise OptionError("the time budget must be a positive number of seconds")
 
 
 def _valid(candidate: Candidate, width: int, height: int) -> tuple[_Box, float, str] | str:
-    """``(box, score, phrase)`` of a trustworthy candidate, else the reason it is not."""
+    """``(box, score, label)`` of a trustworthy candidate, else the reason it is not."""
     try:
         box = tuple(float(v) for v in candidate.box)
         score = float(candidate.score)
@@ -118,8 +185,8 @@ def _valid(candidate: Candidate, width: int, height: int) -> tuple[_Box, float, 
         return "invalid_candidate"
     if not (0 < score <= 1 and box[0] < box[2] and box[1] < box[3]):
         return "invalid_candidate"
-    phrase = normalize_phrase(candidate.label) if isinstance(candidate.label, str) else None
-    if phrase is None:
+    label = candidate.label
+    if not isinstance(label, str) or len(label) > MAX_LABEL_CHARS:
         return "unknown_label"
     try:
         x1, y1, x2, y2 = clip_to_image(box, width, height, tol=CLIP_TOLERANCE_PX)
@@ -127,7 +194,7 @@ def _valid(candidate: Candidate, width: int, height: int) -> tuple[_Box, float, 
         return "box_outside_image"
     if x2 - x1 < MIN_BOX_SIDE_PX or y2 - y1 < MIN_BOX_SIDE_PX:
         return "box_too_small"
-    return (x1, y1, x2, y2), score, phrase
+    return (x1, y1, x2, y2), score, label
 
 
 def _proposal_id(
@@ -163,7 +230,8 @@ def propose(
         clock: monotonic seconds (default ``time.monotonic``; a test seam).
 
     Raises:
-        ValueError: an invalid option, an unknown class, or no usable class name.
+        OptionError (a ``ValueError``): an invalid option, an unknown class, a threshold key the
+            set cannot hold, or no usable class name; all found before the model runs.
         ValidationError: the dataset is not a detection dataset.
         ModelError: the model failed (nothing is returned).
     """
@@ -177,9 +245,16 @@ def propose(
     names = {c.id: c.name for c in ds.categories}
     selected = {names[cid] for cid in phrase_class.values()}
     if not set(thresholds) <= selected:
-        raise ValueError("a threshold names an unknown class (or one that was not selected)")
+        raise OptionError("a threshold names an unknown class (or one that was not selected)")
+    for name in thresholds:  # the set must be able to hold the key: found out before the model runs
+        if not 0 < len(name) <= MAX_CLASS_NAME_CHARS or not _printable_line(name):
+            raise OptionError(
+                f"a class name used as a threshold key must be one printable line of at most "
+                f"{MAX_CLASS_NAME_CHARS} characters"
+            )
     cutoff = {cid: thresholds.get(names[cid], min_score) for cid in set(phrase_class.values())}
     phrases = sorted(phrase_class)
+    labels = _Labels(phrase_class)
     prompt_hash = hashlib.sha256("\n".join(phrases).encode("utf-8")).hexdigest()
     floor = min([min_score, *thresholds.values()])
     existing: dict[tuple[str, int], list[_Box]] = {}
@@ -208,16 +283,16 @@ def propose(
             break
         data, _digest, reason = read_verified(image, ctx)
         if data is None:
-            log.warning("proposer_image_skipped", reason=reason)
+            log.warning("proposer_image_skipped", image_id=image.image_id, reason=reason)
             continue
         try:
             found = proposer.detect(data, phrases, (image.width, image.height), min_score=floor)
         except ImageDecodeError as exc:
-            log.warning("proposer_image_skipped", reason=exc.reason)
+            log.warning("proposer_image_skipped", image_id=image.image_id, reason=exc.reason)
             continue
         fresh = _image_proposals(
             ds, proposer, image.image_id, (image.width, image.height),
-            found, phrase_class, cutoff, existing, overlap_iou, rejected,
+            found, labels, cutoff, existing, overlap_iou, rejected,
         )  # fmt: skip
         if len(proposals) + len(fresh) > MAX_PROPOSALS:
             stopped = "proposal_cap"
@@ -246,6 +321,7 @@ def propose(
         images_done=done,
         incomplete_reason=stopped,
         rejected={k: v for k, v in sorted(rejected.items()) if v},
+        test_only=bool(getattr(proposer, "test_only", False)),
     )
 
 
@@ -255,7 +331,7 @@ def _image_proposals(
     image_id: str,
     size: tuple[int, int],
     found: Sequence[Candidate],
-    phrase_class: Mapping[str, int],
+    labels: _Labels,
     cutoff: Mapping[int, float],
     existing: Mapping[tuple[str, int], list[_Box]],
     overlap_iou: float,
@@ -268,12 +344,12 @@ def _image_proposals(
         if isinstance(checked, str):
             rejected[checked] += 1
             continue
-        box, score, phrase = checked
-        category = phrase_class.get(phrase)
-        if category is None:
-            rejected["unknown_label"] += 1
-        elif score >= cutoff[category]:
-            valid.append((-score, category, box, phrase))
+        box, score, label = checked
+        match = labels.resolve(label)
+        if isinstance(match, str):
+            rejected[match] += 1
+        elif score >= cutoff[match[0]]:
+            valid.append((-score, match[0], box, match[1]))
     valid.sort()
     if len(valid) > MAX_PROPOSALS_PER_IMAGE:
         rejected["image_cap"] += len(valid) - MAX_PROPOSALS_PER_IMAGE
@@ -303,7 +379,7 @@ def _image_proposals(
                     image_id=image_id,
                     category_id=category,
                     bbox_xyxy_abs=rounded,  # type: ignore[arg-type]
-                    score=-negative,
+                    score=max(round(-negative, SCORE_DECIMALS), 10**-SCORE_DECIMALS),
                     prompt=phrase,
                 )
             )

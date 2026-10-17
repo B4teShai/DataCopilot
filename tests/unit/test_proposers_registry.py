@@ -91,7 +91,7 @@ def test_check_proposer_answers_the_license_question_without_creating_anything(
 ) -> None:
     plugin = FakeProposer("fake")
     install(monkeypatch, EP("fake", "m:p", plugin))
-    assert registry.check_proposer("fake", PERMISSIVE).name == "fake"
+    assert registry.check_proposer("fake", PERMISSIVE).spec.name == "fake"
     assert plugin.created == []
 
 

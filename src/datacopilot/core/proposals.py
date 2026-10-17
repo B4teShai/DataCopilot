@@ -159,6 +159,8 @@ class ProposalSet(_Model):
             incomplete set unless asked.
         rejected: model candidates dropped by validation, counted by constant reason.
         parent_set_id: the set a review was derived from (None for a fresh run).
+        test_only: the proposer is a test double (its boxes say nothing about the pictures);
+            ``apply`` refuses such a set unless asked.
         proposals: in canonical order (image, descending score, class, box, id).
     """
 
@@ -177,7 +179,8 @@ class ProposalSet(_Model):
     incomplete_reason: IncompleteReason | None
     rejected: Annotated[dict[str, Annotated[int, Field(ge=0)]], AfterValidator(_reasons)]
     parent_set_id: str | None = Field(default=None, pattern=_HEX32)
-    proposals: tuple[Proposal, ...]
+    test_only: bool
+    proposals: tuple[Proposal, ...] = Field(max_length=MAX_PROPOSALS)
 
     @property
     def incomplete(self) -> bool:
@@ -224,6 +227,8 @@ class ProposalSet(_Model):
                 (image, class, score, prompt or kind: the same proposal must stay the same).
         """
         mine = {p.proposal_id: p for p in self.proposals}
+        # rebuilt through the validators: model_copy(update=...) skips them
+        proposals = [Proposal.model_validate(p.model_dump()) for p in proposals]
         given = {p.proposal_id: p for p in proposals}
         for pid, new in given.items():
             old = mine.get(pid)

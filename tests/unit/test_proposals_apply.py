@@ -12,7 +12,7 @@ from fixtures.auditdata import Img, build
 
 from datacopilot.core.errors import FormatError, LicenseError, StoreError, ValidationError
 from datacopilot.core.proposals import Proposal, ProposalSet
-from datacopilot.core.schema import Dataset
+from datacopilot.core.schema import Dataset, DatasetManifest
 from datacopilot.models import registry as models
 from datacopilot.proposals.apply import apply_proposals
 from datacopilot.store import DatasetStore
@@ -46,6 +46,7 @@ def make_set(
     ds: Dataset,
     statuses: tuple[str, ...] = ("accepted", "rejected", "pending"),
     first_id: int = 0,
+    parent_set_id: str | None = "1" * 32,
     **kw: object,
 ) -> ProposalSet:
     a, b = (next(i for i in ds.images if i.file_path.endswith(n)) for n in ("a.png", "b.png"))
@@ -80,6 +81,8 @@ def make_set(
         "images_done": 2,
         "incomplete_reason": None,
         "rejected": {},
+        "test_only": False,
+        "parent_set_id": parent_set_id,
         "proposals": props,
     }
     return ProposalSet.build(**{**fields, **kw})  # type: ignore[arg-type]
@@ -93,9 +96,17 @@ def digest_tree(root: Path) -> dict[str, str]:
     }
 
 
+def go(ds: Dataset, ps: ProposalSet, out: Path, **kw: object) -> DatasetManifest:
+    """apply_proposals with the defaults most tests want: the test double allowed, a source."""
+    kw.setdefault("allowed_licenses", ALLOWED)
+    kw.setdefault("source", out.parent / "src.dcp")
+    kw.setdefault("allow_test_proposer", True)
+    return apply_proposals(ds, ps, out, **kw)  # type: ignore[arg-type]
+
+
 def run(tmp_path: Path, ds: Dataset, ps: ProposalSet, **kw: object) -> Path:
     out = tmp_path / "new.dcp"
-    apply_proposals(ds, ps, out, allowed_licenses=ALLOWED, **kw)  # type: ignore[arg-type]
+    go(ds, ps, out, **kw)
     return out
 
 
@@ -109,7 +120,14 @@ def test_only_accepted_proposals_become_annotations_with_provenance(tmp_path: Pa
     (row,) = added
     assert row.ann_id == "proposal:" + f"{0:016x}" and row.kind == "bbox"
     assert row.category_id == 1 and row.bbox_xyxy_abs == (41.0, 31.0, 60.0, 46.0)
-    assert row.score == 0.9 and row.source == {"proposal_id": f"{0:016x}", "set_id": ps.set_id}
+    assert row.score == 0.9
+    assert row.source == {
+        "proposal_id": f"{0:016x}",
+        "set_id": ps.set_id,
+        "model_id": "test_boxes",
+        "model_revision": "1",
+        "edited": False,
+    }
     assert {a.ann_id for a in ds.annotations} <= {a.ann_id for a in new.annotations}
     assert new.images == ds.images and new.categories == ds.categories
 
@@ -128,11 +146,12 @@ def test_an_edited_box_is_the_one_that_is_applied(tmp_path: Path) -> None:
     new = DatasetStore.open(run(tmp_path, ds, edited)).read()
     (row,) = [a for a in new.annotations if a.provenance == "proposal_accepted"]
     assert row.bbox_xyxy_abs == (40.0, 30.0, 60.0, 46.0)
+    assert row.score is None and row.source["edited"] is True  # the reviewer's box, not the model's
 
 
 def test_the_new_version_records_its_parent_in_the_lineage(tmp_path: Path) -> None:
     _, ds = stored(tmp_path)
-    manifest = apply_proposals(ds, make_set(ds), tmp_path / "new.dcp", allowed_licenses=ALLOWED)
+    manifest = go(ds, make_set(ds), tmp_path / "new.dcp")
     assert manifest.lineage == (ds.manifest.version,)
     assert manifest.version != ds.manifest.version
     assert manifest.annotation_count == ds.manifest.annotation_count + 1
@@ -144,11 +163,10 @@ def test_the_new_version_records_its_parent_in_the_lineage(tmp_path: Path) -> No
         statuses=("accepted", "accepted", "rejected"),
         first_id=100,
     )
-    second = apply_proposals(
+    second = go(
         DatasetStore.open(tmp_path / "new.dcp").read(),
         second_set,
         tmp_path / "third.dcp",
-        allowed_licenses=ALLOWED,
     )
     assert second.lineage == (ds.manifest.version, manifest.version)
 
@@ -166,8 +184,8 @@ def test_nothing_in_the_source_dataset_changes(tmp_path: Path) -> None:
 def test_the_same_inputs_give_the_same_version(tmp_path: Path) -> None:
     _, ds = stored(tmp_path)
     ps = make_set(ds)
-    a = apply_proposals(ds, ps, tmp_path / "a.dcp", allowed_licenses=ALLOWED)
-    b = apply_proposals(ds, ps, tmp_path / "b.dcp", allowed_licenses=ALLOWED)
+    a = go(ds, ps, tmp_path / "a.dcp")
+    b = go(ds, ps, tmp_path / "b.dcp")
     assert a.version == b.version
 
 
@@ -176,7 +194,7 @@ def test_applying_logs_the_versions_and_the_count(
 ) -> None:
     _, ds = stored(tmp_path)
     ps = make_set(ds)
-    manifest = apply_proposals(ds, ps, tmp_path / "new.dcp", allowed_licenses=ALLOWED)
+    manifest = go(ds, ps, tmp_path / "new.dcp")
     (event,) = [e for e in _captured_logs if e["event"] == "proposals_applied"]
     assert event["parent_version"] == ds.manifest.version
     assert event["dataset_version"] == manifest.version
@@ -201,7 +219,7 @@ def test_the_output_must_be_a_new_directory_outside_the_source(tmp_path: Path, w
     out = {"same": path, "inside": path / "new.dcp", "parent": tmp_path}[where]
     before = digest_tree(path)
     with pytest.raises((ValidationError, StoreError)):
-        apply_proposals(ds, make_set(ds), out, allowed_licenses=ALLOWED, source=path)
+        go(ds, make_set(ds), out, allowed_licenses=ALLOWED, source=path)
     assert digest_tree(path) == before and not (path / "new.dcp").exists()
 
 
@@ -210,7 +228,7 @@ def test_a_symlink_into_the_source_does_not_get_around_the_guard(tmp_path: Path)
     link = tmp_path / "link"
     link.symlink_to(path, target_is_directory=True)
     with pytest.raises((ValidationError, StoreError)):
-        apply_proposals(ds, make_set(ds), link / "new.dcp", allowed_licenses=ALLOWED, source=path)
+        go(ds, make_set(ds), link / "new.dcp", allowed_licenses=ALLOWED, source=path)
     assert not (path / "new.dcp").exists()
 
 
@@ -257,10 +275,10 @@ def test_a_proposer_that_is_not_installed_is_refused(tmp_path: Path) -> None:
 def test_a_model_that_is_not_on_the_license_allow_list_is_refused(tmp_path: Path) -> None:
     _, ds = stored(tmp_path)
     with pytest.raises(LicenseError, match="DATACOPILOT_ALLOWED_LICENSES"):
-        apply_proposals(ds, make_set(ds), tmp_path / "new.dcp", allowed_licenses=frozenset({"mit"}))
+        go(ds, make_set(ds), tmp_path / "new.dcp", allowed_licenses=frozenset({"mit"}))
     assert not (tmp_path / "new.dcp").exists()
     with pytest.raises(LicenseError):
-        apply_proposals(
+        go(
             ds,
             make_set(ds, proposer="grounding_dino", model_id="grounding_dino"),
             tmp_path / "new2.dcp",
@@ -295,11 +313,10 @@ def test_a_registered_model_must_be_the_pinned_revision_with_the_pinned_files(
             **change,
         }
         with pytest.raises(ValidationError, match="pinned"):
-            apply_proposals(
+            go(
                 ds,
                 make_set(ds, **fields),
                 tmp_path / f"x{len(str(change))}.dcp",
-                allowed_licenses=ALLOWED,
             )
 
 
@@ -330,5 +347,111 @@ def test_a_proposal_id_that_collides_with_an_existing_annotation_is_refused(tmp_
     clash = ds.annotations[0].model_copy(update={"ann_id": "proposal:" + f"{0:016x}"})
     dup = dataset(ds.images, [clash, *ds.annotations[1:]], ds.categories, root=tmp_path)
     with pytest.raises(ValidationError, match="duplicate"):
-        apply_proposals(dup, make_set(dup), tmp_path / "new.dcp", allowed_licenses=ALLOWED)
+        go(dup, make_set(dup), tmp_path / "new.dcp")
     assert not (tmp_path / "new.dcp").exists()
+
+
+# ----------------------------------------------------------------------------- trust in the set
+def test_the_source_directory_is_required(tmp_path: Path) -> None:
+    _, ds = stored(tmp_path)
+    with pytest.raises(TypeError):
+        apply_proposals(  # type: ignore[call-arg]
+            ds,
+            make_set(ds),
+            tmp_path / "new.dcp",
+            allowed_licenses=ALLOWED,
+            allow_test_proposer=True,
+        )
+
+
+def test_a_set_that_never_went_through_review_import_is_refused(tmp_path: Path) -> None:
+    _, ds = stored(tmp_path)
+    forged = make_set(ds, parent_set_id=None)  # hand-written: accepted, with a valid digest
+    with pytest.raises(ValidationError, match="review import"):
+        run(tmp_path, ds, forged)
+    assert not (tmp_path / "new.dcp").exists()
+
+
+def reviewed_pair(ds: Dataset) -> tuple[ProposalSet, ProposalSet]:
+    fresh = make_set(ds, statuses=("pending", "pending", "pending"), parent_set_id=None)
+    done = fresh.derive([p.model_copy(update={"status": "accepted"}) for p in fresh.proposals[:1]]
+                        + list(fresh.proposals[1:]))  # fmt: skip
+    return fresh, done
+
+
+def test_a_review_that_matches_its_parent_is_applied_and_both_sets_travel(tmp_path: Path) -> None:
+    _, ds = stored(tmp_path)
+    fresh, done = reviewed_pair(ds)
+    out = tmp_path / "new.dcp"
+    go(ds, done, out, parent=fresh)
+    store = DatasetStore.open(out)
+    assert (
+        store.read_proposals(done.set_id) == done
+    )  # the provenance survives the source's deletion
+    assert store.read_proposals(fresh.set_id) == fresh
+
+
+def test_a_review_that_is_not_derived_from_the_given_parent_is_refused(tmp_path: Path) -> None:
+    _, ds = stored(tmp_path)
+    fresh, done = reviewed_pair(ds)
+    other = make_set(
+        ds, statuses=("pending", "pending", "pending"), parent_set_id=None, min_score=0.5
+    )
+    with pytest.raises(ValidationError, match="not a review of its parent"):
+        go(ds, done, tmp_path / "a.dcp", parent=other)
+    # a forged review: same parent id, but a proposal the parent never had
+    forged = ProposalSet.build(
+        **{**done.model_dump(exclude={"set_id", "proposals"}),
+           "proposals": [done.proposals[0].model_copy(update={"score": 0.5}), *done.proposals[1:]]}
+    )  # fmt: skip
+    with pytest.raises(ValidationError, match="not a review of its parent"):
+        go(ds, forged, tmp_path / "b.dcp", parent=fresh)
+
+
+def test_a_test_double_is_refused_unless_the_caller_allows_it(tmp_path: Path) -> None:
+    _, ds = stored(tmp_path)
+    with pytest.raises(ValidationError, match="test double"):
+        go(ds, make_set(ds), tmp_path / "a.dcp", allow_test_proposer=False)
+    go(ds, make_set(ds), tmp_path / "b.dcp", allow_test_proposer=True)
+    # a set that claims not to be a test double, from the proposer that is one, is still refused
+    claim = make_set(ds, test_only=False)
+    assert claim.proposer == "test_boxes"
+    with pytest.raises(ValidationError, match="test double"):
+        go(ds, claim, tmp_path / "c.dcp", allow_test_proposer=False)
+    flagged = make_set(ds, test_only=True)
+    with pytest.raises(ValidationError, match="test double"):
+        go(ds, flagged, tmp_path / "d.dcp", allow_test_proposer=False)
+
+
+def test_a_set_cannot_claim_the_identity_of_a_registered_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import types
+
+    from datacopilot.proposals import apply as apply_module
+
+    _, ds = stored(tmp_path)
+    with pytest.raises(ValidationError, match="pinned"):
+        go(ds, make_set(ds, model_id="grounding_dino"), tmp_path / "a.dcp")  # proposer test_boxes
+    # a third-party proposer that names a first-party model as its own
+    plugin = types.SimpleNamespace(spec=None, test_only=False)
+    monkeypatch.setattr(apply_module, "check_proposer", lambda name, allowed: plugin)
+    with pytest.raises(ValidationError, match="pinned"):
+        go(ds, make_set(ds, proposer="thirdparty", model_id="dinov2_base"), tmp_path / "b.dcp")
+    # and an honest third-party identity is fine
+    go(ds, make_set(ds, proposer="thirdparty", model_id="their_model"), tmp_path / "c.dcp")
+
+
+def test_a_set_whose_parent_is_missing_from_the_dataset_is_refused_by_the_use_case(
+    tmp_path: Path,
+) -> None:
+    from datacopilot.proposals import usecase
+    from datacopilot.settings import Settings
+
+    path, ds = stored(tmp_path)
+    _, done = reviewed_pair(ds)
+    DatasetStore.open(path).write_proposals(done)  # the parent was deleted (or never copied)
+    settings = Settings(allowed_licenses=ALLOWED, cache_dir=tmp_path / "cache")
+    with pytest.raises(ValidationError, match="not in the dataset"):
+        usecase.apply_set(path, done.set_id, tmp_path / "n.dcp", settings=settings,
+                          allow_test_proposer=True)  # fmt: skip

@@ -350,12 +350,17 @@ def test_an_alias_that_is_unusable_is_skipped_but_its_class_stays(tmp_path: Path
     assert ps.rejected["unusable_class_name"] == 1
 
 
-def test_two_classes_with_the_same_phrase_do_not_both_get_it(tmp_path: Path) -> None:
+def test_a_phrase_shared_by_two_classes_is_dropped_for_both(tmp_path: Path) -> None:
     ds = two_images(tmp_path)
     cats = [Category(id=1, name="cat"), Category(id=2, name="dog", aliases=("CAT",))]
     ds = dataset(ds.images, [], cats)
-    ps = run(ds, tmp_path, by_name(ds, {"b.png": [C((1, 1, 9, 9), "cat")]}))
-    assert [p.category_id for p in ps.proposals] == [1] and ps.rejected["ambiguous_class_name"] == 1
+    proposer = FakeProposer(
+        by_name(ds, {"b.png": [C((1, 1, 9, 9), "cat"), C((20, 20, 30, 30), "dog")]})
+    )
+    ps = propose(ds, proposer, proposer_name="fake", root=tmp_path)
+    assert proposer.calls[0]["phrases"] == ["dog"]  # neither class owns "cat": nobody is guessed
+    assert [p.prompt for p in ps.proposals] == ["dog"]
+    assert ps.rejected["ambiguous_class_name"] == 2 and ps.rejected["unknown_label"] == 1
 
 
 def test_a_dataset_without_a_usable_class_name_is_an_error(tmp_path: Path) -> None:
@@ -473,3 +478,128 @@ def test_the_image_table_is_not_modified(tmp_path: Path) -> None:
     before: tuple[Image, ...] = ds.images
     run(ds, tmp_path)
     assert ds.images == before
+
+
+# ----------------------------------------------------------------------------- real label shapes
+# Grounding DINO returns the words whose score passed the text threshold, so a box can carry
+# several class names or a piece of one (recorded from real runs on COCO128 photos).
+def label_run(tmp_path: Path, label: str, cats: list[Category] | None = None) -> ProposalSet:
+    ds = two_images(tmp_path)
+    if cats is not None:
+        ds = dataset(ds.images, [], cats)
+    return run(ds, tmp_path, by_name(ds, {"b.png": [C((5, 5, 30, 30), label)]}))
+
+
+@pytest.mark.parametrize(
+    "label", ["bicycle motorcycle", "bus truck", "car bus truck", "fork spoon", "cup bowl"]
+)
+def test_a_label_that_names_two_classes_is_ambiguous_and_dropped(
+    tmp_path: Path, label: str
+) -> None:
+    names = {w for w in label.split()}
+    cats = [Category(id=i + 1, name=n) for i, n in enumerate(sorted(names))]
+    ps = label_run(tmp_path, label, cats)
+    assert ps.proposals == () and ps.rejected == {"ambiguous_label": 1}
+
+
+@pytest.mark.parametrize("label", ["##s snowboard", "bench dining", "dining", "##s", "table", "x"])
+def test_a_label_with_a_fragment_of_another_phrase_is_unknown(tmp_path: Path, label: str) -> None:
+    cats = [Category(id=1, name="snowboard"), Category(id=2, name="bench"),
+            Category(id=3, name="dining table"), Category(id=4, name="skis")]  # fmt: skip
+    ps = label_run(tmp_path, label, cats)
+    assert ps.proposals == () and ps.rejected == {"unknown_label": 1}
+
+
+def test_a_label_is_matched_with_the_spacing_the_decoder_gives_around_punctuation(
+    tmp_path: Path,
+) -> None:
+    cats = [
+        Category(id=1, name="t-shirt"),
+        Category(id=2, name="women's hat"),
+        Category(id=3, name="cat"),
+    ]
+    for label, expected in (
+        ("t - shirt", 1),
+        ("T-Shirt", 1),
+        ("women ' s hat", 2),
+        ("women's hat", 2),
+    ):
+        ps = label_run(tmp_path, label, cats)
+        assert [p.category_id for p in ps.proposals] == [expected], label
+
+
+def test_the_longest_phrase_wins_over_a_word_it_contains(tmp_path: Path) -> None:
+    cats = [Category(id=1, name="dog"), Category(id=2, name="hot dog")]
+    ps = label_run(tmp_path, "hot dog", cats)
+    assert [p.category_id for p in ps.proposals] == [2]
+    ps = label_run(tmp_path, "dog", cats)
+    assert [p.category_id for p in ps.proposals] == [1]
+
+
+def test_a_hostile_label_is_cheap_to_reject(tmp_path: Path) -> None:
+    import time
+
+    started = time.perf_counter()
+    ps = label_run(tmp_path, "- " * 50_000 + "cat")
+    assert ps.proposals == () and ps.rejected == {"unknown_label": 1}
+    assert time.perf_counter() - started < 2.0
+
+
+# ----------------------------------------------------------------------------- stored form
+def test_scores_are_stored_with_four_decimals_so_a_rerun_reproduces_the_set(tmp_path: Path) -> None:
+    ds = two_images(tmp_path)
+    a = run(ds, tmp_path, by_name(ds, {"b.png": [C((1, 1, 9, 9), "cat", 0.9123456789)]}))
+    b = run(ds, tmp_path, by_name(ds, {"b.png": [C((1, 1, 9, 9), "cat", 0.9123456001)]}))
+    assert a.proposals[0].score == 0.9123 and a.set_id == b.set_id
+
+
+def test_a_tiny_score_does_not_round_to_zero(tmp_path: Path) -> None:
+    ds = two_images(tmp_path)
+    ps = run(ds, tmp_path, by_name(ds, {"b.png": [C((1, 1, 9, 9), "cat", 0.00001)]}),
+             min_score=0.00001)  # fmt: skip
+    assert ps.proposals[0].score == 0.0001
+
+
+def test_the_set_records_whether_the_proposer_is_a_test_double(tmp_path: Path) -> None:
+    ds = two_images(tmp_path)
+    assert run(ds, tmp_path).test_only is False
+    double = FakeProposer()
+    double.test_only = True  # type: ignore[attr-defined]
+    assert propose(ds, double, proposer_name="fake", root=tmp_path).test_only is True
+
+
+# ------------------------------------------------------------------ options before the model
+def _classes(tmp_path: Path, name: str) -> Dataset:
+    ds = two_images(tmp_path)
+    return dataset(
+        ds.images, [], [Category(id=1, name=name, aliases=("cat",)), Category(id=2, name="dog")]
+    )
+
+
+@pytest.mark.parametrize("name", ["a" * 70, "c\x01t", "c\u202et", "line\nbreak"])
+def test_a_threshold_key_the_set_cannot_hold_fails_before_the_model_runs(
+    tmp_path: Path, name: str
+) -> None:
+    ds = _classes(tmp_path, name)
+    proposer = FakeProposer()
+    with pytest.raises(run_module.OptionError, match="class name"):
+        propose(ds, proposer, proposer_name="fake", root=tmp_path, class_min_score={name: 0.5})
+    assert proposer.calls == []
+
+
+def test_a_non_ascii_class_name_works_end_to_end_including_the_stored_file(tmp_path: Path) -> None:
+    from datacopilot.store import DatasetStore
+
+    ds = _classes(tmp_path, "猫")
+    images = ds.images
+    store_path = tmp_path / "ds.dcp"
+    DatasetStore.create(store_path, images, [], ds.categories, name="d", task="detection")
+    ps = propose(ds, FakeProposer(by_name(ds, {"b.png": [C((1, 1, 9, 9), "cat")]})),
+                 proposer_name="fake", root=tmp_path, class_min_score={"猫": 0.5})  # fmt: skip
+    store = DatasetStore.open(store_path)
+    store.write_proposals(ps)  # used to crash with an ascii encoding error after the whole run
+    assert store.read_proposals(ps.set_id) == ps and ps.class_min_score == {"猫": 0.5}
+
+
+def test_option_errors_are_value_errors_for_library_callers() -> None:
+    assert issubclass(run_module.OptionError, ValueError)

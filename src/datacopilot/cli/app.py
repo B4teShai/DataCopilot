@@ -690,6 +690,7 @@ def propose(
     fails, a missing extra, or an unreadable or non-detection dataset; 2 bad option.
     """
     from datacopilot.proposals import usecase
+    from datacopilot.proposals.run import OptionError
 
     settings = load_settings()
     names = None if classes is None else _split_option(classes, "--classes")
@@ -704,7 +705,7 @@ def propose(
             class_min_score=thresholds,
             time_budget_seconds=time_budget,
         )
-    except ValueError as exc:
+    except OptionError as exc:  # only what was wrong before the model ran is a usage error
         raise typer.BadParameter(str(exc), param_hint="--proposer/--classes/--min-score") from None
     run_id = current_request_id()
     if test_only:
@@ -775,9 +776,9 @@ def review_import(
     the proposal layer is read; edits to the dataset's own boxes are ignored and counted. A decision
     file that names an unknown, repeated or foreign proposal, changes a class, uses an invalid
     decision or moves an accepted box outside its image is refused as a whole. Prints
-    `accepted=N rejected=N pending=N edited=N edited_pending=N ignored=N set=ID`. Exit codes: 0
-    success; 1 unreadable dataset or file, a refused decision file or no decision in it; 2 bad
-    option.
+    `accepted=N rejected=N pending=N edited=N edited_pending=N ignored=N skipped=N set=ID`. Exit
+    codes: 0 success; 1 unreadable dataset or file, a refused decision file or no decision in it;
+    2 bad option.
     """
     from datacopilot.proposals import usecase
 
@@ -790,12 +791,18 @@ def review_import(
     typer.echo(
         f"accepted={summary.accepted} rejected={summary.rejected} pending={summary.pending} "
         f"edited={summary.edited} edited_pending={summary.edited_pending} "
-        f"ignored={summary.ignored_boxes} set={reviewed.set_id}"
+        f"ignored={summary.ignored_boxes} skipped={summary.skipped_shapes} set={reviewed.set_id}"
     )
     if summary.edited_pending:
         typer.echo(
             f"note: {summary.edited_pending} proposal box(es) were moved but have no decision; "
             "they stay pending",
+            err=True,
+        )
+    if summary.skipped_shapes:
+        typer.echo(
+            f"note: {summary.skipped_shapes} shape(s) of a kind that is not read (polygons, "
+            "tracks, ...) were skipped",
             err=True,
         )
     if summary.ignored_boxes:
@@ -820,10 +827,20 @@ def apply(
             help="Also apply a set from a run that did not reach every image.",
         ),
     ] = False,
+    allow_test_proposer: Annotated[
+        bool,
+        typer.Option(
+            "--allow-test-proposer",
+            help="Also apply a set made by a test double such as test_boxes (its boxes say "
+            "nothing about the pictures).",
+        ),
+    ] = False,
 ) -> None:
     """Write the accepted proposals as a NEW dataset; the original is not changed.
 
-    Only accepted proposals are applied (pending and rejected ones never are). The new dataset
+    Only accepted proposals of a REVIEWED set (from `review import`) are applied (pending and
+    rejected ones never are); the reviewed set and the one it came from are copied into the new
+    dataset. The new dataset
     records the old version in its lineage, and each new box has provenance `proposal_accepted`
     with the proposal and set ids. Refused, writing nothing: a set made for another dataset version
     or by a model that is not the pinned one or not allowed (DATACOPILOT_ALLOWED_LICENSES), a
@@ -837,7 +854,12 @@ def apply(
     if output.suffix != ".dcp":
         raise typer.BadParameter("must end with .dcp", param_hint="--output")
     manifest = usecase.apply_set(
-        dataset, proposals, output, settings=load_settings(), allow_incomplete=allow_incomplete
+        dataset,
+        proposals,
+        output,
+        settings=load_settings(),
+        allow_incomplete=allow_incomplete,
+        allow_test_proposer=allow_test_proposer,
     )
     typer.echo(manifest.version)
 

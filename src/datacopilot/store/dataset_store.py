@@ -295,9 +295,15 @@ class DatasetStore:
                 shutil.copy2(tmp / file, snapshot / file)
             _fsync_dir(snapshot)
             _fsync_dir(tmp / "versions")
-            if root.exists():
-                raise StoreError(f"{root} already exists; refusing to overwrite")
-            os.rename(tmp, root)
+            try:
+                root.mkdir()  # exclusive: whatever appeared since the first check is never replaced
+            except FileExistsError:
+                raise StoreError(f"{root} already exists; refusing to overwrite") from None
+            try:
+                os.rename(tmp, root)  # over the empty directory we just made
+            except OSError:  # platforms that cannot rename over a directory
+                root.rmdir()
+                os.rename(tmp, root)
             _fsync_dir(root.parent)
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -489,7 +495,9 @@ class DatasetStore:
         target.parent.mkdir(exist_ok=True)
         staged = _tmp_name(target)
         try:
-            staged.write_text(ps.model_dump_json() + "\n", encoding="ascii")
+            # ASCII only (a threshold key may be any script): escapes, not bytes
+            text = json.dumps(ps.model_dump(mode="json"), ensure_ascii=True, separators=(",", ":"))
+            staged.write_text(text + "\n", encoding="ascii")
             _fsync_file(staged)
             os.replace(staged, target)
             _fsync_dir(target.parent)

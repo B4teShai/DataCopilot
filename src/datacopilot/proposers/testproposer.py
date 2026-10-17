@@ -48,6 +48,8 @@ class TestBoxesProposer:
 
 class TestBoxesPlugin:
     __test__ = False
+    test_only = True
+    """Known without creating the proposer, so ``apply`` can tell a test double from a model."""
     spec = PluginSpec(
         name="test_boxes",
         kind="proposer",

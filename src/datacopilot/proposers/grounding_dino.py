@@ -28,6 +28,7 @@ from datacopilot.core.errors import ModelError
 from datacopilot.core.schema import PluginSpec
 from datacopilot.embed import imaging
 from datacopilot.embed.backends import fetch_verified
+from datacopilot.embed.protocol import ImageDecodeError
 from datacopilot.logging import get_logger
 from datacopilot.models import registry as models
 from datacopilot.models.registry import ModelCard
@@ -44,7 +45,9 @@ MAX_TEXT_TOKENS = 240
 """Longest prompt, in tokens including the two special ones (the model's own limit is 256)."""
 TEXT_THRESHOLD = 0.25
 """Share a word's score must reach to be named as the label of a box (the library default); the
-box threshold is the ``min_score`` of the call."""
+box threshold is the ``min_score`` of the call. A ``min_score`` below it lowers it too (the
+library drops a box whose label words are below the text threshold, so a fixed 0.25 made every
+lower ``min_score`` identical to 0.25)."""
 _INSTALL = 'pip install "datacopilot[vlm]"'
 
 
@@ -62,6 +65,7 @@ class GroundingDinoProposer:
         self._processor: Any = None
         self._lib: Any = None
         self._device = "cpu"
+        self._chunk_cache: dict[tuple[str, ...], list[list[str]]] = {}
 
     def _load(self) -> None:
         card, log = self._card, get_logger(__name__)
@@ -99,6 +103,9 @@ class GroundingDinoProposer:
 
     def _chunks(self, phrases: Sequence[str]) -> list[list[str]]:
         """Greedy groups of phrases whose prompt stays within :data:`MAX_TEXT_TOKENS`."""
+        cached = self._chunk_cache.get(tuple(phrases))
+        if cached is not None:  # the same phrases are asked about in every image of a run
+            return cached
         tokenizer = self._processor.tokenizer
         chunks: list[list[str]] = [[]]
         for phrase in phrases:
@@ -107,6 +114,7 @@ class GroundingDinoProposer:
                 chunks.append([phrase])
             else:
                 chunks[-1] = trial
+        self._chunk_cache[tuple(phrases)] = chunks
         return chunks
 
     def _pass(self, pil: Any, phrases: list[str], size: tuple[int, int], min_score: float) -> Any:
@@ -119,7 +127,7 @@ class GroundingDinoProposer:
             outputs,
             inputs.input_ids,
             threshold=min_score,
-            text_threshold=TEXT_THRESHOLD,
+            text_threshold=min(TEXT_THRESHOLD, min_score),
             target_sizes=[(size[1], size[0])],
         )
 
@@ -141,6 +149,8 @@ class GroundingDinoProposer:
         if not phrases:
             return []
         rgb = imaging.decode_rgb(image, 0, max_pixels=self._max_pixels)
+        if (rgb.shape[1], rgb.shape[0]) != tuple(size):  # recorded and decoded size must agree
+            raise ImageDecodeError(0, "size_mismatch")
         if self._model is None:
             self._load()
         from PIL import Image

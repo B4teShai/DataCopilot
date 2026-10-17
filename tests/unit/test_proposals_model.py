@@ -44,6 +44,7 @@ def build(proposals: list[Proposal] | None = None, **kw: Any) -> ProposalSet:
         "images_done": 2,
         "incomplete_reason": None,
         "rejected": {},
+        "test_only": False,
         "proposals": proposals if proposals is not None else [proposal()],
     }
     return ProposalSet.build(**{**base, **kw})
@@ -307,3 +308,13 @@ def test_the_binding_error_lists_a_few_ids_and_counts_the_rest() -> None:
     many = [proposal(f"{i:016x}", image_id=IMG_B) for i in range(9)]
     with pytest.raises(ValidationError, match="and 4 more"):
         validate_against(build(many), _dataset())
+
+
+def test_derive_validates_the_reviewed_proposals_again() -> None:
+    parent = build()
+    broken = parent.proposals[0].model_copy(update={"bbox_xyxy_abs": (9.0, 9.0, 3.0, 3.0)})
+    with pytest.raises(ValueError, match="x_min"):
+        parent.derive([broken])  # model_copy does not validate; derive must
+    broken = parent.proposals[0].model_copy(update={"status": "pending", "edited": True})
+    with pytest.raises(ValueError, match="accepted"):
+        parent.derive([broken])

@@ -299,6 +299,7 @@ def apply(
     out: str | Path,
     *,
     allow_incomplete: bool = False,
+    allow_test_proposer: bool = False,
 ) -> DatasetManifest:
     """Write the accepted proposals of a reviewed set as a NEW dataset; the original is untouched.
 
@@ -310,6 +311,7 @@ def apply(
         proposals: the set id (``ProposalSet.set_id`` of a reviewed set).
         out: a new ``.dcp`` path outside ``dataset``.
         allow_incomplete: also apply a set from a run that did not reach every image.
+        allow_test_proposer: also apply a set made by a test double such as ``test_boxes``.
 
     Returns:
         The new dataset's manifest.
@@ -329,4 +331,5 @@ def apply(
             Path(out),
             settings=settings,
             allow_incomplete=allow_incomplete,
+            allow_test_proposer=allow_test_proposer,
         )

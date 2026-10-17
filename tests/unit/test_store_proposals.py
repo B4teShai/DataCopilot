@@ -42,6 +42,7 @@ def make_set(tables: Tables, **kw: object) -> ProposalSet:
         "images_done": 3,
         "incomplete_reason": None,
         "rejected": {},
+        "test_only": False,
         "proposals": [proposal],
     }
     return ProposalSet.build(**{**fields, **kw})  # type: ignore[arg-type]

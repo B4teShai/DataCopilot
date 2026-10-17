@@ -47,6 +47,11 @@ SUFFIX = "__proposed"
 EDIT_TOLERANCE_PX = 0.01
 """A box that moved by at most this many pixels in every coordinate was not edited (annotation
 tools round coordinates)."""
+MAX_EXTRA_BOXES = 10_000
+"""Boxes a decisions file may hold beyond the dataset's own and the set's: a reviewer may draw some
+in the human layer (they are ignored); a file with far more is refused before it is walked."""
+MIN_EDITED_SIDE_PX = 2.0
+"""An edited box is held to the size a proposal must have (the same as ``propose``)."""
 _ID = re.compile(r"^[0-9a-f]{16}$")
 _DECISIONS = {"": None, "pending": None, "accepted": "accepted", "rejected": "rejected"}
 
@@ -54,8 +59,8 @@ _DECISIONS = {"": None, "pending": None, "accepted": "accepted", "rejected": "re
 @dataclass(frozen=True)
 class ReviewSummary:
     """What a review import found. The first four count the statuses of the new set; the others
-    describe the file: proposals whose box was moved but that were not decided, and boxes of the
-    human layer that were left alone."""
+    describe the file: proposals whose box was moved but that were not decided, boxes of the
+    human layer that were left alone, and shapes that are not read (polygons, tracks...)."""
 
     accepted: int
     rejected: int
@@ -63,6 +68,7 @@ class ReviewSummary:
     edited: int
     edited_pending: int
     ignored_boxes: int
+    skipped_shapes: int
 
 
 def export_review(ds: Dataset, ps: ProposalSet, out: Path) -> ConversionReport:
@@ -135,6 +141,31 @@ def import_review(
     """
     validate_against(ps, ds)
     result = registry.get_reader("cvat_xml").read(Path(directory))
+    skipped = result.skipped
+    if skipped.get("images.file_missing", 0) or skipped.get("annotations.of_missing_image", 0):
+        raise ValidationError(
+            "the decisions file lists images that are not in its folder: the images must travel "
+            "with the review folder (export wrote them to images/)"
+        )
+    if skipped.get("annotations.unsupported.rotated_box", 0):
+        raise ValidationError(
+            "the decisions file holds rotated boxes, which are not read: a proposal box that was "
+            "rotated would be silently lost; undo the rotation"
+        )
+    shapes = skipped.get("dataset.unsupported_element", 0) + sum(
+        n
+        for key, n in skipped.items()
+        if key.startswith("annotations.unsupported.") and not key.endswith("rotated_box")
+    )
+    if len(result.annotations) > len(ds.annotations) + len(ps.proposals) + MAX_EXTRA_BOXES:
+        raise ValidationError(
+            "the decisions file holds more boxes than the dataset and set explain"
+        )
+    names = [str(i.source.get("file_name", "")) for i in result.images]
+    if len(set(names)) != len(names):
+        raise ValidationError("the decisions file lists two images with the same name")
+    if len(result.images) > len(ds.images):
+        raise ValidationError("the decisions file holds more images than the dataset")
     label = {c.id: c.name for c in result.categories}
     own = {c.id: c.name for c in ds.categories}
     sizes = {i.image_id: (i.width, i.height) for i in ds.images}
@@ -179,15 +210,22 @@ def import_review(
             width, height = sizes[proposal.image_id]
             if moved and (box[2] > width or box[3] > height):
                 raise ValidationError(f"proposal {pid} was edited to a box outside its image")
-            decided[pid] = proposal.model_copy(
-                update={
+            if moved and (
+                box[2] - box[0] < MIN_EDITED_SIDE_PX or box[3] - box[1] < MIN_EDITED_SIDE_PX
+            ):
+                raise ValidationError(f"proposal {pid} was edited to a box that is too small")
+            decided[pid] = Proposal.model_validate(
+                {
+                    **proposal.model_dump(),
                     "status": "accepted",
                     "edited": proposal.edited or moved,
                     "bbox_xyxy_abs": box if moved else proposal.bbox_xyxy_abs,
                 }
             )
         elif decision == "rejected":
-            decided[pid] = proposal.model_copy(update={"status": "rejected", "edited": False})
+            decided[pid] = Proposal.model_validate(
+                {**proposal.model_dump(), "status": "rejected", "edited": False}
+            )
         elif moved:
             edited_pending += 1
     if not decided:
@@ -201,6 +239,7 @@ def import_review(
         edited=sum(p.edited for p in reviewed.proposals),
         edited_pending=edited_pending,
         ignored_boxes=ignored,
+        skipped_shapes=shapes,
     )
     get_logger(__name__).info(
         "review_imported",
@@ -211,5 +250,6 @@ def import_review(
         pending=summary.pending,
         edited=summary.edited,
         ignored_boxes=ignored,
+        skipped_shapes=shapes,
     )
     return reviewed, summary

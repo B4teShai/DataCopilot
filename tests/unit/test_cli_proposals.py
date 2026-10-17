@@ -274,7 +274,11 @@ def test_propose_review_apply_end_to_end(
     assert all(after[k] == before[k] for k in before)  # nothing that existed was touched
 
     new = tmp_path / "new.dcp"
-    assert run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", new) == 0
+    assert run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", new) == 1
+    assert "test double" in "".join(messages(capsys.readouterr().err))
+    assert not new.exists()
+    assert run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", new,
+               "--allow-test-proposer") == 0  # fmt: skip
     version = capsys.readouterr().out.strip()
     child = DatasetStore.open(new)
     assert child.manifest().version == version and child.manifest().lineage == (parent.version,)
@@ -291,17 +295,73 @@ def test_propose_review_apply_end_to_end(
     assert run(monkeypatch, "export", new, "--format", "yolo", "-o", tmp_path / "yolo") == 0
 
 
-def test_apply_refuses_what_nobody_accepted(
+def test_apply_refuses_a_set_that_was_never_reviewed(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     dcp: Path,
     tmp_path: Path,
 ) -> None:
     set_id = set_id_of(propose(monkeypatch, capsys, dcp)[1])
+    fresh = DatasetStore.open(dcp).read_proposals(set_id)
+    forged = ProposalSet.build(  # hand-written: everything accepted, a valid digest, no review
+        **{
+            **fresh.model_dump(exclude={"set_id", "proposals"}),
+            "proposals": [p.model_copy(update={"status": "accepted"}) for p in fresh.proposals],
+        }
+    )
+    DatasetStore.open(dcp).write_proposals(forged)
     capsys.readouterr()
-    code = run(monkeypatch, "apply", dcp, "--proposals", set_id, "-o", tmp_path / "new.dcp")
+    code = run(monkeypatch, "apply", dcp, "--proposals", forged.set_id, "-o", tmp_path / "new.dcp",
+               "--allow-test-proposer")  # fmt: skip
+    err = capsys.readouterr().err
+    assert code == 1 and "review import" in err and not (tmp_path / "new.dcp").exists()
+
+
+def test_apply_refuses_a_reviewed_set_with_nothing_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dcp: Path,
+    tmp_path: Path,
+) -> None:
+    set_id = set_id_of(propose(monkeypatch, capsys, dcp)[1])
+    review_dir = tmp_path / "review"
+    assert run(monkeypatch, "review", "export", dcp, "--proposals", set_id, "--to", "cvat",
+               "-o", review_dir) == 0  # fmt: skip
+    ids = [p.proposal_id for p in DatasetStore.open(dcp).read_proposals(set_id).proposals]
+    decide(review_dir, {pid: "rejected" for pid in ids})
+    capsys.readouterr()
+    assert run(monkeypatch, "review", "import", dcp, review_dir, "--proposals", set_id,
+               "--from", "cvat") == 0  # fmt: skip
+    reviewed_id = set_id_of(capsys.readouterr().out)
+    code = run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", tmp_path / "new.dcp",
+               "--allow-test-proposer")  # fmt: skip
     err = capsys.readouterr().err
     assert code == 1 and "no accepted" in err and not (tmp_path / "new.dcp").exists()
+
+
+def test_a_value_error_after_the_model_ran_is_a_failure_not_a_bad_option(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dcp: Path,
+) -> None:
+    from datacopilot.core.proposals import ProposalSet
+
+    def late(**_: object) -> None:
+        raise ValueError("something broke once the run was over")
+
+    monkeypatch.setattr(ProposalSet, "build", staticmethod(late))
+    capsys.readouterr()
+    code = run(monkeypatch, "propose", dcp, "--proposer", "test_boxes")
+    assert code == 1  # exit 2 would tell the user to fix an option they got right
+
+
+def test_the_output_directory_is_created_exclusively(tmp_path: Path) -> None:
+    from datacopilot.store import dataset_store
+
+    assert hasattr(dataset_store, "DatasetStore")  # create() uses mkdir, not exists-then-rename
+    import inspect
+
+    assert "root.mkdir()" in inspect.getsource(dataset_store.DatasetStore.create)
 
 
 def test_apply_refuses_an_incomplete_set_unless_told_to(
@@ -330,10 +390,11 @@ def test_apply_refuses_an_incomplete_set_unless_told_to(
     assert run(monkeypatch, "review", "import", dcp, review_dir, "--proposals", partial_id,
                "--from", "cvat") == 0  # fmt: skip
     reviewed_id = set_id_of(capsys.readouterr().out)
-    assert run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", tmp_path / "n.dcp") == 1
+    assert run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", tmp_path / "n.dcp",
+               "--allow-test-proposer") == 1  # fmt: skip
     assert "incomplete" in capsys.readouterr().err and not (tmp_path / "n.dcp").exists()
     assert run(monkeypatch, "apply", dcp, "--proposals", reviewed_id, "-o", tmp_path / "n.dcp",
-               "--allow-incomplete") == 0  # fmt: skip
+               "--allow-incomplete", "--allow-test-proposer") == 0  # fmt: skip
     assert (tmp_path / "n.dcp").is_dir()
 
 

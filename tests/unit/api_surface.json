@@ -132,6 +132,7 @@
   "proposer": "<class 'str'>=required",
   "rejected": "dict[str, typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0)])]]=required",
   "set_id": "<class 'str'>=required",
+  "test_only": "<class 'bool'>=required",
   "weights": "dict[str, str]=required"
  },
  "SettingsError": [
@@ -156,7 +157,7 @@
   "object"
  ],
  "__version__": "str",
- "apply": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:proposals: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:allow_incomplete: bool=False) -> DatasetManifest",
+ "apply": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:proposals: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:allow_incomplete: bool=False, KEYWORD_ONLY:allow_test_proposer: bool=False) -> DatasetManifest",
  "audit": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:checks: Sequence[str] | Literal['all']='all', KEYWORD_ONLY:fail_on: Sequence[str]=('critical',), KEYWORD_ONLY:embedder: str | None=None, KEYWORD_ONLY:embed_batch: int | None=None, KEYWORD_ONLY:similarity_threshold: float | None=None, KEYWORD_ONLY:allow_test_embedder: bool=False, KEYWORD_ONLY:root: str | Path | None=None, KEYWORD_ONLY:workers: int | None=None, KEYWORD_ONLY:require_local_images: bool=False, KEYWORD_ONLY:include_model_annotations: bool=False) -> AuditRun",
  "export": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:format: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:strict: bool=False) -> ConversionReport",
  "load": "(POSITIONAL_OR_KEYWORD:path: str | Path, POSITIONAL_OR_KEYWORD:format: str | None=None, KEYWORD_ONLY:group_by: str | None=None, KEYWORD_ONLY:strict: bool=False) -> Dataset",

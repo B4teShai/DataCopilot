@@ -72,7 +72,7 @@ def reviewed(dcp: Path, ps: ProposalSet) -> ProposalSet:
 def test_apply_writes_a_new_dataset_and_returns_its_manifest(dcp: Path, tmp_path: Path) -> None:
     ps = dc.propose(dcp, "test_boxes")
     done = reviewed(dcp, ps)
-    manifest = dc.apply(dcp, done.set_id, tmp_path / "new.dcp")
+    manifest = dc.apply(dcp, done.set_id, tmp_path / "new.dcp", allow_test_proposer=True)
     parent = DatasetStore.open(dcp).manifest()
     assert manifest.lineage == (parent.version,)
     assert manifest.annotation_count == parent.annotation_count + len(ps.proposals)
@@ -82,7 +82,7 @@ def test_apply_writes_a_new_dataset_and_returns_its_manifest(dcp: Path, tmp_path
 
 def test_apply_refuses_an_unreviewed_set(dcp: Path, tmp_path: Path) -> None:
     ps = dc.propose(dcp, "test_boxes")
-    with pytest.raises(ValidationError, match="no accepted"):
+    with pytest.raises(ValidationError, match="review import"):
         dc.apply(dcp, ps.set_id, tmp_path / "new.dcp")
     assert not (tmp_path / "new.dcp").exists()
 
@@ -100,5 +100,12 @@ def test_the_functions_do_not_write_to_standard_output(
     dcp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     done = reviewed(dcp, dc.propose(dcp, "test_boxes"))
-    dc.apply(dcp, done.set_id, tmp_path / "n.dcp")
+    dc.apply(dcp, done.set_id, tmp_path / "n.dcp", allow_test_proposer=True)
     assert capsys.readouterr().out == ""
+
+
+def test_apply_refuses_a_test_double_unless_asked(dcp: Path, tmp_path: Path) -> None:
+    done = reviewed(dcp, dc.propose(dcp, "test_boxes"))
+    with pytest.raises(ValidationError, match="test double"):
+        dc.apply(dcp, done.set_id, tmp_path / "new.dcp")
+    assert not (tmp_path / "new.dcp").exists()

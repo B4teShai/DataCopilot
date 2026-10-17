@@ -32,13 +32,14 @@ ran and failed (unreadable or invalid input, a gate that matched, a lossy `--str
 
 Write the accepted proposals as a NEW dataset; the original is not changed.
 
-Only accepted proposals are applied (pending and rejected ones never are). The new dataset records
-the old version in its lineage, and each new box has provenance `proposal_accepted` with the
-proposal and set ids. Refused, writing nothing: a set made for another dataset version or by a model
-that is not the pinned one or not allowed (DATACOPILOT_ALLOWED_LICENSES), a tampered set, an
-incomplete run (without --allow-incomplete), a set with nothing accepted, an output that exists or
-lies inside the dataset. Prints the new version. Exit codes: 0 success; 1 refused or unreadable; 2
-bad option.
+Only accepted proposals of a REVIEWED set (from `review import`) are applied (pending and rejected
+ones never are); the reviewed set and the one it came from are copied into the new dataset. The new
+dataset records the old version in its lineage, and each new box has provenance `proposal_accepted`
+with the proposal and set ids. Refused, writing nothing: a set made for another dataset version or
+by a model that is not the pinned one or not allowed (DATACOPILOT_ALLOWED_LICENSES), a tampered set,
+an incomplete run (without --allow-incomplete), a set with nothing accepted, an output that exists
+or lies inside the dataset. Prints the new version. Exit codes: 0 success; 1 refused or unreadable;
+2 bad option.
 
 ```text
 datacopilot apply [OPTIONS] DATASET
@@ -53,6 +54,7 @@ datacopilot apply [OPTIONS] DATASET
 | `--proposals` (required) | `TEXT` |  | Reviewed proposal set id (from `review import`). |
 | `--output` / `-o` (required) | `PATH` |  | New dataset directory (*.dcp). |
 | `--allow-incomplete` |  | off | Also apply a set from a run that did not reach every image. |
+| `--allow-test-proposer` |  | off | Also apply a set made by a test double such as test_boxes (its boxes say nothing about the pictures). |
 
 ## datacopilot audit
 
@@ -256,8 +258,8 @@ The original set is not changed: a new set names it as its parent, and its id is
 proposal layer is read; edits to the dataset's own boxes are ignored and counted. A decision file
 that names an unknown, repeated or foreign proposal, changes a class, uses an invalid decision or
 moves an accepted box outside its image is refused as a whole. Prints `accepted=N rejected=N
-pending=N edited=N edited_pending=N ignored=N set=ID`. Exit codes: 0 success; 1 unreadable dataset
-or file, a refused decision file or no decision in it; 2 bad option.
+pending=N edited=N edited_pending=N ignored=N skipped=N set=ID`. Exit codes: 0 success; 1 unreadable
+dataset or file, a refused decision file or no decision in it; 2 bad option.
 
 ```text
 datacopilot review import [OPTIONS] DATASET DIRECTORY
