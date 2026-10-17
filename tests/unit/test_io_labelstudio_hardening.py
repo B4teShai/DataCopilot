@@ -16,6 +16,7 @@ from datacopilot import convert
 from datacopilot.cli import app as cli
 from datacopilot.core.errors import ConversionLossError
 from datacopilot.core.schema import Annotation, Category, Image
+from datacopilot.io.files import image_id as real_id
 from datacopilot.io.labelstudio import plugin
 from datacopilot.store import DatasetStore
 
@@ -201,7 +202,9 @@ def test_a_category_no_row_uses_is_counted_and_ids_are_ranked_among_the_used(
     tmp_path: Path,
 ) -> None:
     synth.write_png(tmp_path / "i.png", 8, 8, 1)
-    image = Image(image_id=f"{1:016x}", file_path=str(tmp_path / "i.png"), width=8, height=8)
+    image = Image(
+        image_id=real_id(tmp_path / "i.png"), file_path=str(tmp_path / "i.png"), width=8, height=8
+    )
     ann = Annotation(ann_id="a", image_id=image.image_id, category_id=1, kind="bbox",
                      bbox_xyxy_abs=(1.0, 1.0, 4.0, 4.0))  # fmt: skip
     cats = [Category(id=0, name="bird"), Category(id=1, name="cat"), Category(id=2, name="dog")]
@@ -308,7 +311,7 @@ def test_personal_data_in_a_realistic_export_never_reaches_a_stored_or_written_f
     assert source["annotation"] == {"id": 5, "lead_time": 3.5, "ground_truth": False,
                                     "was_cancelled": False}  # fmt: skip
     assert source["prediction"] == {"id": 9, "model_version": "v2", "score": 0.9}
-    convert.export(ds, "label_studio", tmp_path / "work" / "out")
+    convert.export(ds, "label_studio", tmp_path / "work" / "out", allow_external_images=True)
     dc.audit(ds, fail_on=())  # logs and reports are produced from the same rows
     from datacopilot.audit.context import CheckContext
     from datacopilot.audit.engine import run_audit

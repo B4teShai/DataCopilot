@@ -89,7 +89,7 @@ def build(
                 )
             )
     cats = [Category(id=i + 1, name=name) for i, name in enumerate(CLASSES)]
-    return dataset(images, anns, cats, validate=validate)
+    return dataset(images, anns, cats, validate=validate, root=root)
 
 
 def dataset(
@@ -98,6 +98,7 @@ def dataset(
     cats: Sequence[Category],
     *,
     validate: bool = True,
+    root: Path | None = None,
 ) -> Dataset:
     if validate:
         validate_tables(images, anns, cats, task="detection")
@@ -111,4 +112,4 @@ def dataset(
         annotation_count=len(anns),
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
-    return Dataset(manifest, tuple(images), tuple(anns))
+    return Dataset(manifest, tuple(images), tuple(anns), root)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 import structlog
@@ -113,7 +115,9 @@ def dataset_from(
         annotation_count=len(annotations),
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
-    return Dataset(manifest, tuple(images), tuple(annotations))
+    paths = [i.file_path for i in images if os.path.isabs(i.file_path)]
+    root = Path(os.path.commonpath(paths)).parent if paths else None  # where the pictures live
+    return Dataset(manifest, tuple(images), tuple(annotations), root)
 
 
 def table_rows(

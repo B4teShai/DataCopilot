@@ -32,6 +32,7 @@ from hypothesis import strategies as st
 from datacopilot import convert
 from datacopilot.core.errors import DataCopilotError
 from datacopilot.core.schema import Annotation, Category, Image
+from datacopilot.io.files import image_id as real_id
 from datacopilot.store import DatasetStore
 
 FORMATS = ("cvat_xml", "label_studio")
@@ -357,7 +358,7 @@ def test_hostile_rows_from_another_format_are_written_faithfully_or_counted(
 ) -> None:
     synth.write_png(tmp_path / "i.png", W, H, 1)
     image = Image(
-        image_id=f"{1:016x}",
+        image_id=real_id(tmp_path / "i.png"),
         file_path=str(tmp_path / "i.png"),
         width=W,
         height=H,

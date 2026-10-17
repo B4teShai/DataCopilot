@@ -141,6 +141,10 @@ datacopilot embed [OPTIONS] DATASET
 
 Write a dataset.dcp in another format and print the output directory.
 
+Every image is verified before it is copied: it must lie inside the directory that holds the dataset
+(unless --allow-external-images), not be a symlink to elsewhere and match its image_id; otherwise
+nothing is exported.
+
 Exit codes: 0 success; 1 unreadable dataset, unknown format, non-empty output, or --strict with
 dropped fields (nothing is written); 2 bad option or configuration.
 
@@ -157,6 +161,7 @@ datacopilot export [OPTIONS] DATASET
 | `--format` / `-f` (required) | `TEXT` |  | Format name; see `datacopilot formats`. |
 | `--output` / `-o` (required) | `PATH` |  | Empty or new output directory. |
 | `--strict` |  | off | Fail if any field cannot be carried to the format. |
+| `--allow-external-images` |  | off | Also copy images whose real path is outside the dataset's parent directory (each must still match its image_id). Do not use on datasets you do not trust. |
 
 ## datacopilot formats
 

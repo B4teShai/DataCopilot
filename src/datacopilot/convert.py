@@ -7,6 +7,7 @@ skipped column, ``conversion_loss``.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
+from datacopilot.audit.paths import resolve_image_path
 from datacopilot.core.errors import FormatError, ValidationError
 from datacopilot.core.schema import (
     SCHEMA_VERSION,
@@ -32,7 +34,7 @@ from datacopilot.core.schema import (
     validate_tables,
 )
 from datacopilot.core.version import models_version
-from datacopilot.io import registry
+from datacopilot.io import files, registry
 from datacopilot.io.report import ConversionReport, enforce_strict
 from datacopilot.logging import get_logger
 from datacopilot.store import DatasetStore, StoreLimits
@@ -254,8 +256,66 @@ def load_dataset(
     return dataset, read.report
 
 
-def export(ds: Dataset, format: str, out: str | Path, *, strict: bool = False) -> ConversionReport:  # noqa: A002
+MAX_EXPORT_IMAGE_BYTES = 1024**3
+"""Largest image file an export will copy (1 GiB); the file is hashed before it is copied."""
+_HASH_CHUNK = 1024 * 1024
+
+
+def _verified_images(ds: Dataset, *, allow_external: bool = False) -> Dataset:
+    """``ds`` with every image path replaced by the verified real path of its file.
+
+    A dataset directory is untrusted input: ``Image.file_path`` can name any file on the machine
+    (``/home/x/.ssh/id_rsa``, a symlink, ``..``). Before a writer copies anything, each path is
+    resolved inside ``ds.root`` (outside paths, remote URIs and unsafe names are refused), opened
+    without following a symlink, bounded in size, and its sha256 must start with ``image_id``. The
+    whole export is refused if any image fails; nothing is written then.
+    """
+    if ds.root is None:
+        raise FormatError("the dataset has no root directory: its images cannot be verified")
+    checked: list[Image] = []
+    bad = 0
+    for image in ds.images:
+        resolved = resolve_image_path(image.file_path, ds.root, allow_external=allow_external)
+        if resolved.kind != "local" or resolved.path is None:
+            bad += 1
+            continue
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with files.open_regular(resolved.path, nofollow=True) as handle:
+                while chunk := handle.read(_HASH_CHUNK):
+                    total += len(chunk)
+                    if total > MAX_EXPORT_IMAGE_BYTES:
+                        break
+                    digest.update(chunk)
+        except (FormatError, OSError):
+            bad += 1
+            continue
+        if total > MAX_EXPORT_IMAGE_BYTES or digest.hexdigest()[:16] != image.image_id:
+            bad += 1
+            continue
+        checked.append(image.model_copy(update={"file_path": str(resolved.path)}))
+    if bad:
+        raise FormatError(
+            f"{bad} image file(s) are missing, outside the dataset directory, changed since "
+            "ingest, too large or not regular files: nothing was exported"
+        )
+    return Dataset(ds.manifest, tuple(checked), ds.annotations, ds.root)
+
+
+def export(
+    ds: Dataset,
+    format: str,  # noqa: A002
+    out: str | Path,
+    *,
+    strict: bool = False,
+    allow_external_images: bool = False,
+) -> ConversionReport:
     """Write ``ds`` in the named format into ``out`` (absent or an empty directory).
+
+    Every image is verified first (see :func:`_verified_images`), so an export can never copy a
+    file that is not the dataset's own picture. Images that lie outside the dataset's directory are
+    refused unless ``allow_external_images`` is set (their content must still match ``image_id``).
 
     The writer runs in a sibling temporary directory that is renamed into place only after
     ``strict`` is satisfied, so a failure leaves no partial output.
@@ -266,6 +326,7 @@ def export(ds: Dataset, format: str, out: str | Path, *, strict: bool = False) -
     """
     started = time.perf_counter()
     writer = registry.get_writer(format)
+    ds = _verified_images(ds, allow_external=allow_external_images)
     target = Path(out)
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise FormatError(f"output {target.name} already exists and is not an empty directory")

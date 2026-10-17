@@ -168,8 +168,20 @@ def export(
     strict: Annotated[
         bool, typer.Option("--strict", help="Fail if any field cannot be carried to the format.")
     ] = False,
+    allow_external_images: Annotated[
+        bool,
+        typer.Option(
+            "--allow-external-images",
+            help="Also copy images whose real path is outside the dataset's parent directory "
+            "(each must still match its image_id). Do not use on datasets you do not trust.",
+        ),
+    ] = False,
 ) -> None:
     """Write a dataset.dcp in another format and print the output directory.
+
+    Every image is verified before it is copied: it must lie inside the directory that holds the
+    dataset (unless --allow-external-images), not be a symlink to elsewhere and match its image_id;
+    otherwise nothing is exported.
 
     Exit codes: 0 success; 1 unreadable dataset, unknown format, non-empty output, or
     --strict with dropped fields (nothing is written); 2 bad option or configuration.
@@ -182,7 +194,7 @@ def export(
         max_rows=settings.max_table_rows, max_uncompressed_bytes=settings.max_table_bytes
     )
     ds = DatasetStore.open(dataset, limits=limits).read()
-    convert.export(ds, format, output, strict=strict)
+    convert.export(ds, format, output, strict=strict, allow_external_images=allow_external_images)
     typer.echo(str(output))
 
 

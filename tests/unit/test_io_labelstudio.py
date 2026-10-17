@@ -13,6 +13,7 @@ from datacopilot import convert
 from datacopilot.core.errors import ConversionLossError, FormatError
 from datacopilot.core.schema import Annotation, Category, Image
 from datacopilot.io import files, registry
+from datacopilot.io.files import image_id as real_id
 from datacopilot.io.labelstudio import plugin
 from datacopilot.store import DatasetStore
 
@@ -552,9 +553,11 @@ def test_classification_round_trip_from_imagefolder(tmp_path: Path) -> None:
 
 
 def _foreign(tmp_path: Path) -> Any:
+    for n in range(2):
+        synth.write_png(tmp_path / f"i{n}.png", 64, 48, n)
     images = [
         Image(
-            image_id=f"{n:016x}",
+            image_id=real_id(tmp_path / f"i{n}.png"),
             file_path=str(tmp_path / f"i{n}.png"),
             width=64,
             height=48,
@@ -655,7 +658,9 @@ def test_boxes_survive_the_writer_and_reader_exactly(w: int, h: int, data: st.Da
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         synth.write_png(root / "i.png", w, h, 1)
-        image = Image(image_id=f"{1:016x}", file_path=str(root / "i.png"), width=w, height=h)
+        image = Image(
+            image_id=real_id(root / "i.png"), file_path=str(root / "i.png"), width=w, height=h
+        )
         ann = Annotation(
             ann_id="a",
             image_id=image.image_id,

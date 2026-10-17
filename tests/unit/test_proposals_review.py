@@ -145,7 +145,7 @@ def test_a_reviewed_set_is_exported_with_its_decisions_filled_in(tmp_path: Path)
 def test_a_class_that_already_ends_in_the_layer_suffix_is_refused(tmp_path: Path) -> None:
     ds = make_dataset(tmp_path)
     cats = [*ds.categories[:2], Category(id=3, name="bird" + review.SUFFIX)]
-    clash = dataset(ds.images, ds.annotations, cats)
+    clash = dataset(ds.images, ds.annotations, cats, root=tmp_path)
     ps = make_set(clash)
     with pytest.raises(ValidationError, match="suffix"):
         export_review(clash, ps, tmp_path / "out")
@@ -184,7 +184,7 @@ def test_class_names_with_markup_characters_survive_the_round_trip(tmp_path: Pat
         Category(id=2, name="dog"),
         Category(id=3, name="bird"),
     ]
-    ds2 = dataset(ds.images, [], cats)
+    ds2 = dataset(ds.images, [], cats, root=tmp_path)
     export_review(ds2, make_set(ds2), tmp_path / "out")
     _, got = read_back(tmp_path / "out")
     assert "fish & chips" + review.SUFFIX in {c.name for c in got}

@@ -114,7 +114,9 @@ def export_review(ds: Dataset, ps: ProposalSet, out: Path) -> ConversionReport:
         annotation_count=len(annotations),
         created_at=datetime.now(timezone.utc),
     )
-    report = convert.export(Dataset(manifest, ds.images, tuple(annotations)), "cvat_xml", out)
+    report = convert.export(
+        Dataset(manifest, ds.images, tuple(annotations), ds.root), "cvat_xml", out
+    )
     get_logger(__name__).info(
         "review_exported", target="cvat", set_id=ps.set_id, proposal_count=len(ps.proposals)
     )

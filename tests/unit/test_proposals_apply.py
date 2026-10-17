@@ -328,7 +328,7 @@ def test_a_proposal_id_that_collides_with_an_existing_annotation_is_refused(tmp_
 
     _, ds = stored(tmp_path)
     clash = ds.annotations[0].model_copy(update={"ann_id": "proposal:" + f"{0:016x}"})
-    dup = dataset(ds.images, [clash, *ds.annotations[1:]], ds.categories)
+    dup = dataset(ds.images, [clash, *ds.annotations[1:]], ds.categories, root=tmp_path)
     with pytest.raises(ValidationError, match="duplicate"):
         apply_proposals(dup, make_set(dup), tmp_path / "new.dcp", allowed_licenses=ALLOWED)
     assert not (tmp_path / "new.dcp").exists()

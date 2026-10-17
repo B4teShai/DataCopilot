@@ -10,6 +10,7 @@ from datacopilot.core.errors import ConversionLossError, FormatError, Validation
 from datacopilot.core.schema import Annotation, Category, Image
 from datacopilot.io import files, registry
 from datacopilot.io.cvat import plugin
+from datacopilot.io.files import image_id as real_id
 from datacopilot.store import DatasetStore
 
 LABELS = "<labels><label><name>cat</name></label><label><name>dog</name></label></labels>"
@@ -398,9 +399,11 @@ def test_model_provenance_and_attribute_specs_round_trip_without_loss(tmp_path: 
 
 
 def test_foreign_rows_are_written_and_losses_counted(tmp_path: Path) -> None:
+    for n in range(2):
+        synth.write_png(tmp_path / f"i{n}.png", 64, 48, n)
     images = [
         Image(
-            image_id=f"{n:016x}",
+            image_id=real_id(tmp_path / f"i{n}.png"),
             file_path=str(tmp_path / f"i{n}.png"),
             width=64,
             height=48,
@@ -487,7 +490,9 @@ def test_names_with_characters_illegal_in_xml_are_replaced_and_counted(tmp_path:
 
 def test_names_that_collide_after_cleaning_are_refused(tmp_path: Path) -> None:
     synth.write_png(tmp_path / "i.png", 8, 8, 1)
-    img = Image(image_id=f"{1:016x}", file_path=str(tmp_path / "i.png"), width=8, height=8)
+    img = Image(
+        image_id=real_id(tmp_path / "i.png"), file_path=str(tmp_path / "i.png"), width=8, height=8
+    )
     ann = Annotation(
         ann_id="a",
         image_id=img.image_id,
@@ -574,7 +579,7 @@ def test_every_replacement_of_an_illegal_character_is_counted_and_the_file_match
 ) -> None:
     synth.write_png(tmp_path / "i.png", 8, 8, 1)
     img = Image(
-        image_id=f"{1:016x}",
+        image_id=real_id(tmp_path / "i.png"),
         file_path=str(tmp_path / "i.png"),
         width=8,
         height=8,
@@ -661,7 +666,7 @@ def test_a_renumbered_image_id_is_counted(tmp_path: Path) -> None:
     synth.write_png(tmp_path / "j.png", 8, 8, 2)
     imgs = [
         Img(
-            image_id=f"{n:016x}",
+            image_id=real_id(tmp_path / f),
             file_path=str(tmp_path / f),
             width=8,
             height=8,

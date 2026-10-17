@@ -402,7 +402,7 @@ class DatasetStore:
                 raise StoreError(
                     f"tables in {self.path} do not match manifest version {manifest.version}"
                 )
-        return Dataset(manifest, tuple(images), tuple(annotations))
+        return Dataset(manifest, tuple(images), tuple(annotations), self.path.resolve().parent)
 
     def _audit_path(self, run_id: str) -> Path:
         """Path of ``audits/<run_id>.json``; ``run_id`` must be a lowercase UUID (no separators)."""
