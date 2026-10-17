@@ -64,6 +64,15 @@ embed = [
   "torch>=2.14",
 ]
 
+vlm = [
+  # floors are the versions the suite and the real Grounding DINO validation were run with
+  "pillow>=12.3",
+  "safetensors>=0.8",
+  "huggingface-hub>=2.2",
+  "transformers>=5.19",
+  "torch>=2.14",
+]
+
 [project.entry-points."datacopilot.formats"]
 coco = "datacopilot.io.coco:plugin"
 yolo = "datacopilot.io.yolo:plugin"
@@ -86,6 +95,10 @@ hash = "datacopilot.embed.hashembed:plugin"
 dinov2_small = "datacopilot.embed.backends:dinov2_small"
 dinov2_base = "datacopilot.embed.backends:dinov2_base"
 siglip2_base = "datacopilot.embed.backends:siglip2_base"
+
+[project.entry-points."datacopilot.proposers"]
+test_boxes = "datacopilot.proposers.testproposer:plugin"
+grounding_dino = "datacopilot.proposers.grounding_dino:plugin"
 
 [project.scripts]
 datacopilot = "datacopilot.cli.app:main"

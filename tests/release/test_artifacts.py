@@ -157,8 +157,8 @@ def test_core_requirements_are_exactly_the_documented_set_and_not_heavy(wheel: P
     assert unconditional == CORE
     assert not [n for n in unconditional if HEAVY.match(n)]
     extras = [r for r in meta.get_all("Requires-Dist") if "extra ==" in r]
-    assert extras and all("extra == 'embed'" in r or 'extra == "embed"' in r for r in extras)
-    assert "embed" in meta.get_all("Provides-Extra")
+    assert extras and all(re.search(r"""extra == ['"](embed|vlm)['"]""", r) for r in extras)
+    assert {"embed", "vlm"} <= set(meta.get_all("Provides-Extra"))
 
 
 def test_wheel_entry_points(wheel: Path) -> None:
@@ -166,8 +166,14 @@ def test_wheel_entry_points(wheel: Path) -> None:
         name = next(n for n in z.namelist() if n.endswith("entry_points.txt"))
         text = z.read(name).decode()
     assert "datacopilot = datacopilot.cli.app:main" in text
-    for group in ("datacopilot.formats", "datacopilot.checks", "datacopilot.embedders"):
+    for group in (
+        "datacopilot.formats",
+        "datacopilot.checks",
+        "datacopilot.embedders",
+        "datacopilot.proposers",
+    ):
         assert f"[{group}]" in text
+    assert "grounding_dino = datacopilot.proposers.grounding_dino:plugin" in text
     assert "cvat_xml = datacopilot.io.cvat:plugin" in text
     assert "label_studio = datacopilot.io.labelstudio:plugin" in text
 

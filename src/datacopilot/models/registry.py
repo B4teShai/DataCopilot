@@ -32,8 +32,10 @@ _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.safetensors$")
+_AUX_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(json|txt)$")
 
-Family = Literal["dinov2", "siglip2"]
+Family = Literal["dinov2", "siglip2", "grounding_dino"]
+EMBEDDING_FAMILIES = frozenset({"dinov2", "siglip2"})
 
 
 class ModelCard(BaseModel, frozen=True, extra="forbid"):
@@ -46,14 +48,18 @@ class ModelCard(BaseModel, frozen=True, extra="forbid"):
         license: SPDX id or custom name, as shown in THIRD_PARTY_MODELS.md.
         gated: the hub requires the user to accept terms and use their own token.
         gpu_memory_gb: rough GPU need, or None for CPU-friendly.
-        dims: width of the embedding this model produces.
-        family: selects the preprocessing and the feature head in ``embed/backends.py``.
+        dims: width of the embedding an embedder produces; None for a detector, which has none.
+        family: selects the preprocessing and the feature head in ``embed/backends.py`` (or the
+            detector in ``proposers/grounding_dino.py``).
         weights_sha256: ``file name -> sha256`` of every weight file; verified after download.
         weights_bytes: ``file name -> size`` of the same files; checked before they are hashed, so
             a hostile endpoint cannot make the audit hash an endless stream.
         config_sha256: sha256 of ``config.json`` at the pinned revision; a changed configuration
             (``auto_map`` entries, architecture) is refused, and the digest is part of the cache
             identity.
+        aux_sha256: ``file name -> sha256`` of the other small files the model needs (tokenizer
+            and preprocessor settings); only ``.json`` and ``.txt`` names are accepted, so a card
+            can never name code or a pickle. Verified like the weights.
     """
 
     model_id: str = Field(pattern=_ID.pattern)
@@ -62,11 +68,12 @@ class ModelCard(BaseModel, frozen=True, extra="forbid"):
     license: str = Field(min_length=1, max_length=64)
     gated: bool
     gpu_memory_gb: float | None = Field(default=None, gt=0, le=1024)
-    dims: int = Field(ge=1, le=MAX_DIMS)
+    dims: int | None = Field(default=None, ge=1, le=MAX_DIMS)
     family: Family
     weights_sha256: dict[str, str] = Field(min_length=1, max_length=16)
     weights_bytes: dict[str, int] = Field(min_length=1, max_length=16)
     config_sha256: str = Field(pattern=_SHA256.pattern)
+    aux_sha256: dict[str, str] = Field(default_factory=dict, max_length=16)
 
     @model_validator(mode="after")
     def _sizes_match_files(self) -> ModelCard:
@@ -74,7 +81,21 @@ class ModelCard(BaseModel, frozen=True, extra="forbid"):
             0 < n <= 64 * 1024**3 for n in self.weights_bytes.values()
         ):
             raise ValueError("weights_bytes must give a positive size for every weight file")
+        if (self.dims is not None) != (self.family in EMBEDDING_FAMILIES):
+            raise ValueError("an embedder card has dims and a detector card has none")
+        if "config.json" in self.aux_sha256:
+            raise ValueError("config.json is pinned by config_sha256")
         return self
+
+    @field_validator("aux_sha256")
+    @classmethod
+    def _data_files_only(cls, value: dict[str, str]) -> dict[str, str]:
+        for name, digest in value.items():
+            if not _AUX_FILE.fullmatch(name):
+                raise ValueError("auxiliary files must be .json or .txt files with plain names")
+            if not _SHA256.fullmatch(digest):
+                raise ValueError("aux_sha256 values must be 64 lower-case hex digits")
+        return value
 
     @field_validator("repo")
     @classmethod
@@ -139,6 +160,28 @@ _CARDS: tuple[ModelCard, ...] = (
         },
         weights_bytes={"model.safetensors": 1500800904},
         config_sha256="fe8b5fe6d5734360678fd71c11c21e1ea3364bd8598d34295d9206335973ffd7",
+    ),
+    ModelCard(
+        model_id="grounding_dino",
+        repo="IDEA-Research/grounding-dino-tiny",
+        revision="a2bb814dd30d776dcf7e30523b00659f4f141c71",
+        license="Apache-2.0",
+        gated=False,
+        gpu_memory_gb=2.0,
+        family="grounding_dino",
+        weights_sha256={
+            "model.safetensors": "1a2412ef99bd74bcd3c2a246fa1e48581f8889a1300c9051974741314fc042f3"
+        },
+        weights_bytes={"model.safetensors": 689359096},
+        config_sha256="eec82c5ab66e16df12a9a212e68ac011779927c2536cf9078658e35d85f0c67a",
+        aux_sha256={
+            "preprocessor_config.json": "8454179ba95e2ad22947835aad7b45862a601fc0055ab88bf1ee70892d3aea60",  # noqa: E501
+            "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+            "tokenizer_config.json": "d40ab645b68211910b9170d22433d43186a6ec8ee6fd10ba170524b25bf4fb56",  # noqa: E501
+            "special_tokens_map.json": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",  # noqa: E501
+            "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+            "added_tokens.json": "909e96cb32d92ce728a01bc99850cbba26196d74115c17ebeb019275412588f2",
+        },
     ),
 )
 _BY_ID = {card.model_id: card for card in _CARDS}

@@ -56,6 +56,11 @@ datacopilot/io/yolo.py
 datacopilot/logging.py
 datacopilot/models/__init__.py
 datacopilot/models/registry.py
+datacopilot/proposers/__init__.py
+datacopilot/proposers/grounding_dino.py
+datacopilot/proposers/protocol.py
+datacopilot/proposers/registry.py
+datacopilot/proposers/testproposer.py
 datacopilot/py.typed
 datacopilot/report/__init__.py
 datacopilot/report/html_report.py

@@ -65,23 +65,30 @@ def _import(name: str) -> Any:
     return importlib.import_module(name)
 
 
-def _require(name: str, card: ModelCard) -> Any:
+def require(name: str, card: ModelCard, install: str = _INSTALL) -> Any:
+    """Import an optional library, or raise a ``ModelError`` that names how to install it."""
     try:
         return _import(name)
     except ImportError:
         raise ModelError(
-            f"model {card.model_id!r} needs the optional library {name!r}: {_INSTALL}"
+            f"model {card.model_id!r} needs the optional library {name!r}: {install}"
         ) from None
 
 
-def _verify_files(local_dir: Path, card: ModelCard) -> None:
-    """Check every pinned file (weights and configuration) before anything is deserialised.
+def pinned_files(card: ModelCard) -> dict[str, str]:
+    """``file name -> sha256`` of every file the card pins: weights, configuration, extras."""
+    return {**card.weights_sha256, "config.json": card.config_sha256, **card.aux_sha256}
+
+
+def verify_files(local_dir: Path, card: ModelCard) -> None:
+    """Check every pinned file (weights, configuration, tokenizer files) before anything is
+    deserialised.
 
     The size is compared first (from the file's own ``stat``), so a file of the wrong length is
     never hashed; then the sha256 is compared with the card.
     """
-    pinned = {**card.weights_sha256, "config.json": card.config_sha256}
-    sizes: dict[str, int | None] = {**card.weights_bytes, "config.json": None}
+    pinned = pinned_files(card)
+    sizes: dict[str, int | None] = {n: None for n in pinned} | dict(card.weights_bytes)
     for name, expected in pinned.items():
         resolved = Path(os.path.realpath(local_dir / name))  # the hub cache links to a blob
         try:
@@ -109,7 +116,7 @@ def _verify_files(local_dir: Path, card: ModelCard) -> None:
             )
 
 
-def _refuse_foreign_endpoint(card: ModelCard) -> None:
+def refuse_foreign_endpoint(card: ModelCard) -> None:
     """In CI a model hub other than the default must be confirmed.
 
     The hub token travels to whatever ``HF_ENDPOINT`` names, so a workflow that sets it (or a
@@ -129,10 +136,46 @@ def _refuse_foreign_endpoint(card: ModelCard) -> None:
     )
 
 
+def fetch_verified(card: ModelCard, install: str = _INSTALL) -> tuple[Path, Any, Any]:
+    """Download the card's pinned files, verify them, and return ``(directory, transformers, lib)``.
+
+    The same rules for every model that comes from the hub (class docstring of the backends):
+    a foreign endpoint is refused in CI, only the pinned files are fetched (no pickle, no code),
+    timeouts are bounded, telemetry is off, hub error text is never echoed, and every file is
+    checked against the card before anything is handed to a deserialiser.
+    """
+    refuse_foreign_endpoint(card)
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", str(HUB_TIMEOUT_SECONDS))
+    os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", str(HUB_ETAG_TIMEOUT_SECONDS))
+    hub = require("huggingface_hub", card, install)
+    transformers = require("transformers", card, install)
+    lib = require(TENSOR_LIB, card, install)
+    try:
+        local = Path(
+            hub.snapshot_download(
+                repo_id=card.repo,
+                revision=card.revision,
+                allow_patterns=list(pinned_files(card)),
+                etag_timeout=HUB_ETAG_TIMEOUT_SECONDS,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001  # the hub raises many types; never echo its text
+        raise ModelError(
+            f"cannot download model {card.model_id!r} from the model hub "
+            f"({type(exc).__name__}); check network access and, for gated models, the "
+            "access token in the environment"
+        ) from None
+    verify_files(local, card)
+    return local, transformers, lib
+
+
 class HFEmbedder:
     """Embedder for one :class:`ModelCard`; the model is loaded on the first ``embed`` call."""
 
     def __init__(self, card: ModelCard, max_pixels: int) -> None:
+        if card.dims is None:
+            raise ModelError(f"model {card.model_id!r} is a detector, not an embedder")
         self._card = card
         self._max_pixels = max_pixels
         self.model_id = card.model_id
@@ -147,29 +190,7 @@ class HFEmbedder:
     def _load(self) -> None:
         card, log = self._card, get_logger(__name__)
         started = time.perf_counter()
-        _refuse_foreign_endpoint(card)
-        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-        os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", str(HUB_TIMEOUT_SECONDS))
-        os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", str(HUB_ETAG_TIMEOUT_SECONDS))
-        hub = _require("huggingface_hub", card)
-        transformers = _require("transformers", card)
-        lib = _require(TENSOR_LIB, card)
-        try:
-            local = Path(
-                hub.snapshot_download(
-                    repo_id=card.repo,
-                    revision=card.revision,
-                    allow_patterns=[*card.weights_sha256, "config.json"],
-                    etag_timeout=HUB_ETAG_TIMEOUT_SECONDS,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001  # the hub raises many types; never echo its text
-            raise ModelError(
-                f"cannot download model {card.model_id!r} from the model hub "
-                f"({type(exc).__name__}); check network access and, for gated models, the "
-                "access token in the environment"
-            ) from None
-        _verify_files(local, card)
+        local, transformers, lib = fetch_verified(card)
         try:
             model = transformers.AutoModel.from_pretrained(
                 str(local),

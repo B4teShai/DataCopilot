@@ -9,7 +9,18 @@ import pytest
 SRC = Path(__file__).resolve().parents[2] / "src" / "datacopilot"
 CORE_DEPENDENCIES = {"click", "jinja2", "numpy", "pyarrow", "pydantic", "structlog", "typer"}
 ALLOWED_TOP_LEVEL = set(sys.stdlib_module_names) | CORE_DEPENDENCIES | {"datacopilot", "__future__"}
-UPPER = ("cli", "api", "convert", "doctor", "audit", "split", "propose", "patch", "report")
+UPPER = (
+    "cli",
+    "api",
+    "convert",
+    "doctor",
+    "audit",
+    "split",
+    "propose",
+    "proposals",
+    "patch",
+    "report",
+)
 ADAPTER_FREE = {"datacopilot.io.registry", "datacopilot.io.report", "datacopilot.io.files"}
 
 
@@ -49,7 +60,7 @@ def test_domain_imports_only_stdlib_pydantic_numpy_and_itself(path: Path) -> Non
 
 @pytest.mark.parametrize(
     "path",
-    modules("io") + modules("store") + modules("embed") + modules("models"),
+    modules("io") + modules("store") + modules("embed") + modules("models") + modules("proposers"),
     ids=lambda p: p.name,
 )
 def test_infrastructure_never_imports_application_or_interface(path: Path) -> None:
@@ -105,7 +116,9 @@ def test_declared_core_dependencies_are_exactly_the_documented_set() -> None:
     assert names == CORE_DEPENDENCIES
 
 
-@pytest.mark.parametrize("path", modules("embed") + modules("models"), ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "path", modules("embed") + modules("models") + modules("proposers"), ids=lambda p: p.name
+)
 def test_model_runtime_never_imports_the_application_layers_or_other_adapters(path: Path) -> None:
     for name in imports(path):
         assert not allowed(name, {f"datacopilot.{u}" for u in UPPER}), f"{path.name}: {name}"
@@ -119,9 +132,23 @@ def test_models_does_not_depend_on_embed(path: Path) -> None:
     assert not any(n.startswith("datacopilot.embed") for n in imports(path))
 
 
-@pytest.mark.parametrize("path", modules("audit") + modules("cli"), ids=lambda p: p.name)
-def test_application_reaches_model_backends_only_through_the_embedder_registry(path: Path) -> None:
+@pytest.mark.parametrize(
+    "path", modules("audit") + modules("cli") + modules("proposals"), ids=lambda p: p.name
+)
+def test_application_reaches_model_backends_only_through_the_registries(path: Path) -> None:
+    backends = {
+        "datacopilot.embed.backends",
+        "datacopilot.embed.hashembed",
+        "datacopilot.proposers.grounding_dino",
+        "datacopilot.proposers.testproposer",
+    }
     for name in imports(path):
-        assert not allowed(name, {"datacopilot.embed.backends", "datacopilot.embed.hashembed"}), (
-            f"{path.name} imports backend {name}"
-        )
+        assert not allowed(name, backends), f"{path.name} imports backend {name}"
+
+
+@pytest.mark.parametrize("path", modules("proposals"), ids=lambda p: p.name)
+def test_proposal_use_cases_reach_formats_only_through_the_registry(path: Path) -> None:
+    for name in imports(path):
+        if name.startswith("datacopilot.io."):
+            assert allowed(name, ADAPTER_FREE), f"{path.name} imports adapter {name}"
+        assert not allowed(name, {"datacopilot.cli", "datacopilot.api"}), f"{path.name}: {name}"

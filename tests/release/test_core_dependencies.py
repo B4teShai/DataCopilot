@@ -48,3 +48,12 @@ def test_the_embed_extra_is_where_the_heavy_packages_live() -> None:
     assert {"transformers", "faiss-cpu", "safetensors"} <= embed
     core = {d["name"] for d in package.get("dependencies", [])}
     assert not core & embed
+
+
+def test_the_vlm_extra_holds_the_detector_libraries_and_none_of_them_is_core() -> None:
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    package = next(p for p in lock["package"] if p["name"] == "datacopilot")
+    vlm = {d["name"] for d in package["optional-dependencies"]["vlm"]}
+    assert {"transformers", "safetensors", "huggingface-hub", "pillow"} <= vlm
+    assert "faiss-cpu" not in vlm  # the index belongs to the embedding checks
+    assert not {d["name"] for d in package.get("dependencies", [])} & vlm
