@@ -27,7 +27,7 @@ import numpy as np
 from datacopilot.core.errors import ModelError
 from datacopilot.core.schema import PluginSpec
 from datacopilot.embed import imaging
-from datacopilot.embed.backends import fetch_verified, pinned_files
+from datacopilot.embed.backends import fetch_verified
 from datacopilot.logging import get_logger
 from datacopilot.models import registry as models
 from datacopilot.models.registry import ModelCard
@@ -57,7 +57,7 @@ class GroundingDinoProposer:
         self.model_id = card.model_id
         self.revision = card.revision
         # the identity covers the weights, the configuration and the tokenizer files
-        self.weights = pinned_files(card)
+        self.weights = card.pinned_files()
         self._model: Any = None
         self._processor: Any = None
         self._lib: Any = None

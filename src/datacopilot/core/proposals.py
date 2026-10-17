@@ -32,6 +32,8 @@ from pydantic import (
     model_validator,
 )
 
+from datacopilot.core.errors import ValidationError
+from datacopilot.core.schema import Dataset
 from datacopilot.core.version import canonical_json
 
 MAX_PROPOSALS = 200_000
@@ -256,3 +258,39 @@ _UNSEALED = "unsealed"
 
 def _digest(payload: dict[str, object]) -> str:
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:32]
+
+
+_MAX_REPORTED = 5
+
+
+def validate_against(ps: ProposalSet, ds: Dataset) -> None:
+    """Check that ``ps`` belongs to ``ds``: the same version, and every proposal names an image
+    and a class of the dataset and a box inside that image.
+
+    Raises:
+        ValidationError: listing up to five proposal ids (hex, safe to show), then a count.
+    """
+    if ps.dataset_version != ds.manifest.version:
+        raise ValidationError(
+            f"the proposal set was made for another dataset version ({ps.dataset_version}); this "
+            f"one is {ds.manifest.version}: propose again on this version"
+        )
+    sizes = {i.image_id: (i.width, i.height) for i in ds.images}
+    classes = {c.id for c in ds.categories}
+    problems: list[str] = []
+    for p in ps.proposals:
+        size = sizes.get(p.image_id)
+        if size is None:
+            problems.append(f"proposal {p.proposal_id} names an unknown image")
+        elif p.bbox_xyxy_abs[2] > size[0] or p.bbox_xyxy_abs[3] > size[1]:
+            problems.append(f"proposal {p.proposal_id} has a box outside its image")
+        if p.category_id not in classes:
+            problems.append(f"proposal {p.proposal_id} names an unknown class")
+    if problems:
+        more = len(problems) - _MAX_REPORTED
+        suffix = f"; and {more} more" if more > 0 else ""
+        raise ValidationError(
+            "the proposal set does not fit the dataset: "
+            + "; ".join(problems[:_MAX_REPORTED])
+            + suffix
+        )

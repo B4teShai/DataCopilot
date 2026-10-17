@@ -87,6 +87,10 @@ class ModelCard(BaseModel, frozen=True, extra="forbid"):
             raise ValueError("config.json is pinned by config_sha256")
         return self
 
+    def pinned_files(self) -> dict[str, str]:
+        """``file name -> sha256`` of every file the card pins: weights, configuration, extras."""
+        return {**self.weights_sha256, "config.json": self.config_sha256, **self.aux_sha256}
+
     @field_validator("aux_sha256")
     @classmethod
     def _data_files_only(cls, value: dict[str, str]) -> dict[str, str]:

@@ -254,3 +254,56 @@ def test_accepted_returns_only_accepted_proposals_in_order() -> None:
         ]
     )
     assert [p.proposal_id for p in ps.accepted()] == ["1" * 16]
+
+
+# --- binding to a dataset ------------------------------------------------------------------------
+def _dataset(version: str | None = None) -> Any:
+    from datacopilot.core.schema import Category, Dataset, DatasetManifest, Image
+
+    image = Image(image_id=IMG_A, file_path="/x/a.png", width=100, height=50)
+    manifest = DatasetManifest(
+        version=version or VERSION,
+        schema_version=1,
+        name="d",
+        task="detection",
+        categories=(Category(id=1, name="cat"),),
+        image_count=1,
+        annotation_count=0,
+        created_at="2026-01-01T00:00:00+00:00",  # type: ignore[arg-type]
+    )
+    return Dataset(manifest, (image,), ())
+
+
+def test_a_set_that_fits_its_dataset_validates() -> None:
+    from datacopilot.core.proposals import validate_against
+
+    validate_against(build(), _dataset())
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"dataset_version": "e" * 32}, "another dataset version"),
+        ({"proposals": [proposal(image_id=IMG_B)]}, "unknown image"),
+        ({"proposals": [proposal(category_id=9)]}, "unknown class"),
+        ({"proposals": [proposal(bbox_xyxy_abs=(10.0, 10.0, 100.5, 40.0))]}, "outside"),
+        ({"proposals": [proposal(bbox_xyxy_abs=(10.0, 10.0, 60.0, 50.5))]}, "outside"),
+    ],
+)
+def test_a_set_that_does_not_fit_its_dataset_is_refused(
+    change: dict[str, Any], message: str
+) -> None:
+    from datacopilot.core.errors import ValidationError
+    from datacopilot.core.proposals import validate_against
+
+    with pytest.raises(ValidationError, match=message):
+        validate_against(build(**change), _dataset())
+
+
+def test_the_binding_error_lists_a_few_ids_and_counts_the_rest() -> None:
+    from datacopilot.core.errors import ValidationError
+    from datacopilot.core.proposals import validate_against
+
+    many = [proposal(f"{i:016x}", image_id=IMG_B) for i in range(9)]
+    with pytest.raises(ValidationError, match="and 4 more"):
+        validate_against(build(many), _dataset())

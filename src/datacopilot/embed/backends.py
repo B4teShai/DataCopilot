@@ -75,11 +75,6 @@ def require(name: str, card: ModelCard, install: str = _INSTALL) -> Any:
         ) from None
 
 
-def pinned_files(card: ModelCard) -> dict[str, str]:
-    """``file name -> sha256`` of every file the card pins: weights, configuration, extras."""
-    return {**card.weights_sha256, "config.json": card.config_sha256, **card.aux_sha256}
-
-
 def verify_files(local_dir: Path, card: ModelCard) -> None:
     """Check every pinned file (weights, configuration, tokenizer files) before anything is
     deserialised.
@@ -87,7 +82,7 @@ def verify_files(local_dir: Path, card: ModelCard) -> None:
     The size is compared first (from the file's own ``stat``), so a file of the wrong length is
     never hashed; then the sha256 is compared with the card.
     """
-    pinned = pinned_files(card)
+    pinned = card.pinned_files()
     sizes: dict[str, int | None] = {n: None for n in pinned} | dict(card.weights_bytes)
     for name, expected in pinned.items():
         resolved = Path(os.path.realpath(local_dir / name))  # the hub cache links to a blob
@@ -156,7 +151,7 @@ def fetch_verified(card: ModelCard, install: str = _INSTALL) -> tuple[Path, Any,
             hub.snapshot_download(
                 repo_id=card.repo,
                 revision=card.revision,
-                allow_patterns=list(pinned_files(card)),
+                allow_patterns=list(card.pinned_files()),
                 etag_timeout=HUB_ETAG_TIMEOUT_SECONDS,
             )
         )
