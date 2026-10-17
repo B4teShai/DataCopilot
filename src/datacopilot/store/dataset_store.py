@@ -24,7 +24,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import ValidationError as PydanticValidationError
 
-from datacopilot.core.errors import FormatError, StoreError
+from datacopilot.core.errors import FormatError, StoreError, ValidationError
+from datacopilot.core.proposals import ProposalSet
 from datacopilot.core.schema import (
     SCHEMA_VERSION,
     Annotation,
@@ -48,6 +49,9 @@ MAX_FILE_BYTES = 1024**3
 MAX_AUDIT_BYTES = 256 * 1024 * 1024
 """Largest ``audits/<run_id>.json`` that is read back (a run capped at 50,000 findings per check
 stays far below this)."""
+MAX_PROPOSAL_BYTES = 128 * 1024 * 1024
+"""Largest ``proposals/<set_id>.json`` that is read back (a full set of 200,000 proposals is about
+70 MB)."""
 BATCH_ROWS = 10_000
 """Rows converted to model objects at a time, so Arrow buffers are released incrementally."""
 
@@ -66,6 +70,9 @@ class StoreLimits:
 
 
 AUDITS_DIR = "audits"
+PROPOSALS_DIR = "proposals"
+_SET_ID = re.compile(r"^[0-9a-f]{32}$")
+_VERSION = _SET_ID
 _RUN_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 TABLES = ("images.parquet", "annotations.parquet", "categories.parquet")
 MANIFEST = "manifest.json"
@@ -243,18 +250,29 @@ class DatasetStore:
         name: str,
         task: Task,
         limits: StoreLimits | None = None,
+        lineage: Sequence[str] = (),
     ) -> DatasetStore:
         """Write a brand-new dataset atomically; refuses to overwrite anything.
 
+        ``lineage`` names the versions this dataset was derived from, oldest first (``apply`` passes
+        its parent's lineage plus the parent's version); the parent itself is never touched.
+
         Raises:
             StoreError: if ``path`` exists.
-            ValidationError: if the rows violate an invariant (nothing is written).
+            ValidationError: if the rows violate an invariant or ``lineage`` is not a list of
+                distinct versions that excludes the new one (nothing is written).
         """
         root = Path(path)
         if root.exists():
             raise StoreError(f"{root} already exists; refusing to overwrite")
         validate_tables(images, annotations, categories, task=task)
         version = models_version(images, annotations, categories, schema_version=SCHEMA_VERSION)
+        if (
+            not all(isinstance(v, str) and _VERSION.fullmatch(v) for v in lineage)
+            or len(set(lineage)) != len(lineage)
+            or version in lineage
+        ):
+            raise ValidationError("lineage must list distinct versions and not the new version")
         manifest = DatasetManifest(
             version=version,
             schema_version=SCHEMA_VERSION,
@@ -263,6 +281,7 @@ class DatasetStore:
             categories=tuple(sorted(categories, key=lambda c: c.id)),
             image_count=len(images),
             annotation_count=len(annotations),
+            lineage=tuple(lineage),
             created_at=datetime.now(timezone.utc),
         )
         root.parent.mkdir(parents=True, exist_ok=True)
@@ -443,3 +462,65 @@ class DatasetStore:
             return AuditRun.model_validate_json(data)
         except (OSError, ValueError) as exc:
             raise StoreError(f"audit {run_id} is invalid: {type(exc).__name__}") from None
+
+    def _proposal_path(self, set_id: str) -> Path:
+        """Path of ``proposals/<set_id>.json``; ``set_id`` must be 32 lowercase hex digits."""
+        if not _SET_ID.fullmatch(set_id):
+            raise StoreError("a set id is 32 lowercase hex digits")
+        directory = self.path / PROPOSALS_DIR
+        if directory.is_symlink():
+            raise StoreError(
+                f"{PROPOSALS_DIR} must be a directory inside the dataset, not a symlink"
+            )
+        return directory / f"{set_id}.json"
+
+    def write_proposals(self, ps: ProposalSet) -> Path:
+        """Persist ``ps`` as ``proposals/<set_id>.json``: temporary file, fsync, rename.
+
+        A set is content-addressed, so writing the same set again changes nothing. Proposals are
+        derived data: the dataset version and its tables are not touched.
+
+        Raises:
+            StoreError: ``proposals`` is a symlink, or the directory cannot be written.
+        """
+        target = self._proposal_path(ps.set_id)
+        if target.exists():
+            return target
+        target.parent.mkdir(exist_ok=True)
+        staged = _tmp_name(target)
+        try:
+            staged.write_text(ps.model_dump_json() + "\n", encoding="ascii")
+            _fsync_file(staged)
+            os.replace(staged, target)
+            _fsync_dir(target.parent)
+        except BaseException:
+            staged.unlink(missing_ok=True)
+            raise
+        return target
+
+    def read_proposals(self, set_id: str) -> ProposalSet:
+        """Load a stored set; its content must hash to the id it is stored (and asked for) under.
+
+        Raises:
+            StoreError: invalid id, missing, oversized, not a regular file, malformed or tampered.
+        """
+        file = self._proposal_path(set_id)
+        try:
+            handle = files.open_regular(file, nofollow=True)
+        except FormatError as exc:
+            if "not a regular file" in str(exc) or file.is_symlink():
+                raise StoreError(f"proposal set {set_id} is not a regular file") from None
+            raise StoreError(f"no proposal set {set_id} in this dataset") from None
+        try:
+            with handle:
+                if os.fstat(handle.fileno()).st_size > MAX_PROPOSAL_BYTES:
+                    raise StoreError(f"proposal set {set_id} is too large")
+                data = handle.read(MAX_PROPOSAL_BYTES + 1)
+            if len(data) > MAX_PROPOSAL_BYTES:
+                raise StoreError(f"proposal set {set_id} is too large")
+            ps = ProposalSet.model_validate_json(data)
+        except (OSError, ValueError) as exc:
+            raise StoreError(f"proposal set {set_id} is invalid: {type(exc).__name__}") from None
+        if ps.set_id != set_id:
+            raise StoreError(f"proposal set {set_id} does not match the id stored in the file")
+        return ps
