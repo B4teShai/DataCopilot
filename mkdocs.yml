@@ -46,6 +46,7 @@ nav:
       - Formats: guide/formats.md
       - Audit in CI: guide/audit-ci.md
       - Embeddings: guide/embeddings.md
+      - Propose, review, apply: guide/proposals.md
       - Python API: guide/python-api.md
       - Trust model: guide/trust-model.md
   - Reference:
@@ -69,6 +70,7 @@ nav:
       - adr/0005-plugin-system.md
       - adr/0006-dataset-format.md
       - adr/0007-embedding-cache-and-index.md
+      - adr/0008-propose-review-apply.md
   - Engineering:
       - engineering/README.md
       - Standards: engineering/standards.md

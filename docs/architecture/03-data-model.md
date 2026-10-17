@@ -3,7 +3,7 @@
 ![Data model](../diagrams/png/data-model.png)
 
 `Category`, `Image`, `Annotation`, `DatasetManifest`, `AuditRun` and `Finding` are built, and the
-embedding cache (`Embedding`) is built as a store of verified shards; `Proposal` is planned. Models are Pydantic v2 in `core/schema.py`; tables are Parquet with explicit Arrow schemas
+embedding cache (`Embedding`) is built as a store of verified shards; `Proposal` and `ProposalSet` are built for `add_box` proposals (`core/proposals.py`). Models are Pydantic v2 in `core/schema.py`; tables are Parquet with explicit Arrow schemas
 ([ADR-0006](../adr/0006-dataset-format.md)). `?` after a type means nullable.
 
 ## Entities
@@ -69,27 +69,48 @@ File `manifest.json` (and a copy under `versions/<version>/`). Primary key: `ver
 | `annotation_count` | int | no | Number of rows in `annotations.parquet`; must equal the table (checked on read) |
 | `created_at` | datetime (UTC) | no | Not part of the hash |
 
-### Proposal
+### Proposal and ProposalSet
 
-Table `proposals/<set_id>.parquet`. Primary key: `proposal_id`. Foreign keys:
-`target_ann_id → Annotation` (nullable), `image_id → Image`.
+File `proposals/<set_id>.json` (one JSON document per set; bounded read, at most 128 MiB and 200,000
+proposals). A set is **content-addressed**: `set_id` is the first 32 hex digits of the sha256 of the
+canonical JSON of every other field, recomputed whenever a set is built or read, so an edited file no
+longer matches its own id. The model identity is recorded once per set, not per proposal.
 
-| Field | Type | Nullable | Meaning |
-|---|---|---|---|
-| `proposal_id` | str | no | Unique |
-| `set_id` | str | no | One per `propose` run; `latest` resolves to the newest set |
-| `kind` | enum `add_box\|change_class\|refine_box\|delete_box\|flag_ambiguous` | no | What `apply` does |
-| `target_ann_id` | str | yes | Null only for `add_box` |
-| `image_id` | str | no | Image the proposal concerns |
-| `payload` | dict | no | `bbox_xyxy_abs`, `category_id`, or note, depending on `kind` |
-| `model_id` | str | no | Registry id |
-| `model_revision` | str | no | Hub revision or local tag |
-| `weight_hash` | str | no | sha256 of the weight file(s) |
-| `prompt_hash` | str | no | sha256 of the prompt text |
-| `score` | float | no | Model confidence after consensus |
-| `evidence_crop_uri` | str | yes | Crop shown to reviewers |
-| `status` | enum `pending\|accepted\|rejected` | no | Set by review import; default `pending` |
-| `reviewer_id` | str | yes | From the review tool |
+ProposalSet fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `set_id` | str (32 hex) | Digest of the rest of the document; also the file name |
+| `dataset_version` | str (32 hex) | The `manifest.version` the run read; `apply` refuses another |
+| `proposer` | str | Registry name (`grounding_dino`, `test_boxes`) |
+| `model_id`, `model_revision` | str | Registry id and the pinned revision |
+| `weights` | dict[str, str] | File name to sha256 of every pinned file (at most 16) |
+| `prompt_hash` | str (64 hex) | sha256 of the sorted prompt phrases the model was asked about |
+| `min_score`, `class_min_score` | float, dict[str, float] | Thresholds used (`class_min_score` keyed by class name, at most 256) |
+| `overlap_iou` | float | An existing box of the same class with at least this IoU suppresses a proposal |
+| `images_total`, `images_done` | int | Images in the dataset and images the model ran on |
+| `incomplete_reason` | `time_budget\|images_skipped\|proposal_cap` or null | Set exactly when `images_done < images_total`; `apply` refuses an incomplete set unless asked |
+| `rejected` | dict[str, int] | Dropped candidates (and class names) counted by constant reason, at most 16 reasons |
+| `parent_set_id` | str or null | The set a review was derived from |
+| `proposals` | list[Proposal] | In canonical order: image, descending score, class, box, id |
+
+Proposal fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `proposal_id` | str (16 hex) | Unique in its set |
+| `kind` | `add_box` | `change_class`, `delete_box`, `refine_box` and `flag_ambiguous` are not built |
+| `image_id` | str | Image the box was found in |
+| `category_id` | int | Class |
+| `bbox_xyxy_abs` | float[4] | Absolute pixel box (rounded to 0.01); after a review, the reviewer's box |
+| `score` | float | Model confidence, above 0 and at most 1 |
+| `prompt` | str | The class name or alias the model was asked about (one printable line, at most 64 characters) |
+| `status` | `pending\|accepted\|rejected` | Default `pending`; set by `review import`, which writes a new set |
+| `edited` | bool | The reviewer moved the box before accepting it (only with `accepted`) |
+
+Not built: `target_ann_id` (only `add_box` exists), evidence crops and `reviewer_id`. Whether a box lies
+inside its image is checked against the dataset (`validate_against`) when a set is exported, imported or
+applied.
 
 ### AuditRun
 
@@ -166,15 +187,16 @@ Manifest (`manifest.json`, at most 4 MiB, strict schema):
 | AuditRun | Finding | 1 → 0..* | `Finding.run_id` |
 | Finding | Image | 0..1 | `image_id` |
 | Finding | Annotation | 0..1 | `ann_id` |
-| Proposal | Annotation | 0..1 | `target_ann_id` (null for `add_box`) |
 | Proposal | Image | 1 | `image_id` |
+| ProposalSet | DatasetManifest | 1 → 1 | `dataset_version` |
+| ProposalSet | ProposalSet | 0..1 parent | `parent_set_id` |
 
 ## Invariants
 
-Invariants 1 to 6, 9, 10, 13, 14 and 15 are built and tested (`tests/unit/test_schema_invariants.py`, `tests/unit/test_embed_cache.py`,
+Invariants 1 to 11, 13, 14 and 15 are built and tested (`tests/unit/test_schema_invariants.py`, `tests/unit/test_embed_cache.py`,
 `tests/unit/test_store.py`, `tests/unit/test_audit_schema.py`, `tests/unit/test_cli_audit.py`,
 `tests/golden/`); invariant 1 is established by the readers, which
-compute `image_id` from file bytes. Invariants 7, 8, 11 and 12 belong to planned entities.
+compute `image_id` from file bytes. Invariant 12 belongs to the planned `split`.
 
 1. `Image.image_id == sha256(file bytes).hexdigest()[:16]` for every row; moving or
    renaming the file does not change it.
@@ -186,17 +208,18 @@ compute `image_id` from file bytes. Invariants 7, 8, 11 and 12 belong to planned
    `bbox_xyxy_abs` is null.
 5. `Annotation.score` is null when `provenance == "human"`.
 6. `Category.name` is unique; `Category.id` is unique.
-7. `Proposal.target_ann_id` is null if and only if `kind == "add_box"`; otherwise it
-   references an existing annotation of the same `image_id`.
-8. `Proposal.weight_hash`, `prompt_hash`, `model_id` and `model_revision` are non-empty
-   for every proposal.
+7. Only `add_box` proposals exist, so a proposal never targets an existing annotation.
+8. A set records its model id, revision and weight hashes, and the prompt hash; `apply` accepts a set for
+   a registered model only if they equal the pinned values.
 9. `manifest.version` equals `dataset_version(images, annotations, categories,
    schema_version)` recomputed from the tables on disk; row order does not matter.
 10. `apply`, `split` and `ingest` never modify a file under `versions/<existing>/`; they
-    create exactly one new `versions/<new>/` directory and the new manifest's `lineage`
-    equals the parent's `lineage` plus the parent's `version`.
+    create exactly one new dataset directory (`apply` and `ingest`: a new `.dcp`) and the new manifest's `lineage`
+    equals the parent's `lineage` plus the parent's `version` (empty for `ingest`). Tested for `apply` by hashing
+    every file of the source before and after.
 11. After `apply`, every annotation created from a proposal has
-    `provenance == "proposal_accepted"` and the originating `proposal_id` in `source`.
+    `provenance == "proposal_accepted"`, the id `proposal:<proposal_id>`, and the originating `proposal_id` and
+    `set_id` in `source`.
 12. With `split --by-group`, no `group_id` value occurs in more than one split.
 13. `Finding.severity` is one of `CRITICAL`, `WARN`, `INFO`; `AuditRun.counts` equals the
     count of findings per severity.
@@ -224,7 +247,7 @@ dataset.dcp/
   audits/
     <run_id>.json                           # AuditRun with findings
   proposals/
-    <set_id>.parquet                        # Proposal rows of one propose run
+    <set_id>.json                           # one ProposalSet (a propose run or a review of one)
 ```
 
 - Writes of a new version go to `versions/<version>.tmp-<uuid>/`, are fsynced, renamed to

@@ -52,9 +52,10 @@ def test_every_extra_the_readme_names_exists_and_none_is_empty() -> None:
 
 def test_the_readme_does_not_claim_what_is_not_built() -> None:
     assert "DuckDB" not in README
-    for planned in ("datacopilot propose", "datacopilot review", "datacopilot apply",
-                    "datacopilot split", "dc.propose", "## Planned"):  # fmt: skip
+    for planned in ("datacopilot split", "dc.split", "FiftyOne", "SAM 3", "## Planned"):
         assert planned not in README, planned
+    for built in ("datacopilot propose", "dc.propose", "dc.apply"):  # built in Phase 5
+        assert built in README, built
 
 
 def test_the_install_page_names_the_core_dependencies_and_no_heavy_one() -> None:

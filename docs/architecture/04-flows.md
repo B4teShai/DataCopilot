@@ -1,7 +1,7 @@
 # 04 Flows
 
 Flow A is built, including the embedding checks (`--embedder`); `export` and `embed` are built;
-Flow B is planned. Exit
+Flow B is built for missing boxes (`add_box`) reviewed through CVAT. Exit
 codes follow [errors-and-logging.md](../engineering/errors-and-logging.md): `0` success,
 `1` the command ran and failed (including a gate or check that was asked to fail), `2`
 usage or configuration error, `130` interrupted. Every failure is logged once, at the CLI
@@ -108,58 +108,71 @@ for package errors only), `embedding_cache_disabled`, `embedding_cache_rejected`
 Status: `ingest`, `export`, `audit` (all checks but `label_noise` and `sku_confusion`), `embed`, the
 gate and the reports built.
 
-## Flow B: propose → review export → apply
+## Flow B: propose → review export → review import → apply
 
-**Purpose:** let models suggest fixes, route them to a reviewer, and apply only accepted
-ones as a new dataset version with full provenance.
+**Purpose:** let a model suggest missing boxes, route them to a reviewer, and apply only accepted
+ones as a new dataset version with provenance and lineage.
 
-**Preconditions:** a `dataset.dcp/` exists; the `[vlm]` and/or `[sam3]` extra is installed
-on the machine that runs `propose`; the models' licenses are allowed; the user has
-downloaded gated weights with their own token; a CVAT project or FiftyOne dataset name is
-available for review.
+**Preconditions:** a `dataset.dcp/` of task `detection` exists; the `[vlm]` extra is installed on the
+machine that runs `propose`; the model's license is on `DATACOPILOT_ALLOWED_LICENSES`; the reviewer can
+import a CVAT for images 1.1 export.
 
 ![Flow B](../diagrams/png/flow-b.png)
 
-Steps:
+The picture shows the full design. Built today: `add_box` proposals from Grounding DINO (tiny), CVAT
+review, and `apply`. Consensus between models, SAM 3, Qwen3-VL, FiftyOne and the other proposal kinds
+are planned ([ADR-0008](../adr/0008-propose-review-apply.md)).
 
-1. `datacopilot propose ds.dcp --proposer missing_boxes --models grounding-dino-base,sam3 --consensus 2`.
-2. `propose/` loads images, annotations and cached embeddings; an embedding prefilter
-   selects suspicious images so proposers run only where needed.
-3. For each model the runtime checks the license allow-list, records `weight_hash` and
-   `prompt_hash`, runs inference, and returns candidates with evidence crops.
-4. `consensus` keeps candidates on which at least `--consensus` models agree (box IoU ≥
-   0.7 for boxes; a "yes" above threshold for class verification). Nothing is accepted
-   automatically; consensus only ranks.
-5. The set is written to `proposals/<set_id>.parquet` with `status=pending`.
-6. `datacopilot review ds.dcp --proposals latest --to cvat --project 12` pushes the
-   proposals as a separate layer (pre-annotated task in CVAT, a `Detections` field in
-   FiftyOne); decisions come back through `review --from` or `ProposalSet.import_decisions`
-   with `status` and `reviewer_id`.
-7. `datacopilot apply ds.dcp --proposals latest --accepted-only` writes a new version:
-   accepted `add_box` rows become annotations with `provenance=proposal_accepted`;
-   `change_class`, `refine_box`, `delete_box` produce changed rows in the new snapshot;
-   the previous snapshot is untouched and `lineage` is appended.
-8. The new `manifest.version` is printed on `stdout`.
+Steps (built):
+
+1. `datacopilot propose ds.dcp --proposer grounding_dino` (options: `--classes`, `--min-score`,
+   `--min-score-for CLASS=SCORE`, `--time-budget`).
+2. The proposer and its license are resolved before the dataset is read. Prompts are built from class
+   names and aliases after normalisation (lower-case words only; a name that could rewrite the prompt is
+   skipped and counted).
+3. For each image (read through the audit's contained, size-capped, hash-verified reader) the model returns
+   candidates. Each is validated: finite numbers, a score in (0, 1], a label that was asked for, inside
+   the image (one pixel of overshoot is clipped), at least 2 pixels wide and high. A candidate below the
+   class threshold, or whose class already has a box at IoU 0.5 or more in the image, or that a better
+   candidate of the same class overlaps at IoU 0.5 or more, is dropped; every drop is counted by reason.
+4. The set is stored as `proposals/<set_id>.json` (a content-addressed file, see
+   [03-data-model.md](03-data-model.md)) bound to the dataset version and the model identity. A run that
+   did not reach every image (time budget, unreadable image, proposal cap) is marked incomplete and exits 1,
+   but the partial set is kept.
+5. `datacopilot review export ds.dcp --proposals ID --to cvat -o DIR` writes the dataset's own boxes and
+   the proposals as boxes labelled `<class>__proposed` with the attributes `proposal_id`, `score` and
+   `decision`, through the CVAT writer, with the images.
+6. The reviewer types `accepted` or `rejected` in `decision` (and may move a box first: that makes an
+   edited proposal). A deleted box decides nothing.
+7. `datacopilot review import ds.dcp DIR --proposals ID --from cvat` reads the file through the CVAT
+   reader and stores a NEW set (`parent_set_id` is the reviewed set). The dataset's own layer is ignored
+   and counted. Unknown, repeated or foreign ids, changed classes, invalid decisions, boxes edited outside
+   the image and a file without decisions are refused as a whole.
+8. `datacopilot apply ds.dcp --proposals NEWID -o NEW.dcp` writes a new dataset: the old rows plus one row
+   per accepted proposal (`provenance=proposal_accepted`, `source` has `proposal_id` and `set_id`, id
+   `proposal:<proposal_id>`), `lineage` = the parent's lineage plus the parent's version. The new
+   `manifest.version` is printed on `stdout`. The source directory is never written.
 
 Failure paths:
 
 | Condition | Behaviour | Exit code |
 |---|---|---|
-| Proposer or model not registered; extra missing | error names the extra | 1 |
-| Model license not allowed, or gated weights not downloaded | `LicenseError` / `ModelError` with the Hub repo and the variable to set | 1 |
-| GPU out of memory | `ModelError` with `gpu_memory_gb` hint from the registry; nothing written | 1 |
-| vLLM endpoint unreachable or non-2xx | `ModelError` with status code; no retries beyond 3 with backoff | 1 |
-| Model output fails validation (box outside image, unknown class) | candidate dropped, counted in `proposal_candidates_rejected` (`WARN`) | 0 |
-| CVAT or FiftyOne unavailable during `review` | `IntegrationError`; proposals stay `pending` | 1 |
-| `apply` with proposals whose `target_ann_id` no longer exists in the current version | `ValidationError` lists the ids; nothing written | 1 |
-| `apply` interrupted | temporary snapshot ignored; current version unchanged | 130 |
+| Proposer unknown, option invalid, class unknown, no usable class name | usage error | 2 |
+| Extra missing | error names the extra (`datacopilot[vlm]`) | 1 |
+| Model license not allowed | `LicenseError` before the dataset is read and before any download or load | 1 |
+| Model fails or its output is unusable | `ModelError`; nothing is stored | 1 |
+| Model candidate fails validation | dropped, counted in the set and in `proposal_candidates_rejected` (WARN) | 0 |
+| Run did not reach every image | set stored and marked incomplete; `apply` refuses it without `--allow-incomplete` | 1 |
+| Set file tampered, unknown or not a regular file | `StoreError` | 1 |
+| Set made for another dataset version, or by a model that is not the pinned revision and files | `ValidationError`; nothing written | 1 |
+| Decisions file refused (see step 7) | `ValidationError` or `FormatError`; no set stored | 1 |
+| `apply` with nothing accepted, output existing or inside the source | `ValidationError` / `StoreError`; nothing written | 1 |
 
-Logged events: `proposer_started` (`proposer`, `model_id`, `model_revision`,
-`image_count`), `proposal_set_written` (`set_id`, `proposal_count`, `high_confidence_count`),
-`proposal_candidates_rejected` (`WARN`; `reason`, `count`), `review_exported` (`target`,
-`set_id`, `proposal_count`), `review_imported` (`accepted`, `rejected`, `pending`),
-`proposals_applied` (`parent_version`, `dataset_version`, `applied_count`),
-`command_failed` (`ERROR`). Tokens for CVAT, Hugging Face or vLLM are never logged; keys
-ending in `_token` or `_api_key` are redacted by the logging contract.
+Logged events: `proposer_started`, `proposer_image_skipped`, `propose_progress`,
+`proposal_candidates_rejected`, `proposal_set_written`, `review_exported`, `review_imported`,
+`proposals_applied`, `command_failed`; fields in [06-cross-cutting.md](06-cross-cutting.md). No class
+name, prompt text, path or reviewer name is logged.
 
-Status: planned.
+Status: built for `add_box` proposals with Grounding DINO and CVAT review; the rest of the picture is
+planned.
+

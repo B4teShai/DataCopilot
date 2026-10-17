@@ -3,14 +3,14 @@
 ![Components by layer](../diagrams/png/components.png)
 
 Layers follow [ADR-0004](../adr/0004-layering-and-dependency-rule.md). Import package:
-`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
+`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `proposers/` (protocol, registry, Grounding DINO, test proposer), `proposals/` (propose, review, apply use cases), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`, `propose`, `apply`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
 
 | Layer | Packages |
 |---|---|
 | Interface | `cli/`, `api.py` |
-| Application | `convert.py`, `audit/`, `split/`, `propose/`, `patch/`, `report/` |
+| Application | `convert.py`, `audit/`, `proposals/`, `split/`, `report/` |
 | Domain | `core/schema.py`, `core/version.py`, `core/geometry.py` |
-| Infrastructure | `io/`, `store/`, `embed/`, `models/`, `integrations/` |
+| Infrastructure | `io/`, `store/`, `embed/`, `models/`, `proposers/`, `integrations/` |
 | Cross-cutting (beside the layers) | `logging.py`, `settings.py` |
 
 ## Interface layer
@@ -38,14 +38,13 @@ def embed(dataset, embedder, embed_batch, embedding_cache,
           require_cache_key) -> None                        # fills the cache; exit 0 / 1 / 2
 ```
 
-Built commands: `ingest`, `export`, `formats`, `audit`, `embed` (exit codes in their `--help` and in
-[04-flows.md](04-flows.md)). Planned commands: `split`, `propose`, `review`,
-`apply`, `plugins`. Each is a thin function that validates options and calls one use case.
+Built commands: `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply` (exit codes in their `--help` and in
+[04-flows.md](04-flows.md)). Planned commands: `split`, `plugins`. Each is a thin function that validates options and calls one use case.
 The built commands call `convert.py` and `audit/` directly (imported lazily so `--version` does not
 load `pyarrow`); `api.py` wraps the same use cases for Python callers.
 
 Depends on: `convert.py`, `audit/`, `doctor.py`, `logging.py`, `settings.py`. Status:
-**built** for `doctor`, `ingest`, `export`, `formats`, `audit`, `embed`; the rest planned.
+**built** for `doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply`; the rest planned.
 
 ### `api.py`
 
@@ -74,19 +73,19 @@ def audit(ds: Dataset, *, checks: Sequence[str] | Literal["all"] = "all",
           embedder: str | None = None, fail_on: Sequence[str] = ()) -> AuditRun
 def split(ds: Dataset, *, by_group: bool = True, ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
           stratify: Literal["category"] | None = "category", seed: int = 0) -> Dataset
-def propose(ds: Dataset, proposer: str, *, models: Sequence[str], prompts_from: str | None = None,
-            consensus: int = 1) -> ProposalSet
-class ProposalSet:
-    def to_cvat(self, project_id: int) -> ReviewHandle
-    def to_fiftyone(self, dataset_name: str) -> ReviewHandle
-    def import_decisions(self, handle: ReviewHandle) -> "ProposalSet"
-    def apply(self, ds: Dataset, *, status: Literal["accepted"] = "accepted") -> Dataset
+def propose(dataset: str | Path, proposer: str = "grounding_dino", *, classes=None, min_score=0.35,
+            class_min_score=None, time_budget_seconds=3600.0) -> ProposalSet   # stores the set in dataset.dcp
+def apply(dataset: str | Path, proposals: str, out: str | Path, *, allow_incomplete: bool = False) -> DatasetManifest
+class ProposalSet:   # core/proposals.py: frozen, content-addressed (set_id), see 03-data-model.md
+    proposals: tuple[Proposal, ...]
+    def accepted(self) -> tuple[Proposal, ...]
+    def derive(self, proposals: Sequence[Proposal]) -> ProposalSet   # the reviewed successor
 class Dataset:
     manifest: DatasetManifest
     def export(self, format: str, out: str, *, strict: bool = False) -> ConversionReport
 ```
 
-Depends on: application packages, `core/`. Status: **built** for `load`, `audit`, `export`; `split`, `propose`, `ProposalSet` and `Dataset.export` planned.
+Depends on: application packages, `core/`. Status: **built** for `load`, `audit`, `export`, `propose`, `apply` and `ProposalSet`; `split`, FiftyOne helpers and `Dataset.export` planned. `propose` takes the path of a `.dcp` directory (the set is stored there); review is done with the command line.
 
 ## Application layer
 
@@ -206,34 +205,34 @@ def resplit(ds: Dataset, *, by_group: bool, ratios: tuple[float, float, float],
 Invariant: with `by_group=True` no `group_id` appears in two splits. Depends on: `core/`,
 `store/`. Status: planned.
 
-### `propose/`
+### `proposals/` and `proposers/`
 
-Responsibility: run proposers, gate by consensus, write a `ProposalSet`.
+Responsibility: `proposals/` holds the use cases; `proposers/` (infrastructure) holds the models
+behind a registry. Built:
 
 ```python
+# proposers/protocol.py (infrastructure)
 class Proposer(Protocol):
-    spec: PluginSpec
-    def run(self, ds: Dataset, ctx: ProposeContext) -> list[Proposal]
-def run_proposers(ds: Dataset, proposer: str, models: Sequence[str], ctx: ProposeContext) -> ProposalSet
-def consensus(candidates: list[Proposal], *, min_agreement: int, iou: float = 0.7) -> list[Proposal]
+    model_id: str; revision: str; weights: dict[str, str]
+    def detect(self, image: bytes, phrases: Sequence[str], size: tuple[int, int], *, min_score: float) -> list[Candidate]
+# proposals/run.py
+def propose(ds: Dataset, proposer: Proposer, *, proposer_name: str, root: Path, classes=None,
+            min_score=0.35, class_min_score=None, overlap_iou=0.5, time_budget_seconds=3600.0) -> ProposalSet
+# proposals/review.py
+def export_review(ds: Dataset, ps: ProposalSet, out: Path) -> ConversionReport     # CVAT, proposals as a layer
+def import_review(ds: Dataset, ps: ProposalSet, directory: Path) -> tuple[ProposalSet, ReviewSummary]
+# proposals/apply.py
+def apply_proposals(ds, ps, out, *, allowed_licenses, allow_incomplete=False, source=None, limits=None) -> DatasetManifest
 ```
 
-Built-in proposers: `missing_boxes` (Grounding DINO, SAM 3), `class_verify` (Qwen3-VL),
-`box_refine` (SAM 3). Depends on: `core/`, `embed/` and `models/` via registry, `store/`.
-Status: planned.
-
-### `patch/`
-
-Responsibility: review export and import, and `apply`, which writes a new version and
-appends lineage; never mutates existing rows.
-
-```python
-def export_review(ps: ProposalSet, target: Literal["cvat", "fiftyone", "xanylabeling"], **opts) -> ReviewHandle
-def import_decisions(ps: ProposalSet, handle: ReviewHandle) -> ProposalSet
-def apply(ds: Dataset, ps: ProposalSet, *, status: Literal["accepted"]) -> Dataset
-```
-
-Depends on: `core/`, `store/`, `integrations/` via registry. Status: planned.
+Proposers: `grounding_dino` (Grounding DINO tiny, extra `[vlm]`) and the test-only `test_boxes`.
+`propose` validates every candidate a model returns (finite, inside the image, a label that was
+asked for), drops what already exists (same class, IoU 0.5) and marks an incomplete run. Review goes
+through the CVAT reader and writer; `apply` creates a new dataset with `DatasetStore.create` and never
+touches an existing version. Depends on: `core/`, `store/`, `io.registry`, `convert.py`,
+`audit.embedding` (the contained image reader), `proposers/` through its registry. Status: **built**
+for `add_box` proposals. `change_class`, `delete_box`, `refine_box`, consensus between models, SAM 3,
+Qwen3-VL and FiftyOne review are planned; see [ADR-0008](../adr/0008-propose-review-apply.md).
 
 ### `report/`
 
@@ -264,11 +263,11 @@ Depends on: `core/`, `logging.py`. Status: **built** (JSON, HTML, SARIF).
 ### `core/schema.py`
 
 Responsibility: Pydantic models for `Category`, `Image`, `Annotation`, `DatasetManifest`,
-`Proposal`, `AuditRun`, `Finding`, `Embedding`, `PluginSpec`, and the invariants in
-[03-data-model.md](03-data-model.md). Imports only the standard library, `pydantic`,
-`numpy`. Status: **built** for `Category`, `Image`, `Annotation`, `DatasetManifest`,
+`AuditRun`, `Finding`, `Embedding`, `PluginSpec`, and the invariants in
+[03-data-model.md](03-data-model.md); `core/proposals.py` holds `Proposal` and `ProposalSet`. Imports
+only the standard library, `pydantic`, `numpy`. Status: **built** for `Category`, `Image`, `Annotation`, `DatasetManifest`,
 `PluginSpec`, `Dataset`, `validate_tables` (cross-row invariants), `Finding`, `AuditRun`, `Counts`
-and `Summary`; `Proposal` and `Embedding` planned. Exceptions live in `core/errors.py`
+and `Summary`; `Proposal` and `ProposalSet` (`core/proposals.py`) are built and `Embedding` is a store of verified shards. Exceptions live in `core/errors.py`
 (`DataCopilotError`, `FormatError`, `ValidationError`, `StoreError`, `ConversionLossError`).
 
 ### `core/version.py`
@@ -338,20 +337,22 @@ class DatasetStore:
     @classmethod
     def open(cls, path, *, limits: StoreLimits | None = None) -> DatasetStore
     @classmethod
-    def create(cls, path, images, annotations, categories, *, name, task, limits=None) -> DatasetStore
+    def create(cls, path, images, annotations, categories, *, name, task, limits=None, lineage=()) -> DatasetStore
     def manifest(self) -> DatasetManifest
     def read(self, *, verify: bool = True) -> Dataset    # bounded, batched, hash-verified
     def write_version(self, images, annotations, categories) -> DatasetManifest   # parent = current
     def query(self, sql: str) -> pyarrow.Table           # planned: read-only DuckDB over the tables
     def write_audit(self, run: AuditRun) -> Path
-    def write_proposals(self, ps: ProposalSet) -> Path
+    def write_proposals(self, ps: ProposalSet) -> Path                          # proposals/<set_id>.json
+    def read_proposals(self, set_id: str) -> ProposalSet                        # digest-checked
     def embeddings(self, model_id: str, revision: str) -> pyarrow.Table | None
 ```
 
 Depends on: `core/`, `pyarrow` (`duckdb`, `fsspec` arrive with audit). Status: **built**:
 `create`, `open`, `read`, `write_version`, atomic writes, refuse-to-overwrite, resource limits
 ([06-cross-cutting.md](06-cross-cutting.md)). `write_audit` and `read_audit` (`audits/<run_id>.json`, atomic, UUID-named, symlink-safe, bounded
-read) are **built**; `query`, embeddings and proposals planned.
+read) and `write_proposals` and `read_proposals` (`proposals/<set_id>.json`, content-addressed, bounded read at 128 MiB,
+symlink-safe) are **built**; `query` is planned.
 
 ### `embed/`
 
@@ -393,8 +394,10 @@ def weight_hash(local_path: Path) -> str
 
 Cards pin a full 40-hex revision and the sha256 of each safetensors file (the registry cannot name a
 pickle checkpoint). `get_model` raises `LicenseError` before any download or load; the allow-list is
-compared case-insensitively. Status: **built** (`dinov2_small`, `dinov2_base`, `siglip2_base`; DINOv3
-and SAM cards are not registered). The `ModelCard` also carries `dims` and `family`.
+compared case-insensitively. Status: **built** (`dinov2_small`, `dinov2_base`, `siglip2_base` and the
+detector `grounding_dino`; DINOv3 and SAM cards are not registered). The `ModelCard` also carries `dims`
+(None for a detector), `family`, and `aux_sha256` (tokenizer and processor files, `.json` and `.txt`
+only) that are verified like the weights.
 
 ### `integrations/`
 
@@ -422,7 +425,7 @@ Four entry-point groups, one registry each ([ADR-0005](../adr/0005-plugin-system
 |---|---|---|
 | `datacopilot.formats` | `io/registry.py` | `Reader` and/or `Writer` |
 | `datacopilot.checks` | `audit/registry.py` | `Check` |
-| `datacopilot.proposers` | `propose/registry.py` | `Proposer` |
+| `datacopilot.proposers` | `proposers/registry.py` | `Proposer` |
 | `datacopilot.embedders` | `embed/registry.py` | `Embedder` |
 
 Every plugin object exposes:
@@ -454,9 +457,9 @@ Imports point downward only; reviewers reject the following:
 
 - `core/*` importing anything from `datacopilot` outside `core/`, or importing `torch`,
   `duckdb`, `pyarrow`, `fsspec`, `PIL`.
-- `io/`, `store/`, `embed/`, `models/`, `integrations/` importing `cli/`, `api.py`,
-  `audit/`, `split/`, `propose/`, `patch/`, `report/`, `convert.py`.
-- `audit/`, `propose/`, `patch/`, `split/`, `report/`, `convert.py` importing
+- `io/`, `store/`, `embed/`, `models/`, `proposers/`, `integrations/` importing `cli/`, `api.py`,
+  `audit/`, `split/`, `proposals/`, `report/`, `convert.py`.
+- `audit/`, `proposals/`, `split/`, `report/`, `convert.py` importing
   `datacopilot.io.coco` (or any adapter module) directly; they call
   `io.registry.get_reader("coco")`.
 - `cleanlab`, `ultralytics`, `cleanvision` or another copyleft package imported anywhere

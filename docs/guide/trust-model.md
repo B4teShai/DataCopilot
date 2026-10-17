@@ -33,6 +33,16 @@ comments, upload names or presigned URLs) in the stored dataset, a report or a r
 allow-list cannot see is free text you put into a label name, an image file name or task `data` that you
 asked to keep (`--keep-task-data`).
 
+## Model output and review files
+
+A model's boxes are suggestions, never labels. Each candidate is validated before it is stored (finite numbers,
+inside the image, a label that was asked for) and counted if dropped; class names are turned into lower-case
+words before they reach a model prompt; a proposal set is named by the digest of its content, so an edited set
+is refused, and it is bound to the dataset version and to the pinned model it came from. Decisions come back
+through the hardened CVAT reader and a file with an unknown, repeated or foreign id, a changed class or a box
+outside its image is refused as a whole. `apply` writes a new dataset only, checks the license and the pinned
+model again, and never writes into the source. See [Propose, review, apply](proposals.md).
+
 ## Caches
 
 Caches are untrusted input too. Each entry is authenticated with a key from `DATACOPILOT_CACHE_KEY`

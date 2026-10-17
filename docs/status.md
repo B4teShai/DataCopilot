@@ -1,7 +1,8 @@
 # What is built and what is planned
 
-DataCopilot 0.1 is a dataset doctor: it converts, checks and reports. The model-assisted fix
-workflow is designed but not written yet. Anything not listed as built below does not run today.
+DataCopilot is a dataset doctor (it converts, checks and reports) with a first model-assisted fix
+workflow: `propose`, `review` and `apply` for missing boxes. Anything not listed as built below does not
+run today.
 
 ## Built and tested
 
@@ -12,7 +13,8 @@ workflow is designed but not written yet. Anything not listed as built below doe
 | Audit | Four checks on the CPU (integrity, exact duplicates, class imbalance, box sanity) and, with `--embedder`, three more (near-duplicates, split leakage, per-class outliers). Reports in JSON, static HTML and SARIF 2.1.0; the run is stored as `audits/<run_id>.json`. Exit code 1 when `--fail-on` matches. See [Audit in CI](guide/audit-ci.md). |
 | Embeddings | `datacopilot embed` fills the embedding cache ahead of time; `dinov2_small`, `dinov2_base` and `siglip2_base` (extra `[embed]`) and the test-only `hash` embedder. See [Embeddings](guide/embeddings.md). |
 | Diagnose | `datacopilot --version`, `formats` and `doctor` (versions, extras, settings, cache directory, FAISS and GPU; `--json` for a machine-readable report). |
-| Python | `load`, `audit` and `export`. See [Python API](guide/python-api.md). |
+| Propose, review, apply | `propose` finds boxes a dataset is probably missing with Grounding DINO (tiny, Apache-2.0, extra `[vlm]`) and stores them as a proposal set; `review export` and `review import` round-trip them through CVAT files; `apply` writes the accepted ones as a new dataset version with lineage. Only missing boxes (`add_box`) are proposed. See [Propose, review, apply](guide/proposals.md). |
+| Python | `load`, `audit`, `export`, `propose` and `apply`. See [Python API](guide/python-api.md). |
 | Settings | Environment variables, listed in [Settings](reference/settings.md). Logs are JSON on standard error. |
 
 Benchmark (`benchmarks/audit_cpu.py`, 50,000 images and 500,000 boxes, 64 KiB files, 12 cores): 37.6 s
@@ -24,28 +26,14 @@ end to end, 1.35 GB peak memory; details in the [architecture overview](architec
 |---|---|
 | `split` | Split a dataset by group so that near copies stay on one side, optionally balanced per class. |
 | label noise | Find likely wrong labels (an optional Cleanlab backend). |
-| `propose` | Suggest missing boxes or fixes with vision-language models and SAM 3. |
-| `review` | Send proposals to CVAT or FiftyOne for a person to accept or reject. |
-| `apply` | Write the accepted proposals as a new dataset version; the original is unchanged. |
-| more extras | Extras for the proposal models; today the only extra is `embed`. |
+| more proposals | Proposals that change a class, delete a box or refine a box; SAM 3 and Qwen3-VL proposers; consensus between models; review in FiftyOne. See [ADR-0008](adr/0008-propose-review-apply.md) for what was left out on purpose. |
+| more extras | Extras for SAM 3 and the Cleanlab backend; today the extras are `embed` and `vlm`. |
 
-The intended command line, kept here so the design can be reviewed against concrete calls:
+The intended command line for `split`, kept here so the design can be reviewed against a concrete call:
 
 <!-- skip: planned, not implemented -->
 ```bash
 datacopilot split fridge.dcp --by-group --ratios 0.8,0.1,0.1 --stratify category
-datacopilot propose fridge.dcp --proposer missing_boxes --models grounding-dino-base,sam3 --consensus 2
-datacopilot review fridge.dcp --proposals latest --to cvat --project 12
-datacopilot apply fridge.dcp --proposals latest --accepted-only
-```
-
-<!-- skip: planned, not implemented -->
-```python
-props = dc.propose(
-    ds, "missing_boxes", models=["grounding-dino-base"], prompts_from="category.aliases"
-)
-props.to_fiftyone("fridge_review")  # human review in FiftyOne
-ds2 = props.apply(ds, status="accepted")  # a new dataset version; ds is unchanged
 ```
 
 The [architecture documents](architecture/README.md) mark every component as built or planned.

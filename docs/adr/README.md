@@ -9,5 +9,6 @@
 | [0005](0005-plugin-system.md) | Plugin system |
 | [0006](0006-dataset-format.md) | Dataset format |
 | [0007](0007-embedding-cache-and-index.md) | Embedding cache and index |
+| [0008](0008-propose-review-apply.md) | Propose, review, apply |
 
 New decisions start from the [template](0000-template.md).

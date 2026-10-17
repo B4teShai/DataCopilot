@@ -13,7 +13,8 @@ PAGES = sorted([DOCS / "index.md", DOCS / "tutorial.md", *(DOCS / "guide").glob(
 def test_the_user_pages_exist() -> None:
     names = {p.name for p in PAGES}
     assert {"index.md", "tutorial.md", "install.md", "concepts.md", "formats.md", "audit-ci.md",
-            "embeddings.md", "trust-model.md", "python-api.md"} <= names  # fmt: skip
+            "embeddings.md", "trust-model.md", "python-api.md",
+            "proposals.md"} <= names  # fmt: skip
 
 
 @pytest.mark.parametrize("page", PAGES, ids=lambda p: p.name)

@@ -100,10 +100,10 @@ never be placed in a free-text field or an exception message.
 | Extra | Unlocks | Dependencies | Hardware |
 |---|---|---|---|
 | `embed` | built: embedders `dinov2_small`, `dinov2_base`, `siglip2_base` and the near-duplicate, leakage and outlier checks; planned: `dinov3-*` (gated; DINOv3 License) and the label-noise check | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, `faiss-cpu`, `torch` (declared in `pyproject.toml`; nothing is imported by the core) | CPU works (slow); GPU with 8 GB VRAM recommended |
-| `vlm` | proposers `missing_boxes` (Grounding DINO), `class_verify` (Qwen3-VL locally or via `DATACOPILOT_VLLM_URL`) | `torch`, `transformers`, an OpenAI-compatible HTTP client | 8–12 GB VRAM local; none when using a vLLM endpoint |
+| `vlm` | built: proposer `grounding_dino` (Grounding DINO tiny, Apache-2.0); planned: `class_verify` (Qwen3-VL locally or via `DATACOPILOT_VLLM_URL`) | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, `torch` (declared in `pyproject.toml` with the floors the real run used) | about 2 GB of memory on the CPU (the measured run used the CPU); a GPU is used when available |
 | `sam3` | `box_refine` and SAM 3 agreement in `missing_boxes` | the SAM 3 package; user accepts the SAM License on the Hub | 16–24 GB VRAM; Python ≥ 3.12, PyTorch ≥ 2.7, CUDA ≥ 12.6 |
 | `fiftyone` | `review --to fiftyone`, `ProposalSet.to_fiftyone`, `from_fiftyone` | `fiftyone` (Apache-2.0; runs its own MongoDB) | CPU |
-| `cvat` | `review --to cvat`, decisions import | `cvat-sdk` (MIT) | network to a CVAT server |
+| `cvat` | planned: `review --to cvat` against a CVAT server (today review works through exported files, no extra needed) | `cvat-sdk` (MIT) | network to a CVAT server |
 | `cleanlab` | Cleanlab confident learning as the backend of the `label_noise` check (classification and detection); without it the check is skipped with a `WARN` | `cleanlab` (AGPL-3.0; imported lazily inside the adapter). Notice: installing and using this extra makes the user's combined work subject to AGPL-3.0 ([ADR-0001](../adr/0001-scope-and-license.md)) | CPU |
 
 All extras are imported inside the function that needs them; a missing extra produces one

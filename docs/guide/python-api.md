@@ -1,6 +1,6 @@
 # Python API
 
-Three functions over the same code as the commands, importable from the top-level package. The
+Five functions over the same code as the commands, importable from the top-level package. The
 public API is `datacopilot.__all__`; everything else may change in any release.
 
 <!-- run -->
@@ -20,6 +20,8 @@ print(sorted(dc.__all__)[:3], callable(dc.load), callable(dc.audit), callable(dc
 | `load(path, format=None, *, group_by=None, strict=False)` | `Dataset` | read a source dataset or a `.dcp` directory into memory; nothing is written |
 | `audit(dataset, checks="all", *, fail_on=("critical",), embedder=None, ...)` | `AuditRun` | run the checks; `run.passed` is the gate's verdict |
 | `export(dataset, format, out, *, strict=False)` | `ConversionReport` | write a format; every loss is counted |
+| `propose(dataset, proposer="grounding_dino", *, classes=None, min_score=0.35, ...)` | `ProposalSet` | find missing boxes and store them in the `.dcp`; see [Propose, review, apply](proposals.md) |
+| `apply(dataset, proposals, out, *, allow_incomplete=False)` | `DatasetManifest` | write the accepted proposals of a reviewed set as a new dataset |
 
 <!-- skip: illustrative; the tutorial runs the same calls -->
 ```python

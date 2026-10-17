@@ -14,7 +14,7 @@ work starts. Secrets are only read from the environment and never printed or log
 | `DATACOPILOT_CACHE_DIR` | where caches live | `~/.cache/datacopilot` |
 | `DATACOPILOT_HASH_CACHE` | `false` disables the file-hash cache (same as `--no-hash-cache`) | `true` |
 | `DATACOPILOT_CACHE_KEY` | out-of-band key that authenticates caches; needed for the embedding cache in CI | unset |
-| `DATACOPILOT_ALLOWED_LICENSES` | licenses a model may carry | `Apache-2.0,MIT,BSD-3-Clause` |
+| `DATACOPILOT_ALLOWED_LICENSES` | licenses a model may carry; checked before `propose` reads the dataset and again by `apply` | `Apache-2.0,MIT,BSD-3-Clause` |
 
 Logs are JSON records on standard error with `@timestamp`, `level`, `message`, `service`, `env`,
 `request_id` and `logger`. `datacopilot doctor` shows the validated settings.

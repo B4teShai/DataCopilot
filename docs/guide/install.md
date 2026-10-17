@@ -25,14 +25,16 @@ uv run datacopilot --version
 | Extra | Adds | Needed for |
 |---|---|---|
 | `embed` | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, `faiss-cpu`, and the tensor library | `--embedder dinov2_small`, `dinov2_base`, `siglip2_base` |
+| `vlm` | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, and the tensor library | `propose --proposer grounding_dino` ([Propose, review, apply](proposals.md)) |
 
 <!-- skip: network install -->
 ```bash
 pip install "datacopilot[embed]"
+pip install "datacopilot[vlm]"
 ```
 
-`embed` is the only extra. Extras for the proposal workflow (vision-language models, SAM 3, the Cleanlab
-backend) will be published when those features exist.
+`embed` and `vlm` are the extras that exist. Extras for SAM 3 and the Cleanlab backend will be published
+when those features exist. `datacopilot doctor` lists which extras are importable.
 
 ## Check the installation
 

@@ -6,6 +6,25 @@ once a release is tagged.
 
 ## Unreleased
 
+### Added (propose, review, apply)
+
+- `datacopilot propose`, `review export`, `review import` and `apply`, and `dc.propose` and `dc.apply` with
+  `ProposalSet`: a detection model finds boxes a dataset is probably missing, they are reviewed as a separate
+  CVAT layer, and the accepted ones are written as a NEW dataset version with lineage; nothing is applied
+  without a person's decision and no existing version is touched. Only `add_box` proposals exist. See
+  [ADR-0008](docs/adr/0008-propose-review-apply.md) for what was left out on purpose.
+- Proposal sets are one JSON file under `dataset.dcp/proposals/`, named by the digest of their content and bound
+  to the dataset version and the model (id, revision, weight hashes); every candidate from a model is validated
+  and counted by reason; an incomplete run is marked and refused by `apply` without `--allow-incomplete`.
+- Proposer registry (`datacopilot.proposers`), the `grounding_dino` proposer (Grounding DINO tiny, Apache-2.0,
+  pinned weights, configuration and tokenizer files, safetensors, no remote code) and the test-only `test_boxes`.
+- New extra `vlm` (`pillow`, `safetensors`, `huggingface-hub`, `transformers`, torch); `ModelCard` gained
+  `aux_sha256` and `pinned_files()`, and `dims` is optional for a detector.
+- `DatasetStore.create(..., lineage=...)`, `write_proposals` and `read_proposals`.
+- Public API: `propose`, `apply` and `ProposalSet` join `__all__` (the API snapshot is updated; before 1.0 a minor
+  version may break the API).
+- Notebook `03_propose_review_apply.ipynb`: the real model on COCO128 with a seeded held-out answer key.
+
 ### Fixed
 
 - The command line prints one `error:` line (no directory, no temporary-file suffix) when the output
