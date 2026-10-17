@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOKS = ROOT / "notebooks"
-NAMES = ("01_tutorial.ipynb", "02_edge_cases.ipynb")
+NAMES = ("01_tutorial.ipynb", "02_edge_cases.ipynb", "03_propose_review_apply.ipynb")
 MAX_BYTES = 1_500_000
 MAX_PNG = 8
 MAX_TEXT = 20_000
@@ -244,3 +244,85 @@ def test_the_download_check_notices_a_doctored_notebook() -> None:
             "zipfile.ZipFile(archive_path)\n    archive.extractall(destination)",
         )
     )
+
+
+# ------------------------------------------------------------ the propose, review, apply notebook
+PROPOSE = "03_propose_review_apply.ipynb"
+
+
+def all_output(name: str) -> str:
+    return "\n".join(t for c in load(name)["cells"] for t in output_texts(c))
+
+
+def test_the_propose_notebook_ran_the_real_pinned_model_on_every_photo() -> None:
+    out = all_output(PROPOSE)
+    assert "model=grounding_dino@a2bb814dd30d" in out  # the pinned revision, not a test double
+    assert "test_boxes" not in out
+    assert re.search(r"images=128/128 set=[0-9a-f]{32}", out)
+    assert "photos looked at      : 128 of 128 | incomplete: None" in out
+    assert "bound to the version  : True" in out
+
+
+def test_the_propose_notebook_reports_every_number_the_plan_asks_for() -> None:
+    out = all_output(PROPOSE)
+    for needle in (
+        "deleted (held out)",
+        "proposals that are right",
+        "precision (right / proposals)",
+        "recall (found / deleted)",
+        "TUNED ON THE SAME DATA",
+        "run time",
+        "classes in val",
+        "Verdict: the precision is",
+    ):
+        assert needle in out, needle
+    held = re.search(r"deleted \(held out\): (\d+) boxes = (\d+\.\d) percent", out)
+    assert held and 15.0 <= float(held.group(2)) <= 25.0  # about one box in five
+    assert re.search(r"precision \(right / proposals\): 0\.\d{3}", out)
+
+
+def test_the_propose_notebook_draws_six_mistakes_and_a_curve() -> None:
+    cells = load(PROPOSE)["cells"]
+    pictures = sum("image/png" in o.get("data", {}) for c in cells for o in c.get("outputs", []))
+    assert pictures == 2
+    out = all_output(PROPOSE)
+    assert len(re.findall(r"proposed '[a-z ]+' with confidence 0\.\d\d", out)) == 6
+
+
+def test_the_propose_notebook_states_its_caveats_in_plain_words() -> None:
+    text = " ".join(source(c) for c in load(PROPOSE)["cells"])
+    for needle in (
+        "lower bound",
+        "tuned on the same data",
+        "not labelled exhaustively",
+        "What this shows",
+        "What you learned",
+        "CC BY 4.0",
+        "Flickr",
+        "never applied",
+    ):
+        assert needle in text or needle.capitalize() in text, needle
+
+
+def test_the_propose_notebook_refusal_table_has_no_mismatch() -> None:
+    out = all_output(PROPOSE)
+    assert re.search(r"\b(\d+) cases, \1 as expected, 0 mismatches", out)
+    tables = [
+        text_of(o["data"]["text/markdown"])
+        for c in load(PROPOSE)["cells"]
+        for o in c.get("outputs", [])
+        if "text/markdown" in o.get("data", {})
+        and "| Case |" in text_of(o["data"]["text/markdown"])
+    ]
+    assert len(tables) == 1
+    rows = [ln for ln in tables[0].splitlines() if ln.startswith("| ")][1:]
+    assert len(rows) >= 7 and all(r.rstrip().endswith("| ok |") for r in rows)
+    for cause in ("edited by hand", "another dataset version", "allow-list", "source dataset",
+                  "entity bomb", "time budget", "--allow-incomplete"):  # fmt: skip
+        assert cause in tables[0], cause
+
+
+def test_the_propose_notebook_never_loads_a_pickle_or_an_unpinned_model() -> None:
+    code = "\n".join(source(c) for c in load(PROPOSE)["cells"] if c["cell_type"] == "code")
+    assert "trust_remote_code" not in code and "from_pretrained" not in code
+    assert "get_model(" in code and "grounding_dino" in code
