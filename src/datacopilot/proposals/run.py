@@ -31,6 +31,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 
 from datacopilot.audit.context import CheckContext
 from datacopilot.audit.embedding import read_verified
@@ -309,6 +310,6 @@ def _image_proposals(
     return out
 
 
-def _overlaps(box: np.ndarray, others: Sequence[_Box], threshold: float) -> bool:  # type: ignore[type-arg]
+def _overlaps(box: NDArray[np.float64], others: Sequence[_Box], threshold: float) -> bool:
     iou = iou_xyxy(box, np.asarray(others, dtype=np.float64))
     return bool((iou >= threshold).any())
