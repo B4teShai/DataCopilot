@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from datacopilot.core.errors import StoreError, ValidationError
-from datacopilot.core.proposals import ProposalSet
+from datacopilot.core.proposals import ProposalSet, validate_against
 from datacopilot.core.schema import Dataset, DatasetManifest
 from datacopilot.io.report import ConversionReport
 from datacopilot.logging import get_logger
@@ -116,6 +116,7 @@ def apply_set(
     """Write the accepted proposals of the set as the new dataset ``out`` (see ``apply.py``)."""
     store, ds = _open(dataset, settings)
     ps = store.read_proposals(set_id)
+    validate_against(ps, ds)  # the cheap, clearest refusal first (another dataset version)
     parent = None
     if ps.parent_set_id is not None:
         try:

@@ -91,7 +91,8 @@ ProposalSet fields:
 | `images_total`, `images_done` | int | Images in the dataset and images the model ran on |
 | `incomplete_reason` | `time_budget\|images_skipped\|proposal_cap` or null | Set exactly when `images_done < images_total`; `apply` refuses an incomplete set unless asked |
 | `rejected` | dict[str, int] | Dropped candidates (and class names) counted by constant reason, at most 16 reasons |
-| `parent_set_id` | str or null | The set a review was derived from |
+| `parent_set_id` | str or null | The set a review was derived from; `apply` requires it (a fresh run is never applied) |
+| `test_only` | bool | The proposer is a test double; `apply` refuses it unless asked |
 | `proposals` | list[Proposal] | In canonical order: image, descending score, class, box, id |
 
 Proposal fields:
@@ -103,7 +104,7 @@ Proposal fields:
 | `image_id` | str | Image the box was found in |
 | `category_id` | int | Class |
 | `bbox_xyxy_abs` | float[4] | Absolute pixel box (rounded to 0.01); after a review, the reviewer's box |
-| `score` | float | Model confidence, above 0 and at most 1 |
+| `score` | float | Model confidence, above 0 and at most 1, rounded to 4 decimals so a model rerun gives the same set id |
 | `prompt` | str | The class name or alias the model was asked about (one printable line, at most 64 characters) |
 | `status` | `pending\|accepted\|rejected` | Default `pending`; set by `review import`, which writes a new set |
 | `edited` | bool | The reviewer moved the box before accepting it (only with `accepted`) |

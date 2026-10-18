@@ -58,10 +58,21 @@ Option B, with the smallest useful content.
    attributes `proposal_id`, `score`, `decision`. A deleted box decides nothing, so truncation cannot reject
    anything. Unknown, repeated or foreign ids, changed classes, invalid decisions and boxes edited outside
    the image refuse the whole file.
-7. **`apply` appends only.** It calls `DatasetStore.create` (never `write_version`), with the parent's
-   lineage plus the parent's version; the output must be a new path outside the source. It refuses a set
-   for another version, an unpinned or unlicensed model, an incomplete run and a set with nothing accepted.
-8. **Proposals are not a version.** They do not change `manifest.version`; only `apply` does.
+7. **`apply` appends only.** It calls `DatasetStore.create` (never `write_version`; the output directory is
+   created exclusively), with the parent's lineage plus the parent's version; the output must be a new path
+   outside the source (the source is a required argument). It refuses a set for another version, a set that did
+   not come through `review import` or is not exactly a review of its parent, a test double (unless
+   `--allow-test-proposer`), a set that claims the identity of a registered model it was not made by, an
+   unpinned or unlicensed model, an incomplete run and a set with nothing accepted. Each new row records the
+   model, revision, set and whether the box was edited; an edited box loses the model's score; the reviewed set
+   and its parent are copied into the new dataset so the provenance survives deleting the source.
+   A set id is a digest, not a signature: it detects change, not authorship. Whoever can write into the dataset
+   directory can write a self-consistent set; the review marker and the parent check make that deliberate, not
+   accidental.
+8. **Exports verify images.** Every exporter (and `review export`) resolves each image path inside the dataset
+   directory, refuses links to elsewhere, caps the size and requires the content to equal `image_id`, or
+   exports nothing; this closed a hole in all exporters, found in review.
+9. **Proposals are not a version.** They do not change `manifest.version`; only `apply` does.
 
 ### What was deliberately NOT built
 
@@ -78,6 +89,21 @@ Option B, with the smallest useful content.
 - **Evidence crops, `reviewer_id`, a `latest` alias for a set id, an `--accepted-only` flag** (apply only
   ever applies accepted proposals) **and the base-size Grounding DINO checkpoint.**
 - **GPU-specific code paths** beyond the CPU/CUDA choice the embedders already make.
+- **Guessing a class from a merged label.** The decoder sometimes names two classes in one box; those are
+  counted (`ambiguous_label`) and dropped, not resolved.
+
+### Accepted risks
+
+- A file can change between the checksum check and the model library reading it (time of check to time of use);
+  the files are in the user's own cache directory. Copying the pinned files to a private directory first is a
+  small follow-up.
+- Memory use of parsing a 128 MiB proposal file is estimated, not measured; the proposal count is capped at
+  200,000 and the file at 128 MiB.
+- `apply` reads the dataset under the table limits but writes the new dataset without re-applying them (it adds
+  at most 200,000 rows).
+- The time budget is checked between images, not between the prompt passes of one image (at most about 8
+  passes for 512 phrases).
+- The reviewer in the notebook is an oracle and the deletions are random, so its recall is optimistic.
 
 ## Consequences
 

@@ -149,8 +149,9 @@ Steps (built):
    and counted. Unknown, repeated or foreign ids, changed classes, invalid decisions, boxes edited outside
    the image and a file without decisions are refused as a whole.
 8. `datacopilot apply ds.dcp --proposals NEWID -o NEW.dcp` writes a new dataset: the old rows plus one row
-   per accepted proposal (`provenance=proposal_accepted`, `source` has `proposal_id` and `set_id`, id
-   `proposal:<proposal_id>`), `lineage` = the parent's lineage plus the parent's version. The new
+   per accepted proposal (`provenance=proposal_accepted`, id `proposal:<proposal_id>`, `source` has
+   `proposal_id`, `set_id`, `model_id`, `model_revision` and `edited`; an edited box has no score), and copies
+   the reviewed set and its parent into `NEW.dcp/proposals/`; `lineage` = the parent's lineage plus the parent's version. The new
    `manifest.version` is printed on `stdout`. The source directory is never written.
 
 Failure paths:
@@ -165,7 +166,8 @@ Failure paths:
 | Run did not reach every image | set stored and marked incomplete; `apply` refuses it without `--allow-incomplete` | 1 |
 | Set file tampered, unknown or not a regular file | `StoreError` | 1 |
 | Set made for another dataset version, or by a model that is not the pinned revision and files | `ValidationError`; nothing written | 1 |
-| Decisions file refused (see step 7) | `ValidationError` or `FormatError`; no set stored | 1 |
+| Decisions file refused (see step 7; also images missing from the folder and rotated proposal boxes) | `ValidationError` or `FormatError`; no set stored | 1 |
+| `apply` of a set that did not come through `review import`, is not a review of its parent, or comes from a test double (without `--allow-test-proposer`) | `ValidationError`; nothing written | 1 |
 | `apply` with nothing accepted, output existing or inside the source | `ValidationError` / `StoreError`; nothing written | 1 |
 
 Logged events: `proposer_started`, `proposer_image_skipped`, `propose_progress`,

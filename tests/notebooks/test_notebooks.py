@@ -292,7 +292,9 @@ def test_the_propose_notebook_draws_six_mistakes_and_a_curve() -> None:
 def test_the_propose_notebook_states_its_caveats_in_plain_words() -> None:
     text = " ".join(source(c) for c in load(PROPOSE)["cells"])
     for needle in (
-        "lower bound",
+        "oracle",
+        "random",
+        "understate",
         "tuned on the same data",
         "not labelled exhaustively",
         "What this shows",
@@ -317,8 +319,9 @@ def test_the_propose_notebook_refusal_table_has_no_mismatch() -> None:
     assert len(tables) == 1
     rows = [ln for ln in tables[0].splitlines() if ln.startswith("| ")][1:]
     assert len(rows) >= 7 and all(r.rstrip().endswith("| ok |") for r in rows)
-    for cause in ("edited by hand", "another dataset version", "allow-list", "source dataset",
-                  "entity bomb", "time budget", "--allow-incomplete"):  # fmt: skip
+    causes = ("edited by hand", "another dataset version", "allow-list", "source dataset",
+              "entity bomb", "time budget", "--allow-incomplete", "nobody reviewed")  # fmt: skip
+    for cause in causes:
         assert cause in tables[0], cause
 
 

@@ -27,6 +27,21 @@ once a release is tagged.
 
 ### Fixed
 
+- Security: every exporter and `review export` copied whatever file `Image.file_path` named, so a hostile `.dcp`
+  could copy `~/.ssh/id_rsa` into the output. Exports now verify each image (inside the dataset's directory, no
+  link to elsewhere, size cap, content equal to `image_id`) and refuse the whole export otherwise;
+  `export --allow-external-images` lifts only the directory rule. `DatasetStore.read` now sets `Dataset.root`.
+- Propose, review and apply (fix wave after independent reviews): `apply` needs a reviewed set (and, when
+  present, its parent), refuses test doubles without `--allow-test-proposer`, pins the identity a set claims,
+  keeps the model score only for unedited boxes and copies the sets into the new dataset; `review import`
+  refuses missing images and rotated proposal boxes and caps the file; `propose` rejects bad threshold keys
+  before the model runs, drops a phrase two classes share for both, no longer loses a photo without
+  detections (the real model returns one empty label there), lowers the word threshold with `--min-score`,
+  skips an image whose decoded size differs, counts merged and fragmentary labels (`ambiguous_label`) instead of
+  guessing, stores scores with 4 decimals, writes non-ASCII class names safely and no longer reports a late
+  `ValueError` as a bad option. Real numbers of the notebook did not change at the default threshold
+  (215 proposals, 84 right, precision 0.39, recall 0.47); the 39 dropped labels are now 37 `ambiguous_label` and
+  2 `unknown_label`; the sweep rows below 0.35 changed (0.20: 824 proposals, precision 0.14, recall 0.63).
 - The command line prints one `error:` line (no directory, no temporary-file suffix) when the output
   folder cannot be written, instead of only a JSON log with a traceback.
 - YOLO and VOC writers kept annotation order by comparing ids as text, so an image with more than ten

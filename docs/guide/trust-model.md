@@ -23,6 +23,11 @@ is the user-facing summary.
 - **Names** (classes, attributes) are data: they are escaped by every serialiser (XML, JSON, the HTML
   report) and stripped of control characters before they reach a terminal or a log.
 - **Special files** (FIFOs, devices) are rejected on the opened descriptor.
+- **Images named by a dataset** are never copied blindly: `export` and `review export` resolve every image
+  path inside the dataset's directory, refuse links to elsewhere, remote and unsafe paths, cap the size and
+  require the content to match the recorded `image_id`, or export nothing (`--allow-external-images` lifts
+  only the directory rule, never the content check). A hostile `.dcp` can therefore not use an export to copy
+  `~/.ssh/id_rsa` into the output.
 
 ## What never happens
 
