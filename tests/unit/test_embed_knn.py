@@ -335,3 +335,21 @@ def test_faiss_is_not_imported_after_the_tensor_library_on_macos(
         knn.knn(v, v, 1, same_set=True, backend="faiss")
     monkeypatch.setattr(sys, "platform", "linux")
     assert knn._import_faiss() is sentinel
+
+
+def test_many_rows_tied_at_the_kth_place_do_not_blow_up_the_ordering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    same = np.tile(np.eye(1, 8, 0, dtype=np.float32), (300, 1))  # 300 identical rows
+    widest: list[int] = []
+    real = knn._order
+
+    def spy(sims: Any, cols: Any, k: int) -> Any:
+        widest.append(len(cols))
+        return real(sims, cols, k)
+
+    monkeypatch.setattr(knn, "_order", spy)
+    idx, sims = knn.knn(same, same, 3, same_set=True, backend="numpy")
+    assert max(widest) <= 3  # only the k winners are ordered, not every tied column
+    assert idx[0].tolist() == [1, 2, 3] and idx[5].tolist() == [0, 1, 2]  # lowest index wins ties
+    assert np.allclose(sims, 1.0)

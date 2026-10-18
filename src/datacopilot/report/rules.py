@@ -42,6 +42,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "label_noise/suspect_class": "Annotation class disagrees with its neighbouring images",
     "label_noise/skipped": "The label-noise check did not run (see the reason)",
     "label_noise/annotations_not_scored": "Annotations with few close neighbours were not scored",
+    "label_noise/classes_truncated": "Images with many classes were cut for the neighbour test",
     "label_noise/suspects_truncated": "Suspect annotations beyond the per-image or per-class cap",
     "outliers/outlier": "Image is unlike the rest of its class",
     "outliers/classes_skipped": "Classes too small for the outlier check",

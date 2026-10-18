@@ -85,7 +85,13 @@ def unchecked_severity(
 
 
 def display_name(file_path: str) -> str:
-    """Base name of ``file_path`` for findings (never the directory), at most 255 characters."""
+    """Base name of ``file_path`` for findings (never the directory), at most 255 characters.
+
+    A remote URI loses its query string and fragment first (a presigned URL carries a credential
+    and a signature there) and shows only the last path segment, without scheme or host.
+    """
+    if _is_remote(file_path):
+        file_path = file_path.partition("?")[0].partition("#")[0]
     return file_path.replace("\\", "/").rsplit("/", 1)[-1][:MAX_NAME_CHARS]
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import random
 import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from fixtures.embedscene import Row, scene
 from sarif_shape import validate_sarif
 
 from datacopilot.audit import engine, registry
-from datacopilot.audit.checks import label_noise
+from datacopilot.audit.checks import embedtools, label_noise
 from datacopilot.audit.context import CheckConfig
 from datacopilot.core.schema import Dataset, Finding
 from datacopilot.embed import knn
@@ -153,7 +154,7 @@ def test_neighbours_below_the_similarity_floor_are_not_used_and_are_counted(
     found = label_noise.plugin.run(ds, cfg(ctx, suspect_min_similarity=0.9))
     assert of(found, "suspect_class") == []  # the loner has no neighbour close enough
     (n,) = of(found, "annotations_not_scored")
-    assert n.severity == "INFO" and n.payload["count"] == 1 and n.payload["min_similarity"] == 0.9
+    assert n.severity == "WARN" and n.payload["count"] == 1 and n.payload["min_similarity"] == 0.9
     assert n.payload["min_neighbours"] == 3
 
 
@@ -274,14 +275,14 @@ def test_a_dataset_that_is_too_small_is_a_skipped_finding_not_a_pass(tmp_path: P
 def test_a_dataset_without_annotations_is_a_skipped_finding(tmp_path: Path) -> None:
     ds, _, ctx = scene(tmp_path, [Row(f"n{k}.png", cat=None) for k in range(40)])
     (skip,) = label_noise.plugin.run(ds, ctx)
-    assert skip.payload["reason"] == "no_annotations"
+    assert skip.payload["reason"] == "no_annotations" and skip.severity == "INFO"
 
 
 def test_a_single_class_dataset_is_a_skipped_finding(tmp_path: Path) -> None:
     rows = [Row(f"a{k}.png", vec=near(CENTRE_A, 0.08, seed=k), cat=0) for k in range(40)]
     ds, _, ctx = scene(tmp_path, rows)
     (skip,) = label_noise.plugin.run(ds, ctx)
-    assert skip.payload["reason"] == "single_class"
+    assert skip.payload["reason"] == "single_class" and skip.severity == "INFO"
 
 
 def test_a_partly_embedded_dataset_reports_the_missing_images_and_still_checks(
@@ -296,35 +297,42 @@ def test_a_partly_embedded_dataset_reports_the_missing_images_and_still_checks(
     assert len(of(found, "suspect_class")) == 1
 
 
-def test_a_time_budget_is_an_audit_incomplete_finding(
+def test_the_real_time_budget_ends_the_search_and_says_so(tmp_path: Path) -> None:
+    ds, _, ctx = scene(tmp_path, clusters())
+    label_noise.plugin.run(ds, ctx)  # embeds once; the provider keeps the result in memory
+    tight = cfg(ctx, max_check_seconds=1e-9)
+    found = label_noise.plugin.run(ds, tight)
+    (inc,) = of(found, "audit_incomplete")
+    assert inc.severity == "CRITICAL" and inc.payload["reason"] == "time_budget"
+    assert inc.payload["checked"] == 0 and inc.payload["total"] == 32
+    soft = tight.model_copy(update={"incomplete_is_critical": False})
+    assert of(label_noise.plugin.run(ds, soft), "audit_incomplete")[0].severity == "WARN"
+
+
+def test_the_budget_is_checked_for_every_row_not_only_between_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ds, _, ctx = scene(tmp_path, clusters())
-    real = knn.iter_knn
-
-    def one_block(*a: Any, **kw: Any) -> Any:
-        for i, block in enumerate(real(*a, **{**kw, "max_block_bytes": 8 * 32 * 4})):
-            if i == 1:
-                return
-            yield block
-
-    monkeypatch.setattr(knn, "iter_knn", one_block)
-    found = label_noise.plugin.run(ds, ctx)
+    label_noise.plugin.run(ds, ctx)
+    ticks, start = iter(range(10_000)), time.monotonic()
+    fake = types.SimpleNamespace(monotonic=lambda: start + next(ticks))
+    monkeypatch.setattr(label_noise, "time", fake)
+    found = label_noise.plugin.run(
+        ds, cfg(ctx, max_check_seconds=5.5)
+    )  # the whole matrix is one block
     (inc,) = of(found, "audit_incomplete")
-    assert inc.severity == "CRITICAL" and inc.payload["reason"] == "time_budget"
-    assert 0 < inc.payload["checked"] < inc.payload["total"]  # type: ignore[operator]
-    soft = label_noise.plugin.run(ds, ctx.model_copy(update={"incomplete_is_critical": False}))
-    assert of(soft, "audit_incomplete")[0].severity == "WARN"
-    assert time.monotonic() > 0
+    assert inc.payload["checked"] == 5 and inc.payload["total"] == 32
 
 
-def test_more_images_than_the_search_supports_is_audit_incomplete(
+def test_a_dataset_the_embedding_run_refuses_is_skipped_for_that_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ds, _, ctx = scene(tmp_path, clusters())
     monkeypatch.setattr(knn, "MAX_KNN_ROWS", 5)
     found = label_noise.plugin.run(ds, ctx)
     assert of(found, "audit_incomplete")[0].payload["reason"] == "too_many_images"
+    (skip,) = of(found, "skipped")
+    assert skip.payload["reason"] == "too_many_images"
     assert of(found, "suspect_class") == []
 
 
@@ -351,6 +359,7 @@ def test_every_rule_has_a_human_description() -> None:
         "skipped",
         "annotations_not_scored",
         "suspects_truncated",
+        "classes_truncated",
         "embedder_missing",
         "images_not_embedded",
     ):
@@ -389,3 +398,264 @@ def test_the_finding_renders_escaped_in_all_three_formats_and_gates_by_name(
     assert [f["payload"]["rule"] for f in doc["findings"]] == ["suspect_class"]
     for name in ("r.html", "r.json", "r.sarif"):
         assert str(tmp_path) not in (out / name).read_text()
+
+
+# ------------------------------------------------------------ similarity floor, neighbour count
+def basis(i: int) -> np.ndarray:
+    v = np.zeros(16, dtype=np.float32)
+    v[i] = 1.0
+    return v
+
+
+def group(prefix: str, centre: int, noise_axes: list[int], cosine: float, cat: int) -> list[Row]:
+    """Images whose pairwise cosine is exactly ``cosine`` (orthogonal noise around one centre)."""
+    return [
+        Row(
+            f"{prefix}{k}.png",
+            vec=(np.sqrt(cosine) * basis(centre) + np.sqrt(1 - cosine) * basis(axis)).astype(
+                np.float32
+            ),
+            cat=cat,
+        )
+        for k, axis in enumerate(noise_axes)
+    ]
+
+
+SMALL = dict(suspect_min_images=5, suspect_k=4)
+
+
+@pytest.mark.parametrize(("cosine", "scored"), [(0.2, False), (0.4, True)])
+def test_the_default_similarity_floor_is_point_three(
+    tmp_path: Path, cosine: float, scored: bool
+) -> None:
+    rows = group("a", 0, [1, 2, 3, 4, 5], cosine, 0) + group("b", 6, [7, 8, 9, 10, 11], cosine, 1)
+    rows[0] = Row("a0.png", vec=rows[0].vec, cat=1)  # one flip in group A
+    ds, _, ctx = scene(tmp_path, rows)
+    found = label_noise.plugin.run(ds, cfg(ctx, **SMALL))
+    assert bool(of(found, "suspect_class")) is scored
+    assert bool(of(found, "annotations_not_scored")) is (not scored)
+    loose = label_noise.plugin.run(ds, cfg(ctx, suspect_min_similarity=0.1, **SMALL))
+    assert of(loose, "suspect_class")
+
+
+def test_exactly_the_minimum_number_of_neighbours_is_enough_and_one_less_is_not(
+    tmp_path: Path,
+) -> None:
+    rows = group("a", 0, [1, 2, 3, 4], 0.5, 0) + group("b", 6, [7, 8, 9], 0.5, 1)
+    rows[0] = Row("a0.png", vec=rows[0].vec, cat=1)  # group A: 3 neighbours
+    rows[4] = Row("b0.png", vec=rows[4].vec, cat=0)  # group B: 2 neighbours
+    ds, _, ctx = scene(tmp_path, rows)
+    base = cfg(ctx, suspect_min_images=5, suspect_k=10)
+    found = label_noise.plugin.run(ds, base)
+    flagged = {names(ds)[f.image_id or ""] for f in of(found, "suspect_class")}
+    assert flagged == {"a0.png"}
+    (n,) = of(found, "annotations_not_scored")
+    assert n.payload["count"] == 3  # the three boxes of group B
+    two = label_noise.plugin.run(ds, cfg(ctx, suspect_min_neighbours=2, suspect_min_images=5))
+    assert {names(ds)[f.image_id or ""] for f in of(two, "suspect_class")} == {"a0.png", "b0.png"}
+    assert of(two, "annotations_not_scored") == []
+
+
+def test_a_floor_of_one_keeps_images_identical_to_float_precision_as_neighbours(
+    tmp_path: Path,
+) -> None:
+    same = random_unit(b"twins")
+    rows = [Row(f"s{k}.png", vec=near(same, 0.0007, seed=k), cat=0) for k in range(6)]
+    rows += [Row(f"t{k}.png", vec=random_unit(b"other"), cat=1) for k in range(6)]
+    rows[0] = Row("s0.png", vec=rows[0].vec, cat=1)
+    ds, _, ctx = scene(tmp_path, rows)
+    found = label_noise.plugin.run(
+        ds, cfg(ctx, suspect_min_similarity=1.0, suspect_min_images=5, suspect_k=5)
+    )
+    assert {names(ds)[f.image_id or ""] for f in of(found, "suspect_class")} == {"s0.png"}
+
+
+# ------------------------------------------------------------ ranking and caps keep the best
+def graded_scene() -> list[Row]:
+    rows = [
+        Row(f"a{k}.png", vec=near(CENTRE_A, 0.04 + 0.005 * k, seed=k), cat=0) for k in range(42)
+    ]
+    rows += [Row(f"b{k}.png", vec=near(CENTRE_B, 0.08, seed=100 + k), cat=1) for k in range(10)]
+    for k in range(0, 42, 3):  # a stray class-3 box on every third image of group A
+        rows[k] = Row(rows[k].name, vec=rows[k].vec, cats=(0, 2))
+    return rows
+
+
+def rank(f: Finding) -> tuple[float, float, str]:
+    return (float(f.payload["support"]), -float(f.payload["mean_similarity"]), f.ann_id or "")  # type: ignore[arg-type]
+
+
+def test_the_caps_keep_the_best_suspects_and_the_streaming_prune_is_exact(tmp_path: Path) -> None:
+    ds, _, ctx = scene(tmp_path, graded_scene())
+    wide = cfg(ctx, suspect_k=6, suspect_max_support=0.7, max_suspects_per_class=1000)
+    everything = sorted(of(label_noise.plugin.run(ds, wide), "suspect_class"), key=rank)
+    stray = [f for f in everything if f.payload["category_id"] == 3]
+    assert len(stray) > 5 and len({round(rank(f)[0], 3) for f in stray}) > 1
+    capped = cfg(ctx, suspect_k=6, suspect_max_support=0.7, max_suspects_per_class=2)
+    found = label_noise.plugin.run(ds, capped)  # more than 2 * cap candidates: the prune runs
+    kept = sorted(
+        (f for f in of(found, "suspect_class") if f.payload["category_id"] == 3), key=rank
+    )
+    assert [f.ann_id for f in kept] == [f.ann_id for f in stray[:2]]
+    dropped = of(found, "suspects_truncated")[0].payload["count"]
+    all_kept = len(of(found, "suspect_class"))
+    assert dropped == len(everything) - all_kept
+
+
+def test_the_global_cap_keeps_the_best_and_counts_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ds, _, ctx = scene(tmp_path, graded_scene())
+    wide = cfg(ctx, suspect_k=6, suspect_max_support=0.7, max_suspects_per_class=1000)
+    everything = sorted(of(label_noise.plugin.run(ds, wide), "suspect_class"), key=rank)
+    monkeypatch.setattr(label_noise, "MAX_SUSPECTS", 3)
+    found = label_noise.plugin.run(ds, wide)
+    kept = sorted(of(found, "suspect_class"), key=rank)
+    assert [f.ann_id for f in kept] == [f.ann_id for f in everything[:3]]
+    assert of(found, "suspects_truncated")[0].payload["count"] == len(everything) - 3
+
+
+def test_payloads_are_built_only_for_the_suspects_that_survive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ds, _, ctx = scene(tmp_path, graded_scene())
+    calls = []
+    real = embedtools.safe_label
+    monkeypatch.setattr(embedtools, "safe_label", lambda *a, **k: calls.append(1) or real(*a, **k))
+    tight = cfg(
+        ctx,
+        suspect_k=6,
+        suspect_max_support=0.7,
+        max_suspects_per_class=1,
+        max_suspects_per_image=1,
+    )
+    found = label_noise.plugin.run(ds, tight)
+    survivors = len(of(found, "suspect_class"))
+    assert survivors >= 1 and len(calls) <= survivors * (1 + label_noise.TOP_NEIGHBOUR_CLASSES)
+    assert of(found, "suspects_truncated")
+
+
+# ------------------------------------------------------------ hostile and awkward data
+def test_one_image_with_thousands_of_classes_cannot_make_every_row_expensive(
+    tmp_path: Path,
+) -> None:
+    ds, _, ctx = scene(tmp_path, clusters())
+    hub = ds.images[0]
+    template = ds.annotations[0]
+    extra = [
+        template.model_copy(
+            update={"ann_id": f"hub-{k}", "image_id": hub.image_id, "category_id": 1000 + k}
+        )
+        for k in range(3000)
+    ]
+    other = next(i for i in ds.images if i.image_id != hub.image_id)
+    extra.append(  # a box of a class only the hub carries, and only beyond the cap
+        template.model_copy(
+            update={"ann_id": "far", "image_id": other.image_id, "category_id": 3500}
+        )
+    )
+    hostile = Dataset(ds.manifest, ds.images, (*ds.annotations, *extra))
+    started = time.perf_counter()
+    found = label_noise.plugin.run(
+        hostile, cfg(ctx, suspect_k=31)
+    )  # the hub is everyone's neighbour
+    assert time.perf_counter() - started < 10
+    (cut,) = of(found, "classes_truncated")
+    assert cut.severity == "INFO" and cut.payload["count"] == 1
+    assert cut.payload["max_classes"] == label_noise.MAX_CARRIED_CLASSES
+    # classes beyond the cap do not count as carried: the box is a lead although the hub has it
+    assert "far" in {f.ann_id for f in of(found, "suspect_class")}
+
+
+def test_unscored_boxes_gate_like_unexamined_images(tmp_path: Path) -> None:
+    rows = group("a", 0, [1, 2, 3, 4, 5], 0.2, 0) + group("b", 6, [7, 8, 9, 10, 11], 0.2, 1)
+    ds, _, ctx = scene(tmp_path, rows)
+    found = label_noise.plugin.run(ds, cfg(ctx, **SMALL))
+    (n,) = of(found, "annotations_not_scored")
+    assert n.payload["count"] == n.payload["total"] == 10 and n.severity == "CRITICAL"
+    mild = [*clusters(), Row("lone.png", vec=random_unit(b"mild"), cat=2)]
+    (tmp_path / "m").mkdir()
+    ds2, _, ctx2 = scene(tmp_path / "m", mild)
+    assert of(label_noise.plugin.run(ds2, ctx2), "annotations_not_scored")[0].severity == "WARN"
+    strict = ctx2.model_copy(update={"require_local_images": True})
+    assert (
+        of(label_noise.plugin.run(ds2, strict), "annotations_not_scored")[0].severity == "CRITICAL"
+    )
+    gated = cfg(ctx, **SMALL)
+    assert (
+        engine.run_audit(ds, ["label_noise"], gated, ["critical"]).passed is False
+    )  # the default gate no longer passes a check that scored nothing
+
+
+def test_findings_do_not_depend_on_the_order_of_images_or_annotations_with_tied_vectors(
+    tmp_path: Path,
+) -> None:
+    twin = near(CENTRE_A, 0.05, seed=1)
+    rows = [Row(f"a{k}.png", vec=twin, cat=0) for k in range(10)]
+    rows += [Row(f"b{k}.png", vec=near(CENTRE_B, 0.08, seed=k), cat=1) for k in range(14)]
+    rows += [Row(f"c{k}.png", vec=twin, cat=0) for k in range(10)]
+    rows[3] = Row("a3.png", vec=twin, cat=1)
+    ds, _, ctx = scene(tmp_path, rows)
+    ctx = cfg(ctx, suspect_k=3)
+    first = label_noise.plugin.run(ds, ctx)
+    assert [names(ds)[f.image_id or ""] for f in of(first, "suspect_class")] == ["a3.png"]
+    for seed in (1, 2, 3):
+        images, anns = list(ds.images), list(ds.annotations)
+        random.Random(seed).shuffle(images)
+        random.Random(seed + 10).shuffle(anns)
+        other = Dataset(ds.manifest, tuple(images), tuple(anns))
+        assert label_noise.plugin.run(other, ctx) == first
+
+
+def test_a_model_box_on_a_neighbour_does_not_rescue_a_suspect(tmp_path: Path) -> None:
+    rows = clusters()
+    rows[3] = Row("a3.png", vec=rows[3].vec, cat=1)
+    ds, _, ctx = scene(tmp_path, rows)
+    anns = list(ds.annotations)
+    neighbour = next(a for a in anns if names(ds)[a.image_id] == "a4.png")
+    anns.append(
+        neighbour.model_copy(update={"ann_id": "m1", "category_id": 2, "provenance": "model"})
+    )
+    tainted = Dataset(ds.manifest, ds.images, tuple(anns))
+    run = engine.run_audit(tainted, ["label_noise"], ctx)
+    assert [
+        f.payload["category_id"] for f in run.findings if f.payload["rule"] == "suspect_class"
+    ] == [2]
+    inc = engine.run_audit(
+        tainted, ["label_noise"], ctx.model_copy(update={"include_model_annotations": True})
+    )
+    assert len([f for f in inc.findings if f.payload["rule"] == "suspect_class"]) <= 1
+
+
+def test_the_search_does_not_depend_on_whether_faiss_is_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ds, _, ctx = scene(tmp_path, clusters())
+    seen: list[str] = []
+    real = knn.iter_knn
+
+    def spy(*a: Any, **kw: Any) -> Any:
+        seen.append(kw.get("backend", "auto"))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(knn, "iter_knn", spy)
+    label_noise.plugin.run(ds, ctx)
+    assert seen == ["numpy"]
+
+
+def test_the_per_image_cap_keeps_the_lowest_support(tmp_path: Path) -> None:
+    rows = group("a", 0, [1, 2, 3, 4, 5], 0.5, 0)
+    rows[1] = Row("a1.png", vec=rows[1].vec, cats=(0, 1))  # two neighbours carry class 2
+    rows[2] = Row("a2.png", vec=rows[2].vec, cats=(0, 1))
+    rows[0] = Row(
+        "a0.png", vec=rows[0].vec, cats=(0, 1, 2)
+    )  # class 2: shared by 2 of 4; class 3: by none
+    rows += group("b", 6, [7, 8, 9, 10, 11], 0.5, 1)
+    ds, _, ctx = scene(tmp_path, rows)
+    one = cfg(
+        ctx, suspect_min_images=5, suspect_k=4, suspect_max_support=0.6, max_suspects_per_image=1
+    )
+    found = label_noise.plugin.run(ds, one)
+    mine = [f for f in of(found, "suspect_class") if names(ds)[f.image_id or ""] == "a0.png"]
+    assert [(f.payload["category_id"], f.payload["support"]) for f in mine] == [(3, 0.0)]
+    assert of(found, "suspects_truncated")[0].payload["count"] >= 1

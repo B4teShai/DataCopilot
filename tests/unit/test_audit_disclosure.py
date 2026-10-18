@@ -154,3 +154,53 @@ def test_resolved_path_is_a_real_path_inside_the_root(world: tuple[Path, Path]) 
     (root / "alias").symlink_to(root / "real")
     resolved = resolve_image_path(str(root / "alias" / "a.png"), root, allow_external=False)
     assert resolved.kind == "local" and resolved.path == (root / "real" / "a.png").resolve()
+
+
+PRESIGNED = (
+    "https://bucket.s3.amazonaws.com/private/team/photo.jpg"
+    "?X-Amz-Credential=AKIAEXAMPLEKEY%2F20260101&X-Amz-Signature=deadbeef01&X-Amz-Expires=300#frag"
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "shown"),
+    [
+        (PRESIGNED, "photo.jpg"),
+        ("s3://bucket/dir/a.png?versionId=SECRET", "a.png"),
+        ("images/dir/b.jpg", "b.jpg"),
+        ("C:\\data\\c.jpg", "c.jpg"),
+        ("local/odd?name#1.jpg", "odd?name#1.jpg"),  # only remote paths carry queries
+    ],
+)
+def test_display_name_never_shows_a_query_string_or_fragment_of_a_remote_path(
+    path: str, shown: str
+) -> None:
+    from datacopilot.audit.paths import display_name
+
+    assert display_name(path) == shown
+
+
+def test_a_presigned_url_does_not_reach_any_report_format(tmp_path: Path) -> None:
+    from datacopilot.audit import engine
+    from datacopilot.audit.findings import make_finding
+    from datacopilot.audit.paths import display_name
+    from datacopilot.report import render
+
+    ds = build(tmp_path, [Img("a.png", seed=1), Img("b.png", seed=2, path=PRESIGNED)])
+    run = engine.run_audit(ds, ["integrity"], ctx(tmp_path))
+    remote = next(i for i in ds.images if i.file_path == PRESIGNED)
+    # a check that names the image (the embedding checks do) gets the cleaned name
+    named = make_finding(
+        RUN,
+        "integrity",
+        "INFO",
+        image_id=remote.image_id,
+        payload={"rule": "exif_orientation", "file_name": display_name(remote.file_path)},
+    )
+    run = run.model_copy(update={"findings": (*run.findings, named)})
+    render(run, html=tmp_path / "r.html", json=tmp_path / "r.json", sarif=tmp_path / "r.sarif")
+    for name in ("r.html", "r.json", "r.sarif"):
+        text = (tmp_path / name).read_text()
+        assert "photo.jpg" in text or name == "r.sarif", name
+        assert "X-Amz" not in text and "AKIA" not in text and "deadbeef" not in text, name
+        assert "private/team" not in text and "amazonaws" not in text, name

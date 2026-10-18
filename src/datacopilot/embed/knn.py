@@ -6,8 +6,10 @@ similarity. Two backends compute the same thing:
 - **NumPy** (default, no extra dependency): query rows are processed in blocks; one block is a
   ``(rows, N)`` similarity matrix whose size is chosen from ``max_block_bytes``, so peak memory is
   about one block plus the vectors, never ``N x N``. Per query row the ``k`` best columns are chosen
-  exactly: the ``k``-th best similarity is found with a partition, every column at or above it is a
-  candidate, and the candidates are ordered by ``(similarity descending, index ascending)``.
+  exactly: the ``k``-th best similarity is found with a partition, every column above it is a
+  candidate, plus the lowest-index columns that tie with it (only as many as are missing, so a crowd
+  of identical rows costs no sort), and the candidates are ordered by
+  ``(similarity descending, index ascending)``.
   Ties therefore resolve to the lower index, and the result does not depend on the block size
   except through the platform's matrix-multiply rounding (about 1e-7 in similarity).
 - **FAISS** ``IndexFlatIP`` (exact, from the ``[embed]`` extra), used by ``auto`` only above
@@ -159,7 +161,9 @@ def _numpy_block(
     values = np.empty((rows, k), dtype=np.float32)
     for row in range(rows):
         line = sims[row]
-        cols = np.flatnonzero(line >= kth[row]).astype(np.int64)
+        better = np.flatnonzero(line > kth[row])  # fewer than k of them, by the choice of kth
+        tied = np.flatnonzero(line == kth[row])[: k - len(better)]  # ties: lowest index first
+        cols = np.concatenate([better, tied]).astype(np.int64)
         indices[row], values[row] = _order(line[cols], cols, k)
     return KnnBlock(start, indices, values)
 
