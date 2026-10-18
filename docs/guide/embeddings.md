@@ -1,6 +1,6 @@
 # Embeddings
 
-With `--embedder NAME` the audit adds `near_duplicates`, `leakage` and `outliers`. Embedders:
+With `--embedder NAME` the audit adds `near_duplicates`, `leakage`, `label_noise` and `outliers`. Embedders:
 
 | Name | Model | License | Extra |
 |---|---|---|---|

@@ -43,11 +43,11 @@ into place and prints its path. The output directory must be absent or empty.
    uses it, a bad `--embed-batch` or `--similarity-threshold`: exit 2), creates the embedder (if `--embedder`) **before** the dataset is read, which runs the
    license guard against `DATACOPILOT_ALLOWED_LICENSES` (no weights are touched yet), reads the tables
    through the bounded, hash-verified store reader, and runs each check in `audit/registry.py` order.
-   The embedding checks (`near_duplicates`, `leakage`, `outliers`) share one embedding pass
+   The embedding checks (`near_duplicates`, `leakage`, `label_noise`, `outliers`) share one embedding pass
    (`audit/embedding.py`): verified cache vectors are taken from `embeddings/<model>@<rev>/`, a
    sample is re-embedded to authenticate them, and the remaining images are read (contained in the
    dataset root, hashed against their id), batched and embedded, one shard per 4,096 vectors.
-   `--checks all` includes these three only when `--embedder` is given.
+   `--checks all` includes these four only when `--embedder` is given.
    The `duplicates` check uses the authenticated hash cache unless `--no-hash-cache`
    (or `DATACOPILOT_HASH_CACHE=false`) is given.
 6. Findings are collected into an `AuditRun` (`run_id` is the invocation's `request_id`) and written
@@ -69,7 +69,7 @@ Failure paths:
 | Table over `DATACOPILOT_MAX_TABLE_ROWS` / `_BYTES`, wrong Parquet schema, manifest counts that do not match | `StoreError` naming the file and the limit | 1 |
 | A row violates an invariant (box out of bounds, unknown category) | `ValidationError` names `ann_id`/`image_id`; nothing is written | 1 |
 | An image file is missing, unreadable, not a regular file, has an invalid header or a size that differs from its row during `integrity` | `Finding(check="integrity", severity=CRITICAL)`; the run continues | 0 unless `--fail-on` matches |
-| `--checks` names an unknown check; `--fail-on` is unknown, empty, a check that is not built (`label_noise`, `sku_confusion`) or a check that is not in `--checks`; `--workers` out of range | one usage line on `stderr`; nothing is read or written | 2 |
+| `--checks` names an unknown check; `--fail-on` is unknown, empty, a check that is not built (`sku_confusion`) or a check that is not in `--checks`; `--workers` out of range | one usage line on `stderr`; nothing is read or written | 2 |
 | Images that were not examined: remote URIs, real path outside the dataset's parent directory (`--allow-external-images` opts in; refused in CI without `--allow-external-images-in-ci`), unhashable files | counted in a WARN finding, CRITICAL when more than 50 percent of the images are affected or with `--require-local-images`, so a dataset cannot pass by pointing its images elsewhere | 1 with the default gate once CRITICAL |
 | Hash cache in CI (`CI` set) without `DATACOPILOT_CACHE_KEY`; directory, secret or file not private to this user; or a cached digest that fails the spot check | cache disabled (`audit_cache_untrusted`, reason `ci_without_key` and others), ignored or discarded, WARN event (and a `hash_cache_mismatch` WARN finding for a failed spot check); the audit continues | 0 unless `--fail-on` matches |
 | Embedder requested without `[embed]` | the first use fails: an `embedder_error` finding (CRITICAL) with the message that names `pip install "datacopilot[embed]"`, an `embedder_failed` log event, and every image counted as not embedded | 1 with the default gate |
@@ -105,7 +105,7 @@ for package errors only), `embedding_cache_disabled`, `embedding_cache_rejected`
 `passed`), `report_written` (`format`, `path` = the file name only, never the directory), `command_failed` (`ERROR`; `command`,
 `exc_info`). Expected failures also print one `error: ...` line on `stderr`.
 
-Status: `ingest`, `export`, `audit` (all checks but `label_noise` and `sku_confusion`), `embed`, the
+Status: `ingest`, `export`, `audit` (all checks but `sku_confusion`), `embed`, the
 gate and the reports built.
 
 ## Flow B: propose → review export → review import → apply

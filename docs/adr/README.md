@@ -10,5 +10,6 @@
 | [0006](0006-dataset-format.md) | Dataset format |
 | [0007](0007-embedding-cache-and-index.md) | Embedding cache and index |
 | [0008](0008-propose-review-apply.md) | Propose, review, apply |
+| [0009](0009-label-noise-check.md) | The label_noise check over existing embeddings |
 
 New decisions start from the [template](0000-template.md).

@@ -10,7 +10,7 @@ run today.
 |---|---|
 | Convert | `ingest` and `export` between COCO, YOLO, Pascal VOC, CVAT for images 1.1 XML, Label Studio JSON and ImageFolder, through a versioned `dataset.dcp/` directory. Every field a conversion cannot carry is counted; `--strict` turns any loss into a failure, on `export` and on `ingest`. See [Formats](guide/formats.md). |
 | Version | An order-independent `manifest.version`: the same data in the same format gives the same version whatever the file order. See [Concepts](guide/concepts.md). |
-| Audit | Four checks on the CPU (integrity, exact duplicates, class imbalance, box sanity) and, with `--embedder`, three more (near-duplicates, split leakage, per-class outliers). Reports in JSON, static HTML and SARIF 2.1.0; the run is stored as `audits/<run_id>.json`. Exit code 1 when `--fail-on` matches. See [Audit in CI](guide/audit-ci.md). |
+| Audit | Four checks on the CPU (integrity, exact duplicates, class imbalance, box sanity) and, with `--embedder`, four more (near-duplicates, split leakage, label-noise leads, per-class outliers). Reports in JSON, static HTML and SARIF 2.1.0; the run is stored as `audits/<run_id>.json`. Exit code 1 when `--fail-on` matches. See [Audit in CI](guide/audit-ci.md) and [Label noise](guide/label-noise.md). |
 | Embeddings | `datacopilot embed` fills the embedding cache ahead of time; `dinov2_small`, `dinov2_base` and `siglip2_base` (extra `[embed]`) and the test-only `hash` embedder. See [Embeddings](guide/embeddings.md). |
 | Diagnose | `datacopilot --version`, `formats` and `doctor` (versions, extras, settings, cache directory, FAISS and GPU; `--json` for a machine-readable report). |
 | Propose, review, apply | `propose` finds boxes a dataset is probably missing with Grounding DINO (tiny, Apache-2.0, extra `[vlm]`) and stores them as a proposal set; `review export` and `review import` round-trip them through CVAT files; `apply` writes the accepted ones as a new dataset version with lineage. Only missing boxes (`add_box`) are proposed. See [Propose, review, apply](guide/proposals.md). |
@@ -25,7 +25,7 @@ end to end, 1.35 GB peak memory; details in the [architecture overview](architec
 | Planned | What it will do |
 |---|---|
 | `split` | Split a dataset by group so that near copies stay on one side, optionally balanced per class. |
-| label noise | Find likely wrong labels (an optional Cleanlab backend). |
+| better label noise | Box-crop embeddings and an optional Cleanlab backend for `label_noise`, which today compares a box with neighbouring photos and is weak (see [Label noise](guide/label-noise.md)). |
 | more proposals | Proposals that change a class, delete a box or refine a box; SAM 3 and Qwen3-VL proposers; consensus between models; review in FiftyOne. See [ADR-0008](adr/0008-propose-review-apply.md) for what was left out on purpose. |
 | more extras | Extras for SAM 3 and the Cleanlab backend; today the extras are `embed` and `vlm`. |
 

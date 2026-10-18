@@ -35,7 +35,7 @@ const api = component("api", ...p(0, 1, 6), "api.py", "public Python API. Built:
 
 // Application (integer columns).
 const convert = component("convert", ...p(0, 2), "convert.py", "ingest / export use case", true);
-const audit = component("audit", ...p(1, 2), "audit/", "runner, gate, 7 checks", true);
+const audit = component("audit", ...p(1, 2), "audit/", "runner, gate, 8 checks", true);
 const propose = component("propose", ...p(2, 2), "propose/", "proposers, consensus");
 const patch = component("patch", ...p(3, 2), "patch/", "review export, apply");
 const split = component("split", ...p(4, 2), "split/", "group-aware re-split");

@@ -6,6 +6,23 @@ once a release is tagged.
 
 ## Unreleased
 
+### Added (label noise)
+
+- Audit check `label_noise` (rule `suspect_class`): with `--embedder`, a box is reported as an INFO lead when
+  at most `suspect_max_support` of the nearest neighbouring photos (exact, chunked cosine search over the existing
+  embeddings; no new model, no new dependency) carry its class. It only reports and never edits or proposes. It
+  is deterministic, capped per photo and per class with the excess counted (`suspects_truncated`), counts boxes
+  it could not score (`annotations_not_scored`) and says when it did not run (`skipped` WARN with a reason:
+  `embedder_missing`, `no_embeddings`, `no_annotations`, `too_few_images`, `single_class`). It joins
+  `--checks all` with an embedder and `--fail-on label_noise` is now valid. Thresholds are new `CheckConfig`
+  fields (`suspect_*`, `max_suspects_per_image`, `max_suspects_per_class`). The Cleanlab backend remains planned.
+  See [ADR-0009](docs/adr/0009-label-noise-check.md) for what was left out on purpose.
+- Notebook `04_label_noise.ipynb`: COCO128 with seeded planted class mistakes and the real DINOv2-small model.
+  Measured, and weak: with default thresholds recall 0.23 and precision 0.11 (2.2 times the random base rate),
+  a false-positive rate of 0.097, 633 of 929 boxes not scored; confusions with a class of the same photo are
+  almost invisible (recall 0.07). The notebook says so in its computed verdict.
+- `benchmarks/embed_checks.py` times `label_noise` on its own (16.5 s at 50,000 x 768 on 12 cores).
+
 ### Added (propose, review, apply)
 
 - `datacopilot propose`, `review export`, `review import` and `apply`, and `dc.propose` and `dc.apply` with

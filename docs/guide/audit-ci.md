@@ -18,6 +18,7 @@ passed|failed critical=N warn=N info=N run_id=ID
 | `boxes` | out of bounds, zero area, tiny, extreme aspect, duplicate and conflicting boxes | |
 | `near_duplicates` | clusters of look-alike images (CRITICAL across splits) | `--embedder` |
 | `leakage` | cross-split near copies and `group_id` shared between splits | `--embedder` |
+| `label_noise` | boxes whose class no neighbouring photo shares (INFO leads, weak; says when it was skipped), see [Label noise](label-noise.md) | `--embedder` |
 | `outliers` | images far from their class (INFO) | `--embedder` |
 
 ## The gate
@@ -34,7 +35,7 @@ gate fails.
 
 ## Options
 
-`--checks all|integrity,duplicates,imbalance,boxes` chooses the checks (`all` adds the three embedding
+`--checks all|integrity,duplicates,imbalance,boxes` chooses the checks (`all` adds the four embedding
 checks only when an embedder is given). `--fail-on` is described above. `--report report.html` sets
 where the HTML goes (JSON and SARIF are written next to it unless `--json` and `--sarif` are given).
 `--workers N` sets the threads, `--hash-cache/--no-hash-cache` the file-hash cache,

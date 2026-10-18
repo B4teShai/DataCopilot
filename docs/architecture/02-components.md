@@ -3,7 +3,7 @@
 ![Components by layer](../diagrams/png/components.png)
 
 Layers follow [ADR-0004](../adr/0004-layering-and-dependency-rule.md). Import package:
-`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `proposers/` (protocol, registry, Grounding DINO, test proposer), `proposals/` (propose, review, apply use cases), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`, `propose`, `apply`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
+`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `label_noise`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `proposers/` (protocol, registry, Grounding DINO, test proposer), `proposals/` (propose, review, apply use cases), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`, `propose`, `apply`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
 
 | Layer | Packages |
 |---|---|
@@ -133,7 +133,7 @@ class CheckContext(BaseModel, frozen=True):
     use_hash_cache: bool; cache_key: SecretStr | None; in_ci: bool
     allow_external_images: bool; require_local_images: bool; incomplete_is_critical: bool
     config: CheckConfig   # thresholds and budgets (max_unchecked_fraction, max_check_seconds, max_hash_bytes,
-                          # near_duplicate_cosine, leakage_cosine, knn_k, outlier_*, max_embed_image_bytes)
+                          # near_duplicate_cosine, leakage_cosine, knn_k, outlier_*, suspect_*, max_suspects_per_*, max_embed_image_bytes)
 def run_audit(ds: Dataset, checks: Sequence[str] | Literal["all"], ctx: CheckContext,
               fail_on: Sequence[str] = ()) -> AuditRun
 def gate_failed(run: AuditRun, fail_on: Sequence[str]) -> bool   # True -> exit code 1
@@ -149,9 +149,10 @@ Built checks and findings (`payload["rule"]`):
 | `near_duplicates` | WARN within a split, CRITICAL across splits | `near_duplicate` (cluster of images whose embeddings have cosine similarity of at least `near_duplicate_cosine` = 0.95 among each other's 10 nearest neighbours; `cross_split` clusters are CRITICAL like exact duplicates, and `leakage` reports them too; `group_id` = 12-hex digest of the member ids, up to 20 members as short id, split and base name), `phash_not_applied` (WARN; optional perceptual-hash prefilter could not hash some images, their pairs are kept; the prefilter never drops a cross-split pair and weakens the within-split gate), `embedding_pair_contradicted` (WARN) |
 | `leakage` | CRITICAL | `cross_split_near_duplicate` (neighbours are searched only among the images of the *other* splits, so a crowd of same-split frames cannot hide a leak; `unassigned` is compared with the real splits like in `duplicates`), `group_overlap` (one `group_id` in more than one split; needs no embedding) |
 | `outliers` | INFO | `outlier` (per class, mean cosine distance to the 5 nearest images of the same class, robust z above 3.5 with the scale floored at 0.02; at most 20 per class), `classes_skipped`, `images_without_class` |
+| `label_noise` | INFO; WARN for `skipped` | `suspect_class` (a box of class `c` when at most `suspect_max_support` = 0.0 of its usable neighbours carry `c`: the 10 nearest embedded and annotated photos at cosine similarity of at least 0.3, at least 3 usable, else the box is counted in `annotations_not_scored` (INFO); at most 3 per photo and 20 per class, the rest in `suspects_truncated` (INFO); evidence: support, neighbours, mean similarity, the 5 classes the neighbours carry), `skipped` (WARN; `reason`: `embedder_missing`, `no_embeddings`, `no_annotations`, `too_few_images`, `single_class`). Measured weak, see [ADR-0009](../adr/0009-label-noise-check.md) |
 | `boxes` | CRITICAL / WARN | `invalid_box`, `out_of_bounds`, `zero_area` (CRITICAL); `tiny_box`, `extreme_aspect`, `duplicate_box` (earliest same-class match), `conflicting_class` (earliest different-class match; one box can be both), `pairwise_skipped` (WARN: an image with more than 20,000 boxes) (WARN); `boxes_truncated` (INFO) |
 
-The three embedding checks share these **fail-closed rules**, emitted by each of them so that
+The four embedding checks share these **fail-closed rules**, emitted by each of them so that
 `--fail-on <check>` and the severity gates see them: `embedder_missing` (CRITICAL, no provider),
 `embedder_error` (CRITICAL; the exception *type* only, never its text), `images_not_embedded`
 (`leakage`: CRITICAL under a gate for any image not embedded except by time budget, WARN without a
@@ -165,9 +166,9 @@ budget, more than 500,000 images, or more than 2,000,000 similar pairs: `pair_ca
 image file no longer hashes to the digest stored with its cached vector; the cache is discarded) and
 `embedding_cache_unverified` (WARN). `leakage` also reports `images_without_group` (INFO, when only
 some images carry a `group_id`, so that clearing the id on the images that matter is visible; a
-dataset with no group ids at all cannot be told apart from one that does not use them). `--checks all` includes the three only when an embedder is given; naming one without
+dataset with no group ids at all cannot be told apart from one that does not use them). `--checks all` includes the four only when an embedder is given; naming one without
 `--embedder`, or gating on one that is not part of the run, is a usage error (exit 2).
-`label_noise` and `sku_confusion` are planned; `--fail-on` rejects their names as "not available
+`sku_confusion` is planned (and the Cleanlab backend of `label_noise`); `--fail-on` rejects its name as "not available
 in this version" instead of accepting a gate that can never fire.
 
 `--fail-on` defaults to `critical` at the CLI; `none` (alone) applies no gate. It accepts severity names and check names. A severity name is a threshold: `warn` matches
@@ -189,8 +190,8 @@ Depends on: `core/`, `io.files` and `io.registry` (header reader, path helpers; 
 adapter module), `logging.py`. The tables arrive as a `Dataset` read through the bounded store
 reader; DuckDB is not used (see [ADR-0003](../adr/0003-repo-and-tooling.md)). Hashing and header
 reads run on a thread pool (`hashlib` releases the GIL on large chunks), not a process pool.
-Status: **built** for the registry, runner, gate, the four CPU checks and the three embedding
-checks (`near_duplicates`, `leakage`, `outliers`) with `audit/embedding.py`, the pipeline that feeds
+Status: **built** for the registry, runner, gate, the four CPU checks and the four embedding
+checks (`near_duplicates`, `leakage`, `label_noise`, `outliers`) with `audit/embedding.py`, the pipeline that feeds
 them (cache, bounded reads, batching, spot check, budgets).
 
 ### `split/`

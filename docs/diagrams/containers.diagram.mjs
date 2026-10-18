@@ -57,6 +57,6 @@ export default {
     arrow(report, ci, "exit code, SARIF"),
     c4Legend(40, 880),
     statusLegend(40, 920),
-    note("n1", "Built: ingest, export, audit and doctor (CLI, core library, six format adapters, registries, dataset store, four CPU checks and three embedding checks, DINOv2 and SigLIP2 embedders, HTML/JSON/SARIF reports), the load, audit and export API, settings, logging. Split, propose, review and apply are planned.", 40, 960),
+    note("n1", "Built: ingest, export, audit and doctor (CLI, core library, six format adapters, registries, dataset store, four CPU checks and four embedding checks, DINOv2 and SigLIP2 embedders, HTML/JSON/SARIF reports), the load, audit and export API, settings, logging. Split, propose, review and apply are planned.", 40, 960),
   ],
 };

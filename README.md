@@ -45,6 +45,7 @@ failed critical=0 warn=3 info=0 run_id=571c0043-41af-4ca4-b256-34bc66f25a61
 - Catch duplicates and leaks: identical images, and train images copied into test.
 - Use it in CI: `--fail-on warn` turns findings into a non-zero exit code.
 - Find look-alike images with image models: `datacopilot audit --embedder` (optional, `pip install "datacopilot[embed]"`).
+- Spot boxes with a doubtful class: `label_noise` leads over the same embeddings (weak; see the guide).
 - Find boxes your labels missed: `datacopilot propose`, then `review` in CVAT and `apply` (optional, `pip install "datacopilot[vlm]"`).
 - Use it from Python: `dc.load`, `dc.audit`, `dc.export`, `dc.propose` and `dc.apply`.
 
