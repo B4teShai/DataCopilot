@@ -25,7 +25,7 @@ from datacopilot.logging import clear_request_context
 from datacopilot.store import DatasetStore
 
 FORMATS = ["coco", "yolo", "voc", "cvat_xml", "label_studio"]
-SECRET = b"-----BEGIN " + b"PRIVATE KEY-----\nnot a picture\n"  # split: the QA gate scans for the marker
+SECRET = b"-----BEGIN " + b"PRIVATE KEY-----\nnot a picture\n"  # split on purpose
 
 
 def two(tmp_path: Path) -> Dataset:
