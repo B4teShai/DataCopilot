@@ -14,13 +14,16 @@ once a release is tagged.
   is deterministic, capped per photo and per class with the excess counted (`suspects_truncated`), counts boxes
   it could not score (`annotations_not_scored`) and says when it did not run (`skipped` WARN with a reason:
   `embedder_missing`, `no_embeddings`, `no_annotations`, `too_few_images`, `single_class`). It joins
-  `--checks all` with an embedder and `--fail-on label_noise` is now valid. Thresholds are new `CheckConfig`
+  `--checks all` with an embedder and `--fail-on label_noise` is now valid. Unscored boxes carry the severity
+  of images a check could not examine (WARN, CRITICAL above half of the boxes), so a check that scored under
+  half of the boxes fails the default gate. Thresholds are new `CheckConfig`
   fields (`suspect_*`, `max_suspects_per_image`, `max_suspects_per_class`). The Cleanlab backend remains planned.
   See [ADR-0009](docs/adr/0009-label-noise-check.md) for what was left out on purpose.
 - Notebook `04_label_noise.ipynb`: COCO128 with seeded planted class mistakes and the real DINOv2-small model.
-  Measured, and weak: with default thresholds recall 0.23 and precision 0.11 (2.2 times the random base rate),
-  a false-positive rate of 0.097, 633 of 929 boxes not scored; confusions with a class of the same photo are
-  almost invisible (recall 0.07). The notebook says so in its computed verdict.
+  Measured, and weak: with default thresholds the check scores 296 of 929 boxes; recall is 0.23 over all boxes
+  and 0.83 over the scorable ones, the false-positive rate 0.097 and 0.30, precision 0.11 (2.2 times the random
+  base rate, per seed 1.5 to 2.9); confusions with another class of the same photo reach recall 0.09 and 0.28.
+  The notebook says so in its computed verdict.
 - `benchmarks/embed_checks.py` times `label_noise` on its own (16.5 s at 50,000 x 768 on 12 cores).
 
 ### Added (propose, review, apply)
@@ -43,6 +46,11 @@ once a release is tagged.
 - Notebook `03_propose_review_apply.ipynb`: the real model on COCO128 with a seeded held-out answer key.
 
 ### Fixed
+
+- Reports no longer show the query string or fragment of a remote image path (a presigned URL carries a
+  credential and a signature there) or its host: `display_name` keeps the last path segment only.
+- The exact kNN no longer sorts every column that ties at the k-th place; a crowd of identical images costs no
+  sort (the lowest indices win ties, as before).
 
 - Security: every exporter and `review export` copied whatever file `Image.file_path` named, so a hostile `.dcp`
   could copy `~/.ssh/id_rsa` into the output. Exports now verify each image (inside the dataset's directory, no

@@ -372,7 +372,7 @@ def test_the_label_noise_notebook_reports_every_number_the_plan_asks_for() -> No
         "precision",
         "recall",
         "FP rate",
-        "base rate (precision of reporting boxes at random)",
+        "base rate over all boxes",
         "UNTOUCHED dataset",
         "false-positive rate",
         "not scored",
@@ -382,7 +382,7 @@ def test_the_label_noise_notebook_reports_every_number_the_plan_asks_for() -> No
         "Verdict:",
     ):
         assert needle in out or needle in " ".join(source(c) for c in load(NOISE)["cells"]), needle
-    assert "check and independent version give the same boxes in every run: True" in out
+    assert "give the same boxes and the same unscored count in every run: True" in out
     assert "same boxes: True" in out
     assert re.search(r"seed  planted  reported  found  precision   recall  FP rate", out)
     assert len(re.findall(r"^ {0,3}\d  +46 ", out, re.MULTILINE)) >= 10  # five seeds, two protocols
@@ -427,3 +427,46 @@ def test_the_label_noise_notebook_download_cell_is_the_pinned_one_of_the_tutoria
         return next(source(c) for c in doc["cells"] if "def fetch_coco128" in source(c))
 
     assert fetch(load(NOISE)) == fetch(load("01_tutorial.ipynb"))
+
+
+CLAIM_WORDS = re.compile(
+    r"\b(raises?|lowers?|increas\w+|decreas\w+|dominat\w+|usually|typically|mostly|almost|better|"
+    r"worse|even more|invisible|nothing to see)\b",
+    re.IGNORECASE,
+)
+
+
+def test_the_label_noise_prose_makes_no_hand_typed_claim_about_a_result() -> None:
+    for cell in load(NOISE)["cells"]:
+        if cell["cell_type"] == "markdown":
+            found = CLAIM_WORDS.findall(source(cell))
+            assert found == [], (found, source(cell)[:80])
+
+
+def test_the_claim_check_notices_a_hand_typed_comparison() -> None:
+    assert CLAIM_WORDS.search("A lower floor raises recall and the rate even more.")
+    assert not CLAIM_WORDS.search("The grid and the computed changes between its cells.")
+
+
+def test_the_label_noise_notebook_reports_both_denominators_and_the_lift_range() -> None:
+    out = all_output(NOISE)
+    for needle in (
+        "OVER ALL BOXES",
+        "OVER SCORABLE BOXES ONLY",
+        "coverage: the check scored",
+        "lift per seed",
+        "no confidence interval",
+        "over scorable boxes",
+        "eligible boxes (photo holds another class)",
+        "ALL false alarms of seed 0",
+        "ALL missed planted mistakes of seed 0",
+        "may hold real mistakes",
+    ):
+        assert needle in out, needle
+    assert re.search(r"base rate over scorable boxes: 0\.\d{3}; lift per seed: ", out)
+
+
+def test_the_label_noise_notebook_uses_a_private_folder_and_an_isolated_child_python() -> None:
+    setup = next(source(c) for c in load(NOISE)["cells"] if "def datacopilot(" in source(c))
+    assert "mkdtemp(" in setup and "datacopilot-notebooks" not in setup
+    assert re.search(r'"-I",\s*"-m",\s*"datacopilot"', setup)
