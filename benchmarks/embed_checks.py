@@ -5,7 +5,7 @@ classes, 80/10/10 split, with planted near-duplicate pairs (half of them across 
 files and no model are involved: the benchmark measures what happens *after* embedding, which is
 what a CI run with a precomputed cache pays (plus the sample re-embedding, which needs the images
 and the model and is not measured here). Phases: exact kNN, cache write and verified read, and the
-three checks.
+three checks (``label_noise`` is timed on its own).
 
 Usage::
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from datacopilot.audit.checks import leakage, near_duplicates, outliers
+from datacopilot.audit.checks import label_noise, leakage, near_duplicates, outliers
 from datacopilot.audit.context import CheckContext
 from datacopilot.audit.embedding import EmbeddingSet
 from datacopilot.core.schema import (
@@ -177,6 +177,9 @@ def main() -> None:
         findings, seconds = timed(lambda c=check: c.plugin.run(ds, ctx))
         out[f"{name}_s"] = seconds
         out[f"{name}_findings"] = len(findings)
+    # reported apart from ``check_total_s``, which keeps the three checks of the documented budget
+    findings, out["label_noise_s"] = timed(lambda: label_noise.plugin.run(ds, ctx))
+    out["label_noise_findings"] = len(findings)
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB on Linux
     out["peak_rss_gb"] = round(peak / (1e9 if sys.platform == "darwin" else 1024**2), 2)
     out["check_total_s"] = round(

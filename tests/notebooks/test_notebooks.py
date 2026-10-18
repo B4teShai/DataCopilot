@@ -14,7 +14,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOKS = ROOT / "notebooks"
-NAMES = ("01_tutorial.ipynb", "02_edge_cases.ipynb", "03_propose_review_apply.ipynb")
+NAMES = (
+    "01_tutorial.ipynb",
+    "02_edge_cases.ipynb",
+    "03_propose_review_apply.ipynb",
+    "04_label_noise.ipynb",
+)
 MAX_BYTES = 1_500_000
 MAX_PNG = 8
 MAX_TEXT = 20_000
@@ -63,7 +68,7 @@ def test_readme_lists_every_notebook_and_stays_short() -> None:
     readme = (NOTEBOOKS / "README.md").read_text(encoding="utf-8")
     for notebook in NAMES:
         assert notebook in readme
-    assert len(readme.splitlines()) <= 10
+    assert len(readme.splitlines()) <= 11
     assert "DATACOPILOT_NOTEBOOK_DATA" in readme and "CC BY 4.0" in readme
 
 
@@ -106,6 +111,11 @@ def test_no_folder_of_the_machine_that_ran_it_is_saved(name: str) -> None:
     text = (NOTEBOOKS / name).read_text(encoding="utf-8")
     assert PRIVATE_PATHS.findall(text) == []
     assert SECRETS.findall(text) == []
+
+
+def test_no_terminal_colour_codes_are_saved(name: str) -> None:
+    text = (NOTEBOOKS / name).read_text(encoding="utf-8")
+    assert "\x1b" not in text and "\\u001b" not in text.lower()
 
 
 def test_no_tool_or_vendor_name_is_mentioned(name: str) -> None:
@@ -329,3 +339,91 @@ def test_the_propose_notebook_never_loads_a_pickle_or_an_unpinned_model() -> Non
     code = "\n".join(source(c) for c in load(PROPOSE)["cells"] if c["cell_type"] == "code")
     assert "trust_remote_code" not in code and "from_pretrained" not in code
     assert "get_model(" in code and "grounding_dino" in code
+
+
+# ------------------------------------------------------------------ the label-noise notebook
+NOISE = "04_label_noise.ipynb"
+
+
+def test_the_label_noise_notebook_explains_every_code_cell() -> None:
+    cells = load(NOISE)["cells"]
+    for index, cell in enumerate(cells[:-1]):
+        if cell["cell_type"] == "code" and index > 4:  # the set-up and download cells come first
+            follower = cells[index + 1]
+            assert follower["cell_type"] == "markdown", source(cell).splitlines()[0]
+            assert "What this shows" in source(follower), source(cell).splitlines()[0]
+    assert cells[-1]["cell_type"] == "markdown"
+
+
+def test_the_label_noise_notebook_used_the_real_pinned_model() -> None:
+    out = all_output(NOISE)
+    assert "model=dinov2_small@ed25f3a31f01" in out
+    assert "revision ed25f3a31f01632728cabb09d1542f84ab7b0056" in out
+    assert "mismatched: 0" in out and "cache state: ok" in out
+    assert "hash@" not in out and "test-only" not in out
+    code = "\n".join(source(c) for c in load(NOISE)["cells"] if c["cell_type"] == "code")
+    assert "trust_remote_code" not in code and "from_pretrained" not in code
+    assert "resolve_embedder(" in code
+
+
+def test_the_label_noise_notebook_reports_every_number_the_plan_asks_for() -> None:
+    out = all_output(NOISE)
+    for needle in (
+        "precision",
+        "recall",
+        "FP rate",
+        "base rate (precision of reporting boxes at random)",
+        "UNTOUCHED dataset",
+        "false-positive rate",
+        "not scored",
+        "embedding 128 photos with the real model",
+        "label_noise itself",
+        "tuned on this same data",
+        "Verdict:",
+    ):
+        assert needle in out or needle in " ".join(source(c) for c in load(NOISE)["cells"]), needle
+    assert "check and independent version give the same boxes in every run: True" in out
+    assert "same boxes: True" in out
+    assert re.search(r"seed  planted  reported  found  precision   recall  FP rate", out)
+    assert len(re.findall(r"^ {0,3}\d  +46 ", out, re.MULTILINE)) >= 10  # five seeds, two protocols
+
+
+def test_the_label_noise_notebook_shows_six_honest_failures_in_one_picture() -> None:
+    cells = load(NOISE)["cells"]
+    pictures = sum("image/png" in o.get("data", {}) for c in cells for o in c.get("outputs", []))
+    assert pictures == 1
+    out = all_output(NOISE)
+    assert len(re.findall(r"^false alarm +\d+\.jpg", out, re.MULTILINE)) == 3
+    assert len(re.findall(r"^missed +\d+\.jpg", out, re.MULTILINE)) == 3
+
+
+def test_the_label_noise_notebook_has_no_hand_typed_results() -> None:
+    for cell in load(NOISE)["cells"]:
+        if cell["cell_type"] != "markdown":
+            continue
+        text = source(cell).replace("CC BY 4.0", "")
+        assert re.findall(r"\d+\.\d+|\d+ ?%|\bpercent of the (?:boxes|photos)", text) == [], text
+        assert not re.search(r"(precision|recall|rate) (of|is|was|=) *\d", text), text
+
+
+def test_the_label_noise_verdict_follows_the_computed_numbers() -> None:
+    out = all_output(NOISE)
+    mean = re.search(
+        r"^mean +[\d.]+ +[\d.]+ +[\d.]+ +(?P<p>[\d.]+) +(?P<r>[\d.]+) +[\d.]+ +[\d.]+$",
+        out,
+        re.MULTILINE,
+    )
+    assert mean, "no mean row"
+    verdict = re.search(r"\*\*Verdict: ([a-z ]+) on this dataset", out)
+    assert verdict
+    weak = float(mean["p"]) < 0.5 or float(mean["r"]) < 0.5
+    assert (verdict[1] == "weak") == weak
+    if weak:
+        assert "never as a list of errors" in out
+
+
+def test_the_label_noise_notebook_download_cell_is_the_pinned_one_of_the_tutorial() -> None:
+    def fetch(doc: dict[str, Any]) -> str:
+        return next(source(c) for c in doc["cells"] if "def fetch_coco128" in source(c))
+
+    assert fetch(load(NOISE)) == fetch(load("01_tutorial.ipynb"))

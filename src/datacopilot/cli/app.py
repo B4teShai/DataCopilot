@@ -299,7 +299,8 @@ def audit(
             "--embedder",
             help=(
                 "Embedder name (for example dinov2_base, siglip2_base; needs the [embed] extra): "
-                "adds the near_duplicates, leakage and outliers checks to `--checks all`."
+                "adds the near_duplicates, leakage, label_noise and outliers checks to "
+                "`--checks all`."
             ),
         ),
     ] = None,

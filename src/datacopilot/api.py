@@ -163,7 +163,7 @@ def audit(
         dataset: a loaded dataset or the path of a ``.dcp`` directory (whose embedding cache is
             then used with an embedder).
         checks: ``"all"`` or check names; the embedding checks (``near_duplicates``, ``leakage``,
-            ``outliers``) are included in ``"all"`` only with an ``embedder``.
+            ``label_noise``, ``outliers``) are included in ``"all"`` only with an ``embedder``.
         fail_on: ``critical``, ``warn``, ``info`` (that severity and above) and/or check names;
             ``()`` applies no gate.
         embedder: an embedder name (``dinov2_small``, ``dinov2_base``, ``siglip2_base``, ``hash``);

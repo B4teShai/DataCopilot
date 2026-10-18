@@ -88,7 +88,7 @@ datacopilot audit [OPTIONS] DATASET
 | `--allow-external-images` |  | off | Also read images whose real path is outside the dataset's parent directory. |
 | `--no-store-audit` |  | off | Do not write audits/<run_id>.json into the dataset (read-only checkouts). |
 | `--allow-external-images-in-ci` |  | off | Confirm --allow-external-images when the CI environment variable is set. |
-| `--embedder` | `TEXT` |  | Embedder name (for example dinov2_base, siglip2_base; needs the [embed] extra): adds the near_duplicates, leakage and outliers checks to `--checks all`. |
+| `--embedder` | `TEXT` |  | Embedder name (for example dinov2_base, siglip2_base; needs the [embed] extra): adds the near_duplicates, leakage, label_noise and outliers checks to `--checks all`. |
 | `--embed-batch` | `INT (1..1024)` |  | Images per embedder call. |
 | `--similarity-threshold` | `FLOAT` |  | Cosine similarity (above 0, at most 1) from which images are near-duplicates and cross-split pairs are leakage (default 0.95). |
 | `--embedding-cache` / `--no-embedding-cache` |  | on | Keep embeddings in dataset.dcp/embeddings (authenticated; default: on). |
