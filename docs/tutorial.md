@@ -136,7 +136,7 @@ datasets use `--embedder dinov2_base` (extra `[embed]`, see [Embeddings](guide/e
 <!-- run -->
 ```console
 $ datacopilot audit shop.dcp --no-hash-cache --embedder hash --allow-test-embedder --fail-on leakage  # exit 1
-failed critical=2 warn=3 info=1 run_id=<uuid>
+failed critical=2 warn=4 info=1 run_id=<uuid>
 warning: embedder 'hash' is a test double that compares file bytes, not pictures; its verdicts say nothing about look-alike images
 ```
 
@@ -155,13 +155,16 @@ for check, severity in sorted({(f["check"], f["severity"]) for f in report["find
 ```text
 boxes WARN
 imbalance WARN
+label_noise WARN
 leakage CRITICAL
 near_duplicates CRITICAL
 outliers INFO
 ```
 
 `leakage` is CRITICAL because the near copy sits in a different split than the picture it copies:
-the validation score would be inflated.
+the validation score would be inflated. `label_noise` is a WARN that says it did not run: a shop
+this small has too few annotated images to compare a box with its neighbours, and a skipped check
+is reported, never counted as a pass.
 
 ## 5. Convert and count the loss
 
@@ -251,7 +254,7 @@ settings: ok (...)
 cache: ...
 faiss: ...
 gpu: ...
-plugins: formats=6, checks=7, embedders=4
+plugins: formats=6, checks=8, embedders=4
 ```
 
 ## Where to go next

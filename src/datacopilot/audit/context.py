@@ -41,6 +41,14 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
         outlier_z: robust z-score (median and MAD) above which an image is an outlier.
         outlier_min_class_images: classes with fewer embedded images are skipped.
         max_outliers_per_class: outliers reported per class (highest score first).
+        suspect_k: neighbouring images examined per annotation by the ``label_noise`` check.
+        suspect_min_similarity: neighbours with a lower cosine similarity are not used.
+        suspect_min_neighbours: an annotation with fewer usable neighbours is not scored (counted).
+        suspect_max_support: an annotation is suspect when at most this fraction of its usable
+            neighbours carry its class (0.0: none of them does).
+        suspect_min_images: fewer annotated, embedded images than this skips the check (reported).
+        max_suspects_per_image: suspect annotations reported per image (the rest are counted).
+        max_suspects_per_class: suspect annotations reported per class (the rest are counted).
     """
 
     imbalance_info_ratio: float = Field(default=3.0, gt=1.0, le=1e9, allow_inf_nan=False)
@@ -62,11 +70,20 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
     outlier_z: float = Field(default=3.5, gt=0.0, le=100.0, allow_inf_nan=False)
     outlier_min_class_images: int = Field(default=8, ge=3, le=1_000_000)
     max_outliers_per_class: int = Field(default=20, ge=1, le=10_000)
+    suspect_k: int = Field(default=10, ge=1, le=100)
+    suspect_min_similarity: float = Field(default=0.3, gt=0.0, le=1.0, allow_inf_nan=False)
+    suspect_min_neighbours: int = Field(default=3, ge=1, le=100)
+    suspect_max_support: float = Field(default=0.0, ge=0.0, lt=1.0, allow_inf_nan=False)
+    suspect_min_images: int = Field(default=30, ge=5, le=1_000_000)
+    max_suspects_per_image: int = Field(default=3, ge=1, le=1_000)
+    max_suspects_per_class: int = Field(default=20, ge=1, le=10_000)
 
     @model_validator(mode="after")
     def _ordered(self) -> CheckConfig:
         if self.imbalance_warn_ratio < self.imbalance_info_ratio:
             raise ValueError("imbalance_warn_ratio must not be below imbalance_info_ratio")
+        if self.suspect_min_neighbours > self.suspect_k:
+            raise ValueError("suspect_min_neighbours must not exceed suspect_k")
         return self
 
 

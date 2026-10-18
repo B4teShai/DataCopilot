@@ -38,6 +38,7 @@ def test_all_includes_the_embedding_checks_only_with_an_embedder() -> None:
         "leakage",
         "imbalance",
         "boxes",
+        "label_noise",
         "outliers",
     ]
 

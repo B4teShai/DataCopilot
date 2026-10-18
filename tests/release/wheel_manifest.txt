@@ -8,6 +8,7 @@ datacopilot/audit/checks/duplicates.py
 datacopilot/audit/checks/embedtools.py
 datacopilot/audit/checks/imbalance.py
 datacopilot/audit/checks/integrity.py
+datacopilot/audit/checks/label_noise.py
 datacopilot/audit/checks/leakage.py
 datacopilot/audit/checks/near_duplicates.py
 datacopilot/audit/checks/outliers.py

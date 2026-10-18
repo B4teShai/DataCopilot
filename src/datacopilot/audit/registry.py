@@ -29,7 +29,9 @@ CANONICAL_ORDER: tuple[str, ...] = (
 )
 """Documented checks in run order (docs/architecture/02-components.md). Checks outside this list
 run after them, alphabetically."""
-EMBEDDING_CHECKS: frozenset[str] = frozenset({"near_duplicates", "leakage", "outliers"})
+EMBEDDING_CHECKS: frozenset[str] = frozenset(
+    {"near_duplicates", "leakage", "label_noise", "outliers"}
+)
 """Checks that need image embeddings. ``--checks all`` includes them only when an embedder is
 given; naming one without an embedder is a usage error."""
 
