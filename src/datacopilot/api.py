@@ -347,6 +347,7 @@ def split(
     similarity_threshold: float | None = None,
     stratify: Literal["category"] | None = None,
     seed: int = 0,
+    allow_test_embedder: bool = False,
 ) -> SplitReport:
     """Re-split a ``.dcp`` dataset by group and write a NEW dataset; the original is untouched.
 
@@ -361,22 +362,27 @@ def split(
         out: a new ``.dcp`` path outside ``dataset``.
         ratios: train, val and test fractions that sum to 1.
         by_group: ``group_id``, ``source.<name>`` or ``re:<pattern>`` over the file name (refused
-            unless it is bounded and cannot backtrack badly); the new ``group_id`` is the key.
+            unless it is bounded and cannot backtrack badly); the new ``group_id`` is the key. An
+            existing ``group_id`` always stays together too.
         near_duplicates: also keep near copies together; needs ``embedder``, and every image must
             be embedded (otherwise the split is refused).
         embedder: an embedder name (the license guard runs first).
         similarity_threshold: cosine similarity of near copies, above 0 and at most 1 (0.95).
         stratify: ``"category"`` balances each class across the splits too.
         seed: breaks ties between groups of equal size.
+        allow_test_embedder: permit a test-only embedder (``hash``, which compares file bytes,
+            not pictures); refused otherwise.
 
     Returns:
         The :class:`~datacopilot.core.schema.SplitReport`: the new version, the groups, and the
         deviation from the ratios per split and per class.
 
     Raises:
-        ValueError: bad ratios, key, seed or threshold, or near duplicates without an embedder.
+        ValueError: bad ratios, key, seed or threshold, near duplicates without an embedder, or a
+            test-only embedder without ``allow_test_embedder``.
         ValidationError: an image without an embedding, too many near-copy pairs, a split equal to
-            the current one, or an output inside the source.
+            the current or an earlier version, or an output inside the source or in a directory
+            that does not hold the images.
         StoreError: the output exists or the dataset is unreadable.
         LicenseError, FormatError: the embedder is not allowed or unusable.
     """
@@ -395,4 +401,5 @@ def split(
             similarity_threshold=similarity_threshold,
             stratify=stratify == "category",
             seed=seed,
+            allow_test_embedder=allow_test_embedder,
         )

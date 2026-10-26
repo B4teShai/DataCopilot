@@ -88,7 +88,7 @@ def assign(
     images = sum(len(g.members) for g in groups)
     totals: dict[int, int] = {}
     for g in groups:
-        for cid, count in g.classes.items():
+        for cid, count in sorted(g.classes.items()):
             totals[cid] = totals.get(cid, 0) + count
     totals = {c: n for c, n in totals.items() if n > 0}
     weight = 1.0 / len(totals) if stratify and totals else 0.0
@@ -103,7 +103,7 @@ def assign(
             target = ratios[s] * images
             cost = ((placed[s] + size - target) ** 2 - (placed[s] - target) ** 2) / images**2
             if weight:
-                for cid, count in group.classes.items():
+                for cid, count in sorted(group.classes.items()):  # a fixed float order
                     total = totals.get(cid)
                     if not total:
                         continue

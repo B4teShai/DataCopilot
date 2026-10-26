@@ -4,7 +4,9 @@ Groups are the connected components of two relations over the images:
 
 - *same key*: images whose ``--by-group`` key (``groupkey.py``; default ``group_id``) has the same
   normalised label; the new version's ``group_id`` is that label, so the leakage check's
-  ``group_overlap`` verifies the result;
+  ``group_overlap`` verifies the result. An existing ``group_id`` is *always* a constraint as
+  well, whatever the key: an image the key does not label keeps its ``group_id``, and one whose
+  ``group_id`` the key replaces keeps the old value in ``source["group_id_before_split"]``;
 - *near copies* (``near_duplicates``): every pair of images whose embeddings have a cosine
   similarity of at least the threshold, found exactly (``knn.pairs_at_least``, not a top-k
   search, so a crowd of copies cannot hide an edge). The pairs are taken down to
@@ -21,9 +23,12 @@ refuse the split (``ValidationError``) and nothing is written, because an image 
 unknown could be the leaked one.
 
 Append-only: the output is created with ``DatasetStore.create`` (it refuses an existing path) with
-the parent's lineage plus the parent's version; the source directory is read, never written,
-except that a near-duplicate split stores the embeddings it computed in the source's embedding
-cache, as ``embed`` and ``audit`` do. Event: ``dataset_split``.
+the parent's lineage plus the parent's version; the source directory is read, never written (a
+near-duplicate split neither reads nor writes the embedding cache). A result equal to the current
+version or to an earlier one in its lineage is refused. Relative image paths are rewritten for the
+output's directory (``store.relocate_images``); an output whose directory does not hold the images
+is refused, because no check would read them there. A test-only embedder (``hash``) is refused
+unless the caller opts in. Event: ``dataset_split``.
 """
 
 from __future__ import annotations
@@ -43,13 +48,17 @@ from datacopilot.audit.context import CheckConfig, CheckContext
 from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, PipelineProvider
 from datacopilot.audit.usecase import check_threshold, embedder_label, resolve_embedder
 from datacopilot.core.errors import StoreError, ValidationError
-from datacopilot.core.schema import Dataset, Image, SplitReport
+from datacopilot.core.schema import SCHEMA_VERSION, Dataset, Image, SplitReport
+from datacopilot.core.version import models_version
 from datacopilot.embed import knn
+from datacopilot.embed.protocol import Embedder
 from datacopilot.logging import current_request_id, get_logger
 from datacopilot.settings import Settings
 from datacopilot.splits import assign, groupkey
-from datacopilot.store import DatasetStore, StoreLimits, ensure_outside
+from datacopilot.store import DatasetStore, StoreLimits, ensure_outside, relocate_images
 
+PREVIOUS_GROUP_ID = "group_id_before_split"
+"""``Image.source`` key that keeps a ``group_id`` the ``--by-group`` key replaced."""
 DEFAULT_THRESHOLD = 0.95
 """Cosine similarity at or above which two images are near copies (the leakage check's default)."""
 MAX_PAIRS = 2_000_000
@@ -83,16 +92,20 @@ def _near_copy_pairs(
     uf: _UnionFind,
     *,
     settings: Settings,
-    embedder: str,
+    created: Embedder,
     threshold: float,
     embed_batch: int | None,
 ) -> tuple[int, str]:
-    """Union the rows of every near-copy pair; returns the pair count and the embedder label."""
-    created = resolve_embedder(embedder, settings.allowed_licenses)
+    """Union the rows of every near-copy pair; returns the pair count and the embedder label.
+
+    The embedding cache is neither read nor written (``use_cache=False``): the source dataset is
+    never written by ``split``, so the vectors are computed for this run only.
+    """
     provider = PipelineProvider(
         created,
         batch_size=embed_batch if embed_batch is not None else DEFAULT_EMBED_BATCH,
         dtype=DEFAULT_DTYPE,
+        use_cache=False,
     )
     config = CheckConfig()
     ctx = CheckContext(
@@ -102,7 +115,7 @@ def _near_copy_pairs(
         workers=settings.workers,
         cache_key=settings.cache_key,
         in_ci=settings.ci,
-        dataset_dir=dataset_dir,
+        dataset_dir=None,
         embedder=embedder_label(created),
         embeddings=provider,
         config=config,
@@ -175,14 +188,16 @@ def split_dataset(
     embed_batch: int | None = None,
     stratify: bool = False,
     seed: int = 0,
+    allow_test_embedder: bool = False,
 ) -> SplitReport:
     """Re-split ``dataset`` into the new dataset ``out`` (see the module docstring).
 
     Raises:
-        ValueError: bad ratios, key, seed or threshold, or near duplicates without an embedder
-            (usage errors).
-        ValidationError: output inside the source, a near-duplicate split that cannot see every
-            image, too many pairs, or a split identical to the current one.
+        ValueError: bad ratios, key, seed or threshold, near duplicates without an embedder, or a
+            test-only embedder without ``allow_test_embedder`` (usage errors).
+        ValidationError: output inside the source or in a directory that does not hold the images,
+            a near-duplicate split that cannot see every image, too many pairs, or a split equal to
+            the current version or to an earlier one in its lineage.
         StoreError: the output exists or the dataset is unreadable.
         LicenseError, FormatError: the embedder is not allowed or unusable.
     """
@@ -196,6 +211,14 @@ def split_dataset(
         raise ValueError("an embedder and a similarity threshold need near_duplicates")
     check_threshold(similarity_threshold)
     threshold = DEFAULT_THRESHOLD if similarity_threshold is None else similarity_threshold
+    created: Embedder | None = None
+    if embedder is not None:
+        created = resolve_embedder(embedder, settings.allowed_licenses)
+        if getattr(created, "test_only", False) and not allow_test_embedder:
+            raise ValueError(
+                f"{embedder!r} is test-only (it compares file bytes, not pictures) and is refused "
+                "for a split; pass allow_test_embedder=True (--allow-test-embedder)"
+            )
     ensure_outside(out, dataset)
     if os.path.lexists(out):  # checked before any embedding work; create() checks again
         raise StoreError(f"{out} already exists; refusing to overwrite")
@@ -206,24 +229,28 @@ def split_dataset(
     read = store.read()
     ds = Dataset(read.manifest, read.images, read.annotations, Path(dataset).resolve().parent)
     images = sorted(ds.images, key=lambda i: i.image_id)
+    assert ds.root is not None  # noqa: S101  # set above
+    relocated = relocate_images(images, ds.root, Path(out).resolve().parent)  # refuses early
     position = {image.image_id: n for n, image in enumerate(images)}
     uf = _UnionFind(len(images))
     labels = [groupkey.key_of(image, key) for image in images]
-    first_with: dict[str, int] = {}
-    for row, label in enumerate(labels):
-        if label is not None:
-            uf.union(first_with.setdefault(label, row), row)
+    old_labels = [groupkey.label(image.group_id) for image in images]
+    for column in (labels, old_labels):  # an existing group_id is always a constraint too
+        first_with: dict[str, int] = {}
+        for row, value in enumerate(column):
+            if value is not None:
+                uf.union(first_with.setdefault(value, row), row)
     key_groups = sum(1 for n in Counter(lb for lb in labels if lb).values() if n > 1)
     pairs, label = 0, None
     if near_duplicates:
-        assert embedder is not None  # noqa: S101  # checked above
+        assert created is not None  # noqa: S101  # checked above
         pairs, label = _near_copy_pairs(
             ds,
             Path(dataset).resolve(),
             position,
             uf,
             settings=settings,
-            embedder=embedder,
+            created=created,
             threshold=threshold,
             embed_batch=embed_batch,
         )
@@ -234,32 +261,39 @@ def split_dataset(
     for group, rows in zip(groups, rows_of, strict=True):
         for row in rows:
             split_of_row[row] = result.split_of[group.key]
-    for row, image in enumerate(images):
+    for row, image in enumerate(relocated):
         update: dict[str, object] = {"split": split_of_row[row]}
-        if key.kind != "group_id":
+        if key.kind != "group_id" and labels[row] is not None:
             update["group_id"] = labels[row]
+            if image.group_id is not None and old_labels[row] != labels[row]:
+                update["source"] = {**image.source, PREVIOUS_GROUP_ID: image.group_id}
         new_images.append(image.model_copy(update=update))
     across = sum(1 for rows in rows_of if len({split_of_row[r] for r in rows}) > 1)
     if across:  # cannot happen: every group was assigned as one unit
         raise ValidationError(f"internal error: {across} groups ended in more than one split")
     lineage = (*ds.manifest.lineage, ds.manifest.version)
-    try:
-        written = DatasetStore.create(
-            out,
-            new_images,
-            ds.annotations,
-            ds.categories,
-            name=ds.manifest.name,
-            task=ds.manifest.task,
-            limits=limits,
-            lineage=lineage,
-        ).manifest()
-    except ValidationError as exc:
-        if "lineage" in str(exc):
-            raise ValidationError(
-                "the split equals the current one (same splits and groups): nothing to write"
-            ) from None
-        raise
+    version = models_version(
+        new_images, ds.annotations, ds.categories, schema_version=SCHEMA_VERSION
+    )
+    if version == ds.manifest.version:
+        raise ValidationError(
+            "the split equals the current version (same splits and groups): nothing to write"
+        )
+    if version in ds.manifest.lineage:
+        raise ValidationError(
+            f"the split equals an earlier version in this dataset's lineage ({version}); use "
+            "that version instead: nothing to write"
+        )
+    written = DatasetStore.create(
+        out,
+        new_images,
+        ds.annotations,
+        ds.categories,
+        name=ds.manifest.name,
+        task=ds.manifest.task,
+        limits=limits,
+        lineage=lineage,
+    ).manifest()
     sizes = [len(rows) for rows in rows_of]
     stratified: Literal["category"] | None = "category" if stratify else None
     report = SplitReport(

@@ -57,7 +57,7 @@ def test_split_by_near_copies_then_the_leakage_gate_passes(
     out = tmp_path / "split.dcp"
     code = run(
         monkeypatch, "split", leaky, "-o", out, "--ratios", "0.7,0.15,0.15", "--near-dup",
-        "--embedder", "hash", "--stratify", "category", "--seed", "3",
+        "--embedder", "hash", "--allow-test-embedder", "--stratify", "category", "--seed", "3",
         "--json", tmp_path / "split.json",
     )  # fmt: skip
     printed = capsys.readouterr()
@@ -68,7 +68,7 @@ def test_split_by_near_copies_then_the_leakage_gate_passes(
     assert [ln.split()[0] for ln in lines[2:5]] == ["train", "val", "test"]
     report = json.loads((tmp_path / "split.json").read_text())
     assert report["groups_across_splits"] == 0 and report["near_duplicate_pairs"] >= 1
-    assert "warning: embedder 'hash' is a test double" in printed.err
+    assert "embedder 'hash' is a test double" in printed.err
     assert leakage_gate(monkeypatch, out, tmp_path) == 0
 
 
@@ -83,6 +83,7 @@ def test_split_by_near_copies_then_the_leakage_gate_passes(
         ["--embedder", "hash"],
         ["--similarity-threshold", "1.5", "--near-dup", "--embedder", "hash"],
         ["--stratify", "size"],
+        ["--near-dup", "--embedder", "hash"],  # a test double needs --allow-test-embedder
         ["--seed", "-1"],
     ],
 )
@@ -110,7 +111,32 @@ def test_an_unembeddable_image_refuses_the_split_with_exit_1(
     (tmp_path / "src" / "images" / "train3.png").unlink()
     capsys.readouterr()
     code = run(
-        monkeypatch, "split", leaky, "-o", tmp_path / "s.dcp", "--near-dup", "--embedder", "hash"
-    )
+        monkeypatch, "split", leaky, "-o", tmp_path / "s.dcp", "--near-dup", "--embedder", "hash",
+        "--allow-test-embedder",
+    )  # fmt: skip
     assert code == 1 and "file_missing=1" in capsys.readouterr().err
     assert not (tmp_path / "s.dcp").exists()
+
+
+def test_the_json_report_is_never_written_into_the_dataset_or_over_a_file(
+    leaky: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = sorted(p.name for p in leaky.rglob("*"))
+    assert (
+        run(monkeypatch, "split", leaky, "-o", tmp_path / "a.dcp", "--json", leaky / "r.json") == 2
+    )
+    assert sorted(p.name for p in leaky.rglob("*")) == before and not (tmp_path / "a.dcp").exists()
+    (tmp_path / "taken.json").write_text("keep")
+    assert (
+        run(
+            monkeypatch, "split", leaky, "-o", tmp_path / "b.dcp", "--json", tmp_path / "taken.json"
+        )
+        == 2
+    )
+    assert (tmp_path / "taken.json").read_text() == "keep"
+    (tmp_path / "link.json").symlink_to(tmp_path / "target.json")
+    assert (
+        run(monkeypatch, "split", leaky, "-o", tmp_path / "c.dcp", "--json", tmp_path / "link.json")
+        == 2
+    )
+    assert not (tmp_path / "target.json").exists()

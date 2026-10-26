@@ -308,4 +308,5 @@ datacopilot split [OPTIONS] DATASET
 | `--embed-batch` | `INT (1..1024)` |  | Images per embedder call. |
 | `--stratify` | `TEXT` |  | `category`: also balance each class across splits. |
 | `--seed` | `INT` | `0` | Breaks ties between groups of equal size (0 to 2^32-1). |
-| `--json` | `PATH` |  | Write the split report as JSON to this path. |
+| `--json` | `PATH` |  | Write the split report as JSON to this new file (outside the dataset; an existing file or a symlink is refused). |
+| `--allow-test-embedder` |  | off | Allow a test-only embedder such as `hash` (it compares file bytes, not pictures) for --near-dup; refused without it. |

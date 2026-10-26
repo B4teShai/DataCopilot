@@ -865,6 +865,14 @@ def apply(
     typer.echo(manifest.version)
 
 
+def _write_new_file(path: Path, text: str) -> None:
+    """Create ``path`` exclusively, never following a symlink, and write ``text`` (UTF-8)."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
 @app.command()
 def split(
     dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
@@ -912,8 +920,21 @@ def split(
         int, typer.Option("--seed", help="Breaks ties between groups of equal size (0 to 2^32-1).")
     ] = 0,
     json_out: Annotated[
-        Path | None, typer.Option("--json", help="Write the split report as JSON to this path.")
+        Path | None,
+        typer.Option(
+            "--json",
+            help="Write the split report as JSON to this new file (outside the dataset; an "
+            "existing file or a symlink is refused).",
+        ),
     ] = None,
+    allow_test_embedder: Annotated[
+        bool,
+        typer.Option(
+            "--allow-test-embedder",
+            help="Allow a test-only embedder such as `hash` (it compares file bytes, not "
+            "pictures) for --near-dup; refused without it.",
+        ),
+    ] = False,
 ) -> None:
     """Re-split a dataset by group and write it as a NEW dataset; the original is not changed.
 
@@ -928,6 +949,7 @@ def split(
     """
     from datacopilot.splits import assign, groupkey
     from datacopilot.splits import usecase as split_usecase
+    from datacopilot.store import ensure_outside
 
     if output.suffix != ".dcp":
         raise typer.BadParameter("must end with .dcp", param_hint="--output")
@@ -947,10 +969,26 @@ def split(
         raise typer.BadParameter(
             "--embedder and --similarity-threshold need --near-dup", param_hint="--embedder"
         )
+    if json_out is not None:
+        try:
+            ensure_outside(json_out, dataset)
+        except DataCopilotError:
+            raise typer.BadParameter(
+                "must lie outside the dataset directory", param_hint="--json"
+            ) from None
+        if os.path.lexists(json_out):
+            raise typer.BadParameter(
+                "already exists (or is a symlink); choose a new file", param_hint="--json"
+            )
     settings = load_settings()
     if embedder is not None:
         created = _resolve_embedder(embedder, settings.allowed_licenses)
         if getattr(created, "test_only", False):
+            if not allow_test_embedder:
+                raise typer.BadParameter(
+                    f"{embedder!r} is test-only; pass --allow-test-embedder to use it",
+                    param_hint="--embedder",
+                )
             typer.echo(
                 f"warning: embedder {embedder!r} is a test double that compares file bytes, not "
                 "pictures",
@@ -969,11 +1007,12 @@ def split(
             embed_batch=embed_batch,
             stratify=stratify == "category",
             seed=seed,
+            allow_test_embedder=allow_test_embedder,
         )
     except ValueError as exc:  # the use case's usage errors (seed, threshold)
         raise typer.BadParameter(str(exc)) from None
     if json_out is not None:
-        json_out.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        _write_new_file(json_out, report.model_dump_json(indent=2) + "\n")
     typer.echo(report.dataset_version)
     typer.echo(
         f"images={report.image_count} groups={report.group_count} "

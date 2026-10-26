@@ -17,7 +17,12 @@ def test_split_is_public_returns_the_report_and_prints_nothing(
     assert "split" in dc.__all__ and "SplitReport" in dc.__all__
     source = store(tmp_path, specs())
     report = dc.split(
-        source, tmp_path / "s.dcp", near_duplicates=True, embedder="hash", stratify="category"
+        source,
+        tmp_path / "s.dcp",
+        near_duplicates=True,
+        embedder="hash",
+        stratify="category",
+        allow_test_embedder=True,
     )
     assert isinstance(report, dc.SplitReport)
     assert report.dataset_version == DatasetStore.open(tmp_path / "s.dcp").manifest().version
@@ -32,4 +37,6 @@ def test_split_validates_its_options(tmp_path: Path) -> None:
         dc.split(source, tmp_path / "s.dcp", seed=-1)
     with pytest.raises(ValueError, match="unknown embedder"):
         dc.split(source, tmp_path / "s.dcp", near_duplicates=True, embedder="nope")
+    with pytest.raises(ValueError, match="test-only"):
+        dc.split(source, tmp_path / "s.dcp", near_duplicates=True, embedder="hash")
     assert not (tmp_path / "s.dcp").exists()
