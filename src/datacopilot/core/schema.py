@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -115,6 +116,13 @@ class Image(_Row):
     split: Split = "unassigned"
     group_id: str | None = None
     source: Source = Field(default_factory=dict)
+
+
+def group_key(label: str) -> str:
+    """How group labels are compared: case-insensitively, without surrounding space and in NFKC
+    form, so ``Cam1``, ``" cam1 "`` and a fullwidth ``Ｃam1`` are one group (the leakage check and
+    ``split`` use this one definition)."""
+    return unicodedata.normalize("NFKC", label).casefold().strip()
 
 
 class Annotation(_Row):
@@ -292,6 +300,71 @@ class AuditRun(_Row):
         if self.counts != expected:
             raise ValueError(f"counts {self.counts.model_dump()} do not equal the findings")
         return self
+
+
+class SplitShare(_Row):
+    """How many images one split received against its target (``deviation`` is
+    ``images / total - ratio``, rounded to 4 places)."""
+
+    images: int = Field(ge=0)
+    target_images: float = Field(ge=0)
+    deviation: float
+
+
+class ClassShare(_Row):
+    """Annotations of one class in one split: ``share`` of the class's total and ``deviation``
+    from the split's ratio (both rounded to 4 places)."""
+
+    annotations: int = Field(ge=0)
+    share: float = Field(ge=0, le=1)
+    deviation: float
+
+
+_HEX32 = r"^[0-9a-f]{32}$"
+
+
+class SplitReport(_Row):
+    """What ``split`` did: the new version, how images were grouped, and how close it came.
+
+    Attributes:
+        parent_version, dataset_version: the version that was split and the new one (its lineage
+            ends with the parent).
+        ratios: train, val and test fractions asked for; ``seed`` breaks ties between equal groups.
+        stratify: ``category`` when classes were balanced too.
+        group_key: the ``--by-group`` key; the new version's ``group_id`` holds its label.
+        near_duplicate_threshold, embedder: set when near-duplicate clusters were grouped.
+        group_count: groups assigned (an image without a key or near copy is a group of its own);
+            ``multi_image_groups`` and ``largest_group`` describe the groups of two or more.
+        key_groups: groups of two or more images that share a key; ``images_without_key`` had none.
+        near_duplicate_pairs: image pairs at or above the threshold, all of them (not a top-k).
+        groups_across_splits: groups whose images ended in more than one split; checked after the
+            assignment and always 0 in a written report.
+        moved_images: images whose split changed.
+        splits: ``split -> SplitShare``; classes: ``split -> str(category_id) -> ClassShare`` for
+            every class with annotations; ``max_class_deviation`` is the largest absolute class
+            deviation (None without annotations).
+    """
+
+    parent_version: str = Field(pattern=_HEX32)
+    dataset_version: str = Field(pattern=_HEX32)
+    seed: int = Field(ge=0)
+    ratios: tuple[float, float, float]
+    stratify: Literal["category"] | None = None
+    group_key: str
+    near_duplicate_threshold: float | None = None
+    embedder: str | None = None
+    image_count: int = Field(ge=0)
+    group_count: int = Field(ge=0)
+    multi_image_groups: int = Field(ge=0)
+    largest_group: int = Field(ge=0)
+    key_groups: int = Field(ge=0)
+    images_without_key: int = Field(ge=0)
+    near_duplicate_pairs: int = Field(ge=0)
+    groups_across_splits: int = Field(ge=0)
+    moved_images: int = Field(ge=0)
+    splits: dict[str, SplitShare]
+    classes: dict[str, dict[str, ClassShare]]
+    max_class_deviation: float | None = None
 
 
 @dataclass(frozen=True)

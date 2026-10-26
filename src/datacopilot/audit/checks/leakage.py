@@ -28,7 +28,6 @@ some images carry a ``group_id``; ``group_overlap`` shows a hashed ``group_ref``
 from __future__ import annotations
 
 import time
-import unicodedata
 from collections import defaultdict
 
 import numpy as np
@@ -36,17 +35,11 @@ import numpy as np
 from datacopilot.audit.checks import embedtools
 from datacopilot.audit.context import CheckContext
 from datacopilot.audit.findings import make_finding
-from datacopilot.core.schema import Dataset, Finding, Image, PluginSpec
+from datacopilot.core.schema import Dataset, Finding, Image, PluginSpec, group_key
 from datacopilot.embed import knn
 
 NAME = "leakage"
 _SPLIT_CODE = {"train": 0, "val": 1, "test": 2, "unassigned": 3}
-
-
-def group_key(label: str) -> str:
-    """Group labels compared case-insensitively, without surrounding space and in NFKC form, so
-    ``Cam1``, ``" cam1 "`` and a fullwidth ``Ｃam1`` are one group."""
-    return unicodedata.normalize("NFKC", label).casefold().strip()
 
 
 def _group_findings(ds: Dataset, ctx: CheckContext) -> list[Finding]:
