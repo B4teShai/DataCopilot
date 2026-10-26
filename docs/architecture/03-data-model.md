@@ -147,12 +147,26 @@ AuditRun`, `image_id → Image` (nullable), `ann_id → Annotation` (nullable).
 | `ann_id` | str | yes | Annotation concerned, if any |
 | `payload` | dict | no | Check-specific data (strings are cut to 512 characters, never aborting the audit) (`rule`, pair ids, IoU, counts). Bounded: at most 65,536 bytes of canonical JSON, depth 6, 20,000 values, finite numbers only |
 
+### SplitReport (built)
+
+Returned by `dc.split` and written by `split --json` (`core/schema.py`); not stored in the dataset. Fields:
+`parent_version`, `dataset_version`, `seed`, `ratios`, `stratify`, `group_key`, `near_duplicate_threshold`,
+`embedder`, `image_count`, `group_count`, `multi_image_groups`, `largest_group`, `key_groups`,
+`images_without_key`, `near_duplicate_pairs`, `groups_across_splits` (always 0 when written), `moved_images`,
+`splits` (`split -> {images, target_images, deviation}`), `classes` (`split -> category id -> {annotations,
+share, deviation}`), `max_class_deviation`. Deviations are fractions (`images / total - ratio`), rounded to
+4 places.
+
 ### Embedding
 
 Cache directory `embeddings/<model_id>@<model_revision>/` holding `manifest.json` and one or more
 `shard-<32 hex>.parquet` files ([ADR-0007](../adr/0007-embedding-cache-and-index.md)). The logical
 key is (`image_id`, `model_id`, `model_revision`); the model identity lives in the manifest, so a
-shard row has only two columns. Foreign key: `image_id → Image`.
+shard row has only two columns. Box-crop vectors for `label_noise` use the same format in
+`embeddings/<model_id>@<model_revision>+<variant>/`, where the variant names the crop geometry
+(`crop-v1-p100-m32-c50-s512`: format, padding per mille, size floor, per-image cap, crop size), is recorded
+in the manifest and bound into the MAC; the row id is the first 16 hex digits of
+`sha256(image_id, crop rectangle, variant)` and the digest column is the SHA-256 of the source image. Foreign key: `image_id → Image`.
 
 Shard columns (Parquet, zstd, one row group):
 
@@ -194,10 +208,10 @@ Manifest (`manifest.json`, at most 4 MiB, strict schema):
 
 ## Invariants
 
-Invariants 1 to 11, 13, 14 and 15 are built and tested (`tests/unit/test_schema_invariants.py`, `tests/unit/test_embed_cache.py`,
+Invariants 1 to 15 are built and tested (`tests/unit/test_schema_invariants.py`, `tests/unit/test_embed_cache.py`,
 `tests/unit/test_store.py`, `tests/unit/test_audit_schema.py`, `tests/unit/test_cli_audit.py`,
 `tests/golden/`); invariant 1 is established by the readers, which
-compute `image_id` from file bytes. Invariant 12 belongs to the planned `split`.
+compute `image_id` from file bytes. Invariant 12 is built and tested for `split` (`tests/unit/test_split_usecase.py`).
 
 1. `Image.image_id == sha256(file bytes).hexdigest()[:16]` for every row; moving or
    renaming the file does not change it.
@@ -217,11 +231,12 @@ compute `image_id` from file bytes. Invariant 12 belongs to the planned `split`.
 10. `apply`, `split` and `ingest` never modify a file under `versions/<existing>/`; they
     create exactly one new dataset directory (`apply` and `ingest`: a new `.dcp`) and the new manifest's `lineage`
     equals the parent's `lineage` plus the parent's `version` (empty for `ingest`). Tested for `apply` by hashing
-    every file of the source before and after.
+    every file of the source before and after, and for `split` the same way.
 11. After `apply`, every annotation created from a proposal has
     `provenance == "proposal_accepted"`, the id `proposal:<proposal_id>`, and the originating `proposal_id` and
     `set_id` in `source`.
-12. With `split --by-group`, no `group_id` value occurs in more than one split.
+12. After `split`, no `group_id` value (the `--by-group` key) and no near-copy pair found by `--near-dup` occurs in
+    more than one split; the split report's `groups_across_splits` is 0.
 13. `Finding.severity` is one of `CRITICAL`, `WARN`, `INFO`; `AuditRun.counts` equals the
     count of findings per severity.
 14. An embedding's `vector` has length `dims`, only finite values and L2 norm 1 (± 1e-3 stored,
@@ -245,6 +260,7 @@ dataset.dcp/
       categories.parquet
   embeddings/
     <model_id>@<model_revision>/            # embedding cache (built): manifest.json + shard-*.parquet
+    <model_id>@<model_revision>+<variant>/  # box crops for label_noise (built), variant = crop geometry
   audits/
     <run_id>.json                           # AuditRun with findings
   proposals/

@@ -30,15 +30,15 @@ const lInfra = lane("l_inf", laneX, laneY(4), laneW, 250, "Infrastructure");
 const lSide = lane("l_side", laneX + laneW + 30, laneY(0), 270, 770, "Cross-cutting, plugins");
 
 // Interface.
-const cli = component("cli", ...p(0, 0, 6), "cli/", "Typer commands. Built: doctor (--json), ingest, export, formats, audit, embed, propose, review, apply. Planned: split", true);
-const api = component("api", ...p(0, 1, 6), "api.py", "public Python API. Built: load, audit, export, propose, apply. Planned: split", true);
+const cli = component("cli", ...p(0, 0, 6), "cli/", "Typer commands. Built: doctor (--json), ingest, export, formats, audit, embed, split, propose, review, apply", true);
+const api = component("api", ...p(0, 1, 6), "api.py", "public Python API. Built: load, audit, export, split, propose, apply", true);
 
 // Application (integer columns).
 const convert = component("convert", ...p(0, 2), "convert.py", "ingest / export use case", true);
 const audit = component("audit", ...p(1, 2), "audit/", "runner, gate, 8 checks", true);
-const propose = component("propose", ...p(2, 2), "proposals/", "propose, review, apply; no consensus", true);
+const propose = component("propose", ...p(2, 2), "proposals/", "propose, review, apply", true);
 const patch = component("patch", ...p(3, 2), "patch/", "change_class, delete_box");
-const split = component("split", ...p(4, 2), "split/", "group-aware re-split");
+const split = component("split", ...p(4, 2), "splits/", "group-aware re-split", true);
 const report = component("report", ...p(5, 2), "report/", "HTML, JSON, SARIF", true);
 
 // Domain (half columns so vertical arrows pass between them).
@@ -59,7 +59,7 @@ const logging = component("logging", sx, 120, sw, sh, "logging.py", "structlog J
 const settings = component("settings", sx, 190, sw, sh, "settings.py", "DATACOPILOT_* env", true);
 const pFormats = component("p_formats", sx, 330, sw, sh, "datacopilot.formats", "-> io/ registry", true);
 const pChecks = component("p_checks", sx, 400, sw, sh, "datacopilot.checks", "-> audit/ registry", true);
-const pProposers = component("p_proposers", sx, 470, sw, sh, "datacopilot.proposers", "-> proposers/ registry", true);
+const pProposers = component("p_proposers", sx, 470, sw, sh, "datacopilot.proposers", "-> proposers/", true);
 const pEmbedders = component("p_embedders", sx, 540, sw, sh, "datacopilot.embedders", "-> embed/ registry", true);
 
 const useCases = [convert, audit, propose, patch, split, report];

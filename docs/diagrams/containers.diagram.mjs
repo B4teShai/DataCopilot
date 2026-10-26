@@ -10,8 +10,8 @@ const p = (c, r) => [g(c, r).x, g(c, r).y, W, H];
 const engineer = actor("engineer", g(0, 0).x, g(0, 0).y, "CV engineer", W);
 
 // Inside the boundary (cols 0-2, rows 1-3).
-const api = container("api", ...p(0, 1), "Python API", "load, audit, export, propose, apply built", true);
-const cli = container("cli", ...p(1, 1), "datacopilot CLI", "Typer; ingest, export, audit, embed, propose, review, apply built", true);
+const api = container("api", ...p(0, 1), "Python API", "load, audit, export, split, propose, apply built", true);
+const cli = container("cli", ...p(1, 1), "datacopilot CLI", "ingest, export, audit, embed, split, propose, apply built", true);
 const plugins = container("plugins", ...p(2, 1), "Plugin host", "formats, checks, embedders, proposers built", true);
 const adapters = container("adapters", ...p(0, 2), "Format adapters", "io/: 6 formats built; integrations/ planned", true);
 const audit = container("audit", ...p(1, 2), "Audit engine", "checks, gate built", true);
@@ -57,6 +57,6 @@ export default {
     arrow(report, ci, "exit code, SARIF"),
     c4Legend(40, 880),
     statusLegend(40, 920),
-    note("n1", "Built: ingest, export, audit and doctor (CLI, core library, six format adapters, registries, dataset store, four CPU checks and four embedding checks, DINOv2 and SigLIP2 embedders, HTML/JSON/SARIF reports), the load, audit and export API, settings, logging. Propose, review and apply (Grounding DINO, add_box only) are built; split is planned.", 40, 960),
+    note("n1", "Built: ingest, export, audit and doctor (CLI, core library, six format adapters, registries, dataset store, four CPU checks and four embedding checks, DINOv2 and SigLIP2 embedders, HTML/JSON/SARIF reports), the load, audit and export API, settings, logging. Propose, review and apply (Grounding DINO, add_box only) and a group-aware split are built.", 40, 960),
   ],
 };

@@ -3,12 +3,12 @@
 ![Components by layer](../diagrams/png/components.png)
 
 Layers follow [ADR-0004](../adr/0004-layering-and-dependency-rule.md). Import package:
-`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `label_noise`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `proposers/` (protocol, registry, Grounding DINO, test proposer), `proposals/` (propose, review, apply use cases), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`, `propose`, `apply`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
+`datacopilot`. Built: `cli/` (`doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `split`, `propose`, `review export`, `review import`, `apply`), `convert.py`, `audit/` (registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `label_noise`, `outliers`), `embed/` (protocol, registry, backends, cache, kNN), `models/` (registry, license guard), `proposers/` (protocol, registry, Grounding DINO, test proposer), `proposals/` (propose, review, apply use cases), `splits/` (group keys, assignment, the split use case), `report/` (JSON, HTML, SARIF), `core/`, `io/` (COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder), `store/`, `doctor.py`, `api.py` (`load`, `audit`, `export`, `split`, `propose`, `apply`), `deprecation.py`, `logging.py`, `settings.py`. Everything else is planned.
 
 | Layer | Packages |
 |---|---|
 | Interface | `cli/`, `api.py` |
-| Application | `convert.py`, `audit/`, `proposals/`, `split/`, `report/` |
+| Application | `convert.py`, `audit/`, `proposals/`, `splits/`, `report/` |
 | Domain | `core/schema.py`, `core/version.py`, `core/geometry.py` |
 | Infrastructure | `io/`, `store/`, `embed/`, `models/`, `proposers/`, `integrations/` |
 | Cross-cutting (beside the layers) | `logging.py`, `settings.py` |
@@ -38,8 +38,8 @@ def embed(dataset, embedder, embed_batch, embedding_cache,
           require_cache_key) -> None                        # fills the cache; exit 0 / 1 / 2
 ```
 
-Built commands: `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply` (exit codes in their `--help` and in
-[04-flows.md](04-flows.md)). Planned commands: `split`, `plugins`. Each is a thin function that validates options and calls one use case.
+Built commands: `ingest`, `export`, `formats`, `audit`, `embed`, `split`, `propose`, `review export`, `review import`, `apply` (exit codes in their `--help` and in
+[04-flows.md](04-flows.md)). Planned command: `plugins`. Each is a thin function that validates options and calls one use case.
 The built commands call `convert.py` and `audit/` directly (imported lazily so `--version` does not
 load `pyarrow`); `api.py` wraps the same use cases for Python callers.
 
@@ -85,7 +85,7 @@ class Dataset:
     def export(self, format: str, out: str, *, strict: bool = False) -> ConversionReport
 ```
 
-Depends on: application packages, `core/`. Status: **built** for `load`, `audit`, `export`, `propose`, `apply` and `ProposalSet`; `split`, FiftyOne helpers and `Dataset.export` planned. `propose` takes the path of a `.dcp` directory (the set is stored there); review is done with the command line.
+Depends on: application packages, `core/`. Status: **built** for `load`, `audit`, `export`, `split` (returns a `SplitReport`), `propose`, `apply` and `ProposalSet`; FiftyOne helpers and `Dataset.export` planned. `propose` takes the path of a `.dcp` directory (the set is stored there); review is done with the command line.
 
 ## Application layer
 
@@ -149,7 +149,7 @@ Built checks and findings (`payload["rule"]`):
 | `near_duplicates` | WARN within a split, CRITICAL across splits | `near_duplicate` (cluster of images whose embeddings have cosine similarity of at least `near_duplicate_cosine` = 0.95 among each other's 10 nearest neighbours; `cross_split` clusters are CRITICAL like exact duplicates, and `leakage` reports them too; `group_id` = 12-hex digest of the member ids, up to 20 members as short id, split and base name), `phash_not_applied` (WARN; optional perceptual-hash prefilter could not hash some images, their pairs are kept; the prefilter never drops a cross-split pair and weakens the within-split gate), `embedding_pair_contradicted` (WARN) |
 | `leakage` | CRITICAL | `cross_split_near_duplicate` (neighbours are searched only among the images of the *other* splits, so a crowd of same-split frames cannot hide a leak; `unassigned` is compared with the real splits like in `duplicates`), `group_overlap` (one `group_id` in more than one split; needs no embedding) |
 | `outliers` | INFO | `outlier` (per class, mean cosine distance to the 5 nearest images of the same class, robust z above 3.5 with the scale floored at 0.02; at most 20 per class), `classes_skipped`, `images_without_class` |
-| `label_noise` | INFO; WARN or CRITICAL for unscored boxes; WARN or INFO for `skipped` | `suspect_class` (a box of class `c` when at most `suspect_max_support` = 0.0 of its usable neighbours carry `c`: the 10 nearest embedded and annotated photos at cosine similarity of at least 0.3, at least 3 usable, else the box is counted in `annotations_not_scored` (WARN; CRITICAL above `max_unchecked_fraction` of the boxes or with `--require-local-images`); at most 3 per photo, 20 per class and 50,000 in all, the rest in `suspects_truncated` (INFO); at most 256 classes of one photo count as carried, the photos cut are in `classes_truncated` (INFO); evidence: support, neighbours, mean similarity, the 5 classes the neighbours carry), `skipped` (`reason`: WARN for `embedder_missing`, `no_embeddings`, `too_many_images`, `too_few_images`; INFO for `no_annotations`, `single_class`). Measured weak, see [ADR-0009](../adr/0009-label-noise-check.md) |
+| `label_noise` | INFO; WARN or CRITICAL for unscored boxes; WARN or INFO for `skipped` | `suspect_class` (a box of class `c` when at most `suspect_max_support` = 0.0 of its usable neighbours carry `c`: the 10 nearest embedded and annotated photos at cosine similarity of at least 0.3, at least 3 usable, else the box is counted in `annotations_not_scored` (WARN; CRITICAL above `max_unchecked_fraction` of the boxes or with `--require-local-images`); at most 3 per photo, 20 per class and 50,000 in all, the rest in `suspects_truncated` (INFO); at most 256 classes of one photo count as carried, the photos cut are in `classes_truncated` (INFO); evidence: support, neighbours, mean similarity, the 5 classes the neighbours carry), `skipped` (`reason`: WARN for `embedder_missing`, `no_embeddings`, `too_many_images`, `too_few_images`; INFO for `no_annotations`, `single_class`). Measured weak, see [ADR-0009](../adr/0009-label-noise-check.md). Built since [ADR-0010](../adr/0010-split-and-box-crops.md): by default the neighbours are **box crops** (`audit/crops.py`: boxes of at least 32 pixels on the shorter side, 0.1 padding, at most 50 per image, cached under a geometry variant), the photo rule above is `suspect_basis = "image"` and the reported fallback (`crop_rule_unavailable`, WARN), every finding names its `basis`, `annotations_not_scored` carries `reasons`, and `too_few_boxes` joins the `skipped` reasons. Still weak |
 | `boxes` | CRITICAL / WARN | `invalid_box`, `out_of_bounds`, `zero_area` (CRITICAL); `tiny_box`, `extreme_aspect`, `duplicate_box` (earliest same-class match), `conflicting_class` (earliest different-class match; one box can be both), `pairwise_skipped` (WARN: an image with more than 20,000 boxes) (WARN); `boxes_truncated` (INFO) |
 
 The four embedding checks share these **fail-closed rules**, emitted by each of them so that
@@ -192,19 +192,29 @@ reader; DuckDB is not used (see [ADR-0003](../adr/0003-repo-and-tooling.md)). Ha
 reads run on a thread pool (`hashlib` releases the GIL on large chunks), not a process pool.
 Status: **built** for the registry, runner, gate, the four CPU checks and the four embedding
 checks (`near_duplicates`, `leakage`, `label_noise`, `outliers`) with `audit/embedding.py`, the pipeline that feeds
-them (cache, bounded reads, batching, spot check, budgets).
+them (cache, bounded reads, batching, spot check, budgets), and `audit/crops.py`, the same pipeline for box crops.
 
-### `split/`
+### `splits/`
 
-Responsibility: group-aware, stratified re-split that writes a new dataset version.
+Responsibility: group-aware, optionally stratified re-split that writes a new dataset version. Named
+`splits` so that importing it never shadows the `datacopilot.split` function.
 
 ```python
-def resplit(ds: Dataset, *, by_group: bool, ratios: tuple[float, float, float],
-            stratify: Literal["category"] | None, seed: int) -> Dataset
+# splits/groupkey.py
+def parse(text: str) -> GroupKey                 # group_id | source.<name> | re:<safe pattern>
+def key_of(image: Image, key: GroupKey) -> str | None
+# splits/assign.py
+def assign(groups: Sequence[Group], ratios: Ratios, *, seed: int, stratify: bool = False) -> Assignment
+# splits/usecase.py
+def split_dataset(dataset: Path, out: Path, *, settings, ratios, group_key="group_id",
+                  near_duplicates=False, embedder=None, similarity_threshold=None,
+                  embed_batch=None, stratify=False, seed=0) -> SplitReport
 ```
 
-Invariant: with `by_group=True` no `group_id` appears in two splits. Depends on: `core/`,
-`store/`. Status: planned.
+Groups are connected components of "same key" and, with near duplicates, every pair found by
+`embed/knn.pairs_at_least` (exact, upper triangle, pair cap). Invariant: no group, and so no `group_id`,
+appears in two splits; checked after the assignment. Depends on: `core/`, `store/`, `embed/` and the
+audit's embedding pipeline. Status: **built** ([ADR-0010](../adr/0010-split-and-box-crops.md)).
 
 ### `proposals/` and `proposers/`
 

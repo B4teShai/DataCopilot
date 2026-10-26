@@ -34,7 +34,8 @@ per CLI invocation and doubles as `AuditRun.run_id` (built, tested through the C
 | `embedder_device_fallback` | WARN | `model_id`, `reason` (exception class name) | built |
 | `audit_completed` | INFO | `run_id`, `dataset_version`, `critical`, `warn`, `info`, `passed` | built |
 | `report_written` | INFO | `format`, `path` (file name only, never the directory) | built |
-| `split_completed` | INFO | `parent_version`, `dataset_version`, `train`, `val`, `test`, `group_count` | planned |
+| `dataset_split` | INFO | `parent_version`, `dataset_version`, `image_count`, `group_count`, `near_duplicate_pairs`, `moved_count` | built |
+| `crop_embeddings_computed` | INFO | `model_id`, `model_revision`, `crop_count`, `embedded_count`, `cache_hits`, `missing_count`, `duration_ms` | built |
 | `proposer_started` | INFO | `proposer`, `model_id`, `model_revision`, `image_count` | built |
 | `proposer_image_skipped` | WARN | `reason` (constant code: `file_missing`, `outside_root`, `content_changed`, `decode_failed`, ...) | built |
 | `propose_progress` | INFO | `images_done`, `images_total` (every 25 images) | built |
@@ -70,7 +71,7 @@ code 2.
 | `ingest`, `export` (built) | converted; `--strict` with zero dropped or skipped values | unreadable or malformed input, invariant violation, identical image content, non-empty output, over-limit table, `--strict` with dropped or skipped values (also on `ingest`: nothing is written), unknown format | bad option (`--format` missing, output not `*.dcp`, invalid `--group-by`), bad env | Ctrl-C; no partial version left visible |
 | `audit` (built) | run completed and gate passed (or no `--fail-on`) | `--fail-on` matched; dataset unreadable; report not writable; embedder license refused; embedder missing its extra or failing (a CRITICAL finding) | bad option (unknown check, bad or never-firing `--fail-on`, `--workers` out of range, embedding check without `--embedder`, bad `--embedder`, `--embed-batch` or `--similarity-threshold`), bad env | Ctrl-C |
 | `embed` (built) | every image embedded and stored | an image without an embedding, embedder failure, license refused, cache not writable, unreadable dataset | bad option, cache unusable (`CI` without key) | Ctrl-C |
-| `split` (planned) | new version written | ratios do not sum to 1, impossible stratification, store error | bad option | Ctrl-C |
+| `split` (built) | new version written | an image without an embedding for `--near-dup`, search ended at the time budget, over 2,000,000 near-copy pairs, a split equal to the current one, output exists or inside the source, unreadable dataset, embedder not allowed | bad option (ratios, unsafe or unknown `--by-group`, `--near-dup` without `--embedder`, `--stratify` other than `category`, seed), bad env | Ctrl-C; no partial version left visible |
 | `propose` (built) | set stored, every image reached | run incomplete (time budget, unreadable image; the partial set is kept), model error, license refused, missing extra, non-detection dataset | bad option, unknown proposer or class | Ctrl-C |
 | `review export`, `review import` (built) | CVAT folder written / decisions stored as a new set | unknown, tampered or mismatching set, refused decisions file, no decisions in it, non-empty output | bad option or id | Ctrl-C |
 | `apply` (built) | new dataset written | set for another version, unpinned or unlicensed model, incomplete run, nothing accepted, output exists or inside the source | bad option or id | Ctrl-C |
