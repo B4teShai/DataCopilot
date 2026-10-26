@@ -26,7 +26,9 @@ Each new row has ``provenance == "proposal_accepted"`` and, in ``source``, the `
 ``set_id``, ``model_id``, ``model_revision`` and whether a reviewer ``edited`` the box. The model's
 score is kept only for an unedited box: an edited box is the reviewer's, not the model's. The
 reviewed set (and its parent) are copied into the new dataset's ``proposals/``, so the provenance
-survives the deletion of the source. Event: ``proposals_applied``.
+survives the deletion of the source. Relative image paths are rewritten for the new dataset's
+directory (``store.relocate_images``); an output whose directory does not hold the images is
+refused. Event: ``proposals_applied``.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ from datacopilot.core.schema import Annotation, Dataset, DatasetManifest
 from datacopilot.logging import get_logger
 from datacopilot.models import registry as models
 from datacopilot.proposers.registry import check_proposer
-from datacopilot.store import DatasetStore, StoreLimits, ensure_outside
+from datacopilot.store import DatasetStore, StoreLimits, ensure_outside, relocate_images
 
 
 def _check_model(ps: ProposalSet, allowed_licenses: frozenset[str], allow_test: bool) -> None:
@@ -142,9 +144,10 @@ def apply_proposals(
         )
         for p in accepted
     ]
+    images = ds.images if ds.root is None else relocate_images(ds.images, ds.root, out.parent)
     store = DatasetStore.create(
         out,
-        ds.images,
+        images,
         [*ds.annotations, *rows],
         ds.categories,
         name=ds.manifest.name,

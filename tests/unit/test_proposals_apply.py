@@ -455,3 +455,42 @@ def test_a_set_whose_parent_is_missing_from_the_dataset_is_refused_by_the_use_ca
     with pytest.raises(ValidationError, match="not in the dataset"):
         usecase.apply_set(path, done.set_id, tmp_path / "n.dcp", settings=settings,
                           allow_test_proposer=True)  # fmt: skip
+
+
+# ----------------------------------------------------------------------------- output elsewhere
+def stored_relative(tmp_path: Path) -> tuple[Path, Dataset]:
+    """A dataset at ``proj/src.dcp`` whose rows name their images relative to ``proj/``."""
+    proj = tmp_path / "proj"
+    ds = build(
+        proj,
+        [
+            Img("a.png", 64, 48, boxes=[(0, 8.0, 6.0, 40.0, 30.0)], path="images/a.png"),
+            Img("b.png", 80, 60, split="val", boxes=[(1, 5.0, 5.0, 30.0, 30.0)],
+                path="images/b.png"),
+        ],
+    )  # fmt: skip
+    path = proj / "src.dcp"
+    DatasetStore.create(
+        path, ds.images, ds.annotations, ds.categories, name="demo", task="detection"
+    )
+    return path, DatasetStore.open(path).read()
+
+
+def test_an_output_in_another_directory_still_finds_the_images(tmp_path: Path) -> None:
+    import datacopilot as dc
+
+    source, ds = stored_relative(tmp_path)
+    out = tmp_path / "new.dcp"  # one level up: the relative paths must gain "proj/"
+    go(ds, make_set(ds), out, source=source)
+    new = DatasetStore.open(out).read()
+    assert sorted(i.file_path for i in new.images) == ["proj/images/a.png", "proj/images/b.png"]
+    run = dc.audit(out, ["integrity"], fail_on=("warn",))
+    assert run.passed and run.findings == ()
+
+
+def test_an_output_whose_directory_does_not_hold_the_images_is_refused(tmp_path: Path) -> None:
+    source, ds = stored_relative(tmp_path)
+    out = tmp_path / "elsewhere" / "new.dcp"
+    with pytest.raises(ValidationError, match="outside"):
+        go(ds, make_set(ds), out, source=source)
+    assert not out.exists()

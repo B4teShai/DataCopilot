@@ -92,6 +92,62 @@ def ensure_outside(out: Path, source: Path) -> None:
         raise ValidationError("the output must be a new directory outside the source dataset")
 
 
+def _is_remote(file_path: str) -> bool:
+    """A URI (``scheme://...``), the same test as ``audit/paths.py``."""
+    scheme, sep, _ = file_path.partition("://")
+    return (
+        bool(sep)
+        and len(scheme) >= 2
+        and scheme.isascii()
+        and all(c.isalnum() or c in "+-." for c in scheme)
+    )
+
+
+def relocate_images(images: Sequence[Image], source_root: Path, new_root: Path) -> list[Image]:
+    """The rows of ``images`` for a dataset whose root moves from ``source_root`` to ``new_root``.
+
+    A dataset's relative ``file_path`` values are read against its root (the parent of the ``.dcp``
+    directory), and the audit opens only images inside that root. ``apply`` and ``split`` write a
+    new ``.dcp`` that may live elsewhere, so a relative path is rewritten to the same file relative
+    to the new root; absolute paths and remote URIs are kept as they are, and a relative path that
+    is already unsafe (``..``, a backslash) is kept as well, for the checks to report.
+
+    Raises:
+        ValidationError: some local images would lie outside ``new_root``, where no check would
+            read them (the message counts them); nothing is written by the caller then.
+    """
+    src, dst = source_root.resolve(), new_root.resolve()
+    out: list[Image] = []
+    outside = 0
+    for image in images:
+        path = image.file_path
+        if _is_remote(path):
+            out.append(image)
+            continue
+        if os.path.isabs(path):
+            outside += not Path(os.path.realpath(path)).is_relative_to(dst)
+            out.append(image)
+            continue
+        parts = path.split("/")
+        if "\\" in path or ".." in parts or not path:
+            out.append(image)
+            continue
+        target = Path(os.path.normpath(src / path))
+        if not target.is_relative_to(dst):
+            outside += 1
+            out.append(image)
+            continue
+        new = target.relative_to(dst).as_posix()
+        out.append(image if new == path else image.model_copy(update={"file_path": new}))
+    if outside:
+        raise ValidationError(
+            f"{outside} of {len(images)} images would lie outside the new dataset's directory "
+            f"({dst.name}), where no check reads them: put the output in a directory that holds "
+            "the images, for example next to the source dataset"
+        )
+    return out
+
+
 def _fsync_file(path: Path) -> None:
     with path.open("rb") as handle:
         os.fsync(handle.fileno())
