@@ -164,9 +164,10 @@ python_version = "3.10"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers -m 'not real_model'"
+addopts = "-ra --strict-markers -m 'not real_model and not clone'"
 markers = [
   "chaos: interrupted-write and crash-recovery tests",
+  "clone: clones HEAD, installs it with pip into a fresh environment and runs the README quick start (needs git and network for the dependencies; off by default; run with -m clone)",
   "real_model: downloads real model weights and needs the [embed] extra (off by default; run with -m real_model)",
 ]
 
