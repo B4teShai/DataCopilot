@@ -47,6 +47,7 @@ from datacopilot.logging import get_logger
 
 if TYPE_CHECKING:
     from datacopilot.audit.context import CheckContext
+    from datacopilot.audit.crops import CropPlan, Crops
 
 __all__ = [
     "DEFAULT_DTYPE",
@@ -307,6 +308,7 @@ class PipelineProvider:
         self._dtype: embed_cache.Dtype = dtype
         self._use_cache = use_cache
         self._memo: tuple[str, EmbeddingSet] | None = None
+        self._crop_memo: tuple[tuple[str, str], Crops] | None = None
 
     # ------------------------------------------------------------------ cache trust
     def _secret(self, ctx: CheckContext) -> tuple[bytes | None, str | None]:
@@ -477,6 +479,29 @@ class PipelineProvider:
             missing_count=result.missing_count,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+        return result
+
+    def crops(self, ds: Dataset, ctx: CheckContext, plan: CropPlan) -> Crops:
+        """Box-crop embeddings of ``ds`` (``audit/crops.py``), computed once per dataset version
+        and crop geometry, cached beside the image embeddings under the geometry's variant."""
+        from datacopilot.audit import crops as crop_pipeline
+
+        memo_key = (ds.manifest.version, plan.variant)
+        if self._crop_memo is not None and self._crop_memo[0] == memo_key:
+            return self._crop_memo[1]
+        secret, disabled_reason = self._secret(ctx)
+        result = crop_pipeline.compute(
+            self._embedder,
+            ds,
+            ctx,
+            plan,
+            identity=self._identity(ds),
+            secret=secret,
+            disabled_reason=disabled_reason,
+            batch=self._batch,
+            dtype=self._dtype,
+        )
+        self._crop_memo = (memo_key, result)
         return result
 
     def fresh_vectors(

@@ -228,6 +228,17 @@ def embedding_set(
             make_finding(ctx.run_id, name, "CRITICAL", payload={"rule": "embedder_missing"})
         ]
     es = provider.get(ds, ctx)
+    return es, qualify(es, ctx, name)
+
+
+def qualify(
+    es: EmbeddingSet, ctx: CheckContext, name: str, *, report_missing: bool = True
+) -> list[Finding]:
+    """The findings that say how complete and how trusted ``es`` is (see the module docstring).
+
+    ``report_missing=False`` leaves out ``images_not_embedded``, for a caller that accounts for
+    the missing vectors itself (the box crops of ``label_noise``, counted per box).
+    """
     findings: list[Finding] = []
     if es.refused is not None:
         findings.append(incomplete_finding(ctx, name, es.refused, 0, es.total))
@@ -246,7 +257,7 @@ def embedding_set(
                 },
             )
         )
-    if es.missing:
+    if es.missing and report_missing:
         findings.append(
             make_finding(
                 ctx.run_id,
@@ -315,7 +326,7 @@ def embedding_set(
                 },
             )
         )
-    return es, findings
+    return findings
 
 
 def images_by_id(ds: Dataset) -> Mapping[str, Image]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
@@ -49,6 +50,12 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
         suspect_min_images: fewer annotated, embedded images than this skips the check (reported).
         max_suspects_per_image: suspect annotations reported per image (the rest are counted).
         max_suspects_per_class: suspect annotations reported per class (the rest are counted).
+        suspect_basis: ``crop`` (default) compares each box with the boxes that look most like it,
+            from box-crop embeddings; ``image`` compares the box's whole photo with neighbouring
+            photos. ``crop`` falls back to ``image`` (and says so) when crops cannot be cut.
+        crop_min_side_px: boxes whose shorter side is below this many pixels are not cropped.
+        crop_padding: each crop is the box grown by this fraction of its width and height per side.
+        max_crops_per_image: boxes cropped per image, largest first (the rest are counted).
     """
 
     imbalance_info_ratio: float = Field(default=3.0, gt=1.0, le=1e9, allow_inf_nan=False)
@@ -77,6 +84,10 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
     suspect_min_images: int = Field(default=30, ge=5, le=1_000_000)
     max_suspects_per_image: int = Field(default=3, ge=1, le=1_000)
     max_suspects_per_class: int = Field(default=20, ge=1, le=10_000)
+    suspect_basis: Literal["crop", "image"] = "crop"
+    crop_min_side_px: int = Field(default=32, ge=1, le=4096)
+    crop_padding: float = Field(default=0.1, ge=0.0, le=1.0, allow_inf_nan=False)
+    max_crops_per_image: int = Field(default=50, ge=1, le=200)
 
     @model_validator(mode="after")
     def _ordered(self) -> CheckConfig:

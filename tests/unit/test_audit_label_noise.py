@@ -17,7 +17,8 @@ from typing import Any
 import numpy as np
 import pytest
 from fixtures.embedfakes import near, random_unit
-from fixtures.embedscene import Row, scene
+from fixtures.embedscene import Row
+from fixtures.embedscene import scene as _scene
 from sarif_shape import validate_sarif
 
 from datacopilot.audit import engine, registry
@@ -48,7 +49,14 @@ def names(ds: Dataset) -> dict[str, str]:
 
 
 def cfg(ctx: Any, **kw: Any) -> Any:
-    return ctx.model_copy(update={"config": CheckConfig(**kw)})
+    """The image rule with these settings (the crop rule has its own tests)."""
+    return ctx.model_copy(update={"config": CheckConfig(**{"suspect_basis": "image", **kw})})
+
+
+def scene(*args: Any, **kw: Any) -> Any:
+    """The planted scene, checked with the whole-image rule (its vectors are per image)."""
+    ds, emb, ctx = _scene(*args, **kw)
+    return ds, emb, cfg(ctx)
 
 
 # ------------------------------------------------------------ registration and config
@@ -362,6 +370,7 @@ def test_every_rule_has_a_human_description() -> None:
         "classes_truncated",
         "embedder_missing",
         "images_not_embedded",
+        "crop_rule_unavailable",
     ):
         assert not describe_rule("label_noise", rule).startswith("label_noise:"), rule
 
@@ -391,7 +400,7 @@ def test_the_finding_renders_escaped_in_all_three_formats_and_gates_by_name(
     out.mkdir()
     render(run, html=out / "r.html", json=out / "r.json", sarif=out / "r.sarif")
     html = (out / "r.html").read_text()
-    assert "Annotation class disagrees with its neighbouring images" in html
+    assert "Annotation class disagrees with its nearest look-alikes" in html
     assert "<script>alert" not in html and "&lt;script&gt;" in html
     validate_sarif(json.loads((out / "r.sarif").read_text()))
     doc = json.loads((out / "r.json").read_text())

@@ -13,6 +13,7 @@ datacopilot/audit/checks/leakage.py
 datacopilot/audit/checks/near_duplicates.py
 datacopilot/audit/checks/outliers.py
 datacopilot/audit/context.py
+datacopilot/audit/crops.py
 datacopilot/audit/embedding.py
 datacopilot/audit/engine.py
 datacopilot/audit/findings.py
