@@ -29,6 +29,7 @@ datacopilot/convert.py
 datacopilot/core/__init__.py
 datacopilot/core/errors.py
 datacopilot/core/geometry.py
+datacopilot/core/patterns.py
 datacopilot/core/proposals.py
 datacopilot/core/schema.py
 datacopilot/core/version.py

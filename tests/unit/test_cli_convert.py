@@ -422,3 +422,11 @@ def test_ingest_strict_fails_on_skipped_input_and_writes_nothing(
     assert code == 1
     assert "annotations.unsupported.polygon=1" in capsys.readouterr().err
     assert not (tmp_path / "s.dcp").exists()
+
+
+def test_an_unsafe_group_by_pattern_is_refused_before_anything_is_read() -> None:
+    from datacopilot import convert
+
+    with pytest.raises(ValueError, match="unsafe --group-by pattern"):
+        convert.parse_group_by("re:^(a+)+$")
+    assert convert.parse_group_by(r"re:^images/(?P<g>[^/.]+)").groups == 1

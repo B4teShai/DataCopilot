@@ -84,15 +84,21 @@ def unchecked_severity(
     return "WARN"
 
 
-def display_name(file_path: str) -> str:
-    """Base name of ``file_path`` for findings (never the directory), at most 255 characters.
+def base_name(file_path: str) -> str:
+    """The last path segment of ``file_path``, not cut to any length.
 
     A remote URI loses its query string and fragment first (a presigned URL carries a credential
-    and a signature there) and shows only the last path segment, without scheme or host.
+    and a signature there), so only the last path segment remains, without scheme or host.
     """
     if _is_remote(file_path):
         file_path = file_path.partition("?")[0].partition("#")[0]
-    return file_path.replace("\\", "/").rsplit("/", 1)[-1][:MAX_NAME_CHARS]
+    return file_path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def display_name(file_path: str) -> str:
+    """Base name of ``file_path`` for findings (never the directory), at most 255 characters; see
+    :func:`base_name`."""
+    return base_name(file_path)[:MAX_NAME_CHARS]
 
 
 def safe_text(value: str, limit: int) -> str:

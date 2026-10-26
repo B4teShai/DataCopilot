@@ -23,6 +23,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from datacopilot.audit.paths import resolve_image_path
 from datacopilot.core.errors import FormatError, ValidationError
+from datacopilot.core.patterns import check_pattern
 from datacopilot.core.schema import (
     SCHEMA_VERSION,
     Annotation,
@@ -52,14 +53,15 @@ class IngestResult:
 def parse_group_by(pattern: str) -> re.Pattern[str]:
     """Compile a ``--group-by`` pattern (optional ``re:`` prefix).
 
+    The pattern is matched against every image's relative path, which comes from the dataset, so it
+    must pass :func:`datacopilot.core.patterns.check_pattern` (bounded, no nested or overlapping
+    quantifiers); relative paths are at most ``MAX_PATH_CHARS`` long.
+
     Raises:
-        ValueError: if the regular expression is invalid.
+        ValueError: if the regular expression is invalid or unsafe.
     """
     text = pattern[3:] if pattern.startswith("re:") else pattern
-    try:
-        return re.compile(text)
-    except re.error as exc:
-        raise ValueError(f"invalid --group-by regular expression: {exc.msg}") from None
+    return check_pattern(text, "--group-by")
 
 
 def _group_of(pattern: re.Pattern[str], relative_path: str) -> str | None:
