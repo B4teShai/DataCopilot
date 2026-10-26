@@ -1,9 +1,9 @@
 """A fresh clone installs and runs: nothing is published, so a clone is how everyone gets it.
 
-The real run (``-m clone``) clones the committed HEAD, installs it with pip into an empty virtual
-environment and runs ``--version``, ``doctor`` and the README quick start through
-``scripts/check_clone.sh``. It needs the network for the dependencies and takes a minute or two, so
-it is off by default; the shape of the script is checked on every run.
+The real run (``-m clone``) clones the committed HEAD, installs it from the lock file with
+``uv sync --frozen`` into an empty environment and runs ``--version``, ``doctor`` and the README
+quick start through ``scripts/check_clone.sh``. It needs the network for the dependencies and takes
+a minute or two, so it is off by default; the shape of the script is checked on every run.
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ def test_the_script_is_executable_strict_and_keeps_caches_inside_its_work_direct
     assert "set -euo pipefail" in text
     for variable in ("HOME", "PIP_CACHE_DIR", "DATACOPILOT_CACHE_DIR", "XDG_CACHE_HOME"):
         assert f'{variable}="$work/' in text, variable
-    assert 'pip install --quiet "$work/src"' in text  # the clone, not a package index name
+    # the dependencies come from the committed lock file, not from whatever an index serves today
+    assert "uv sync --frozen --no-dev" in text and 'UV_CACHE_DIR="$work/' in text
     assert "--version" in text and "doctor" in text
 
 

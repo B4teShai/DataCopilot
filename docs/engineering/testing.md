@@ -68,5 +68,6 @@ and excluded from the default run once they exist.
   sdist, asserts their contents and metadata and installs the wheel in a clean environment.
   `uv run --group docs --group release pytest` runs everything.
 - `tests/release/test_clone.py -m clone` (or `scripts/check_clone.sh [PYTHON]`) clones the committed
-  HEAD, installs it with pip into an empty virtual environment and runs `--version`, `doctor` and the
-  README quick start. It needs git and the network for the dependencies, so it is off by default.
+  HEAD, installs it from the lock file (`uv sync --frozen --no-dev`) into an empty environment and runs
+  `--version`, `doctor` and the README quick start. It needs git, uv and the network for the dependencies,
+  so it is off by default.

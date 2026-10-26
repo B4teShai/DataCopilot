@@ -4,11 +4,13 @@
 #     scripts/check_clone.sh [PYTHON] [WORKDIR]
 #
 # Clones the committed HEAD of this repository (uncommitted changes are not part of a clone) into
-# WORKDIR (default: a new temporary directory), creates an empty virtual environment with PYTHON
-# (default: python3), runs `pip install .` in the clone (the network is used for the dependencies
-# only), then runs `datacopilot --version`, `datacopilot doctor`, the tutorial's dataset generator and
-# every command of the README quick start, comparing each exit code with the one the README states.
-# Caches (pip, DataCopilot) and HOME live inside WORKDIR, so nothing is written to the user's caches.
+# WORKDIR (default: a new temporary directory) and installs it with `uv sync --frozen --no-dev` for
+# PYTHON (default: python3) into a fresh environment, so the verified dependencies are exactly the
+# committed uv.lock (the network is used to download them only). Then it runs `datacopilot --version`,
+# `datacopilot doctor`, the tutorial's dataset generator and every command of the README quick start,
+# comparing each exit code with the one the README states. The README's pip route resolves the newest
+# versions an index serves on the day and is not what this check verifies. Caches (uv, DataCopilot)
+# and HOME live inside WORKDIR, so nothing is written to the user's caches. Needs git and uv.
 # Exit 0 when every step passed, 1 when one failed, 2 on a usage error.
 set -euo pipefail
 
@@ -36,16 +38,19 @@ fail() {
 }
 
 export HOME="$work/home" XDG_CACHE_HOME="$work/home/xdg" PIP_CACHE_DIR="$work/pip-cache"
+export UV_CACHE_DIR="$work/uv-cache" UV_PROJECT_ENVIRONMENT="$work/venv" UV_PYTHON_DOWNLOADS=never
 export DATACOPILOT_CACHE_DIR="$work/home/cache" PIP_DISABLE_PIP_VERSION_CHECK=1
-unset PYTHONPATH VIRTUAL_ENV CI DATACOPILOT_CACHE_KEY
+unset PYTHONPATH VIRTUAL_ENV CI DATACOPILOT_CACHE_KEY UV_FROZEN UV_LOCKED
 mkdir -p "$HOME"
 
+command -v uv >/dev/null || fail "uv is needed to install from the lock file (https://docs.astral.sh/uv/)"
 git clone --quiet --no-hardlinks "$repo" "$work/src"
 echo "cloned $(git -C "$work/src" rev-parse --short HEAD) into $work/src"
-"$python_bin" -m venv "$work/venv" || fail "cannot create a virtual environment with $python_bin"
+python_path="$(command -v "$python_bin")" || fail "no interpreter $python_bin"
+(cd "$work/src" && uv sync --frozen --no-dev --quiet --python "$python_path") ||
+  fail "uv sync --frozen of the clone"
 venv_python="$work/venv/bin/python"
-echo "python $("$venv_python" -c 'import platform; print(platform.python_version())')"
-"$venv_python" -m pip install --quiet "$work/src" || fail "pip install of the clone"
+echo "python $("$venv_python" -c 'import platform; print(platform.python_version())') (locked dependencies)"
 program="$work/venv/bin/datacopilot"
 
 "$program" --version || fail "datacopilot --version"

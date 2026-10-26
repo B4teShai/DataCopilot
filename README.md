@@ -26,8 +26,9 @@ uv sync && source .venv/bin/activate    # or: python3 -m venv .venv && source .v
 
 > **Release status:** not yet published to PyPI, so `pip install datacopilot` does not work; install from a clone as above.
 
-To use it in your own project: `uv add git+https://github.com/B4teShai/DataCopilot`, or
-`pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot"`, or a local clone with
+To use it in your own project, pin a commit you have reviewed (a bare URL follows the default branch):
+`uv add "git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"`, or
+`pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"`, or a local clone with
 `pip install -e ../DataCopilot`. Extras from a clone: `uv sync --extra embed` or `pip install -e ".[embed]"`.
 
 The [tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md) generates a small demo dataset, `shop/`, with planted mistakes. Then:

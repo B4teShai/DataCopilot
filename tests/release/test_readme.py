@@ -56,8 +56,11 @@ def test_the_install_is_from_a_clone_and_no_command_installs_from_the_package_in
     for name, text in (("README.md", README), ("install.md", INSTALL_PAGE)):
         assert CLONE in text and "uv sync" in text, name
         assert [ln for ln in _commands(text) if _INDEX_INSTALL.match(ln)] == [], name
-    assert "uv add git+https://github.com/B4teShai/DataCopilot" in README
-    assert 'pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot"' in README
+    pinned = "git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"
+    for name, text in (("README.md", README), ("install.md", INSTALL_PAGE)):
+        # a bare git URL follows the default branch: every dependency example pins a commit
+        assert f'uv add "{pinned}"' in text and f'"datacopilot @ {pinned}"' in text, name
+        assert not re.search(r"git\+https://github\.com/B4teShai/DataCopilot(?![.@\w])", text), name
     assert 'pip install "datacopilot[' not in README
 
 

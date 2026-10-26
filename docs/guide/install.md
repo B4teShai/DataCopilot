@@ -39,13 +39,14 @@ dependencies itself, so it may pick newer versions than the lock file; `uv sync`
 
 ## Use it in your own project
 
-Add it as a dependency straight from GitHub (pin a commit you have reviewed with `@<commit>`), or
-point at a local clone:
+Add it as a dependency straight from GitHub, pinned to a full commit SHA you have reviewed (a URL
+without `@<commit>` follows whatever the default branch holds at install time), or point at a local
+clone:
 
 <!-- skip: needs network access -->
 ```bash
-uv add git+https://github.com/B4teShai/DataCopilot
-pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot"
+uv add "git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"
+pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"
 pip install -e ../DataCopilot
 ```
 
@@ -60,7 +61,7 @@ pip install -e ../DataCopilot
 ```bash
 uv sync --extra embed                # in a clone, with uv
 pip install -e ".[embed]"            # in a clone, with pip
-uv add "datacopilot[vlm] @ git+https://github.com/B4teShai/DataCopilot"   # in your own project
+uv add "datacopilot[vlm] @ git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"   # in your own project
 ```
 
 `embed` and `vlm` are the extras that exist. Extras for SAM 3 and the Cleanlab backend will be published
