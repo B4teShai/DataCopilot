@@ -866,6 +866,129 @@ def apply(
 
 
 @app.command()
+def split(
+    dataset: Annotated[Path, typer.Argument(help="A dataset.dcp directory.")],
+    output: Annotated[Path, typer.Option("--output", "-o", help="New dataset directory (*.dcp).")],
+    ratios: Annotated[
+        str, typer.Option("--ratios", help="Train, val and test fractions that sum to 1.")
+    ] = "0.8,0.1,0.1",
+    by_group: Annotated[
+        str,
+        typer.Option(
+            "--by-group",
+            help="Images with the same key stay together: `group_id` (default), "
+            "`source.<name>` or `re:<pattern>` over the file name (a bounded, safe pattern; the "
+            "named group `g` or group 1 is the key). The new version's group_id is the key.",
+        ),
+    ] = "group_id",
+    near_dup: Annotated[
+        bool,
+        typer.Option(
+            "--near-dup",
+            help="Also keep near copies together: every image pair whose embeddings reach "
+            "--similarity-threshold (needs --embedder; every image must be embedded).",
+        ),
+    ] = False,
+    embedder: Annotated[
+        str | None, typer.Option("--embedder", help="Embedder for --near-dup.")
+    ] = None,
+    similarity_threshold: Annotated[
+        float | None,
+        typer.Option(
+            "--similarity-threshold", help="Cosine similarity of near copies (default 0.95)."
+        ),
+    ] = None,
+    embed_batch: Annotated[
+        int | None,
+        typer.Option(
+            "--embed-batch", min=1, max=MAX_EMBED_BATCH_OPTION, help="Images per embedder call."
+        ),
+    ] = None,
+    stratify: Annotated[
+        str | None,
+        typer.Option("--stratify", help="`category`: also balance each class across splits."),
+    ] = None,
+    seed: Annotated[
+        int, typer.Option("--seed", help="Breaks ties between groups of equal size (0 to 2^32-1).")
+    ] = 0,
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write the split report as JSON to this path.")
+    ] = None,
+) -> None:
+    """Re-split a dataset by group and write it as a NEW dataset; the original is not changed.
+
+    Groups are images with the same --by-group key and, with --near-dup, near copies (every pair
+    at or above the threshold). Whole groups are assigned, largest first, to the split that keeps
+    the image counts (and with --stratify category the class counts) closest to --ratios; the same
+    input, ratios and seed give the same assignment whatever the row order. The new dataset records
+    the old version in its lineage. Prints the new version, a summary line and one line per split
+    (`<split> images=N target=T deviation=D`). Exit codes: 0 written; 1 refused (an image that
+    could not be embedded, too many near-copy pairs, a split identical to the current one, an
+    output that exists or lies inside the dataset) or unreadable; 2 bad option.
+    """
+    from datacopilot.splits import assign, groupkey
+    from datacopilot.splits import usecase as split_usecase
+
+    if output.suffix != ".dcp":
+        raise typer.BadParameter("must end with .dcp", param_hint="--output")
+    try:
+        parsed = assign.parse_ratios(ratios)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--ratios") from None
+    try:
+        groupkey.parse(by_group)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--by-group") from None
+    if stratify not in (None, "category"):
+        raise typer.BadParameter("only `category` is supported", param_hint="--stratify")
+    if near_dup and embedder is None:
+        raise typer.BadParameter("--near-dup needs --embedder", param_hint="--near-dup")
+    if not near_dup and (embedder is not None or similarity_threshold is not None):
+        raise typer.BadParameter(
+            "--embedder and --similarity-threshold need --near-dup", param_hint="--embedder"
+        )
+    settings = load_settings()
+    if embedder is not None:
+        created = _resolve_embedder(embedder, settings.allowed_licenses)
+        if getattr(created, "test_only", False):
+            typer.echo(
+                f"warning: embedder {embedder!r} is a test double that compares file bytes, not "
+                "pictures",
+                err=True,
+            )
+    try:
+        report = split_usecase.split_dataset(
+            dataset,
+            output,
+            settings=settings,
+            ratios=parsed,
+            group_key=by_group,
+            near_duplicates=near_dup,
+            embedder=embedder,
+            similarity_threshold=similarity_threshold,
+            embed_batch=embed_batch,
+            stratify=stratify == "category",
+            seed=seed,
+        )
+    except ValueError as exc:  # the use case's usage errors (seed, threshold)
+        raise typer.BadParameter(str(exc)) from None
+    if json_out is not None:
+        json_out.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    typer.echo(report.dataset_version)
+    typer.echo(
+        f"images={report.image_count} groups={report.group_count} "
+        f"moved={report.moved_images} near_duplicate_pairs={report.near_duplicate_pairs} "
+        f"groups_across_splits={report.groups_across_splits} "
+        f"max_class_deviation={report.max_class_deviation}"
+    )
+    for name, share in report.splits.items():
+        typer.echo(
+            f"{name} images={share.images} target={share.target_images:g} "
+            f"deviation={share.deviation:+.4f}"
+        )
+
+
+@app.command()
 def formats() -> None:
     """List registered formats as name, capabilities, license and extra (tab separated)."""
     from datacopilot.io import registry

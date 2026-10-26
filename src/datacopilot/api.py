@@ -1,6 +1,6 @@
-"""The public Python API: ``load``, ``audit``, ``export``, ``propose`` and ``apply``.
+"""The public Python API: ``load``, ``audit``, ``export``, ``split``, ``propose`` and ``apply``.
 
-Five thin functions over the use cases the command line uses, with the same validation, limits
+Six thin functions over the use cases the command line uses, with the same validation, limits
 and fail-closed behaviour. Everything importable from the top-level ``datacopilot`` package and
 listed in ``datacopilot.__all__`` is the public API; anything else (including this module's
 helpers and the sub-packages) may change in any release. Before 1.0 a minor version may break the
@@ -29,15 +29,16 @@ from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, Pipe
 from datacopilot.audit.registry import EMBEDDING_CHECKS
 from datacopilot.audit.usecase import check_threshold, embedder_label, resolve_embedder
 from datacopilot.core.proposals import ProposalSet
-from datacopilot.core.schema import AuditRun, Dataset, DatasetManifest
+from datacopilot.core.schema import AuditRun, Dataset, DatasetManifest, SplitReport
 from datacopilot.io.report import ConversionReport
 from datacopilot.logging import clear_request_context, configure_logging, current_request_id
 from datacopilot.proposals import run as proposal_run
 from datacopilot.proposals import usecase as proposal_usecase
 from datacopilot.settings import Settings, load_settings
+from datacopilot.splits import usecase as split_usecase
 from datacopilot.store import DatasetStore, StoreLimits
 
-__all__ = ["apply", "audit", "export", "load", "propose"]
+__all__ = ["apply", "audit", "export", "load", "propose", "split"]
 
 DCP_FORMAT = "dcp"
 
@@ -332,4 +333,66 @@ def apply(
             settings=settings,
             allow_incomplete=allow_incomplete,
             allow_test_proposer=allow_test_proposer,
+        )
+
+
+def split(
+    dataset: str | Path,
+    out: str | Path,
+    *,
+    ratios: Sequence[float] = (0.8, 0.1, 0.1),
+    by_group: str = "group_id",
+    near_duplicates: bool = False,
+    embedder: str | None = None,
+    similarity_threshold: float | None = None,
+    stratify: Literal["category"] | None = None,
+    seed: int = 0,
+) -> SplitReport:
+    """Re-split a ``.dcp`` dataset by group and write a NEW dataset; the original is untouched.
+
+    Images with the same ``by_group`` key and, with ``near_duplicates``, near copies (every pair
+    whose embeddings reach the threshold) form groups; whole groups are assigned, largest first,
+    to the split that keeps the image counts (and with ``stratify="category"`` the class counts)
+    closest to ``ratios``. The same input, ratios and seed give the same assignment whatever the
+    row order. The new dataset records the old version in ``lineage``.
+
+    Args:
+        dataset: the path of a ``.dcp`` directory.
+        out: a new ``.dcp`` path outside ``dataset``.
+        ratios: train, val and test fractions that sum to 1.
+        by_group: ``group_id``, ``source.<name>`` or ``re:<pattern>`` over the file name (refused
+            unless it is bounded and cannot backtrack badly); the new ``group_id`` is the key.
+        near_duplicates: also keep near copies together; needs ``embedder``, and every image must
+            be embedded (otherwise the split is refused).
+        embedder: an embedder name (the license guard runs first).
+        similarity_threshold: cosine similarity of near copies, above 0 and at most 1 (0.95).
+        stratify: ``"category"`` balances each class across the splits too.
+        seed: breaks ties between groups of equal size.
+
+    Returns:
+        The :class:`~datacopilot.core.schema.SplitReport`: the new version, the groups, and the
+        deviation from the ratios per split and per class.
+
+    Raises:
+        ValueError: bad ratios, key, seed or threshold, or near duplicates without an embedder.
+        ValidationError: an image without an embedding, too many near-copy pairs, a split equal to
+            the current one, or an output inside the source.
+        StoreError: the output exists or the dataset is unreadable.
+        LicenseError, FormatError: the embedder is not allowed or unusable.
+    """
+    if stratify not in (None, "category"):
+        raise ValueError("stratify must be None or 'category'")
+    settings = load_settings()
+    with _request(settings):
+        return split_usecase.split_dataset(
+            Path(dataset),
+            Path(out),
+            settings=settings,
+            ratios=ratios,
+            group_key=by_group,
+            near_duplicates=near_duplicates,
+            embedder=embedder,
+            similarity_threshold=similarity_threshold,
+            stratify=stratify == "category",
+            seed=seed,
         )

@@ -213,8 +213,14 @@ def test_unknown_attributes_raise_attribute_error() -> None:
         from datacopilot import nope  # type: ignore[attr-defined]  # noqa: F401
 
 
-def test_api_module_exports_exactly_the_five_functions() -> None:
-    assert api.__all__ == ["apply", "audit", "export", "load", "propose"]
+def test_api_module_exports_exactly_the_six_functions() -> None:
+    assert api.__all__ == ["apply", "audit", "export", "load", "propose", "split"]
+
+
+def test_split_is_the_function_after_the_splits_package_is_imported() -> None:
+    import datacopilot.splits.usecase  # noqa: F401
+
+    assert dc.split is api.split and callable(dc.split)
 
 
 def test_audit_is_callable_whether_or_not_the_subpackage_was_imported() -> None:

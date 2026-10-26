@@ -25,6 +25,7 @@ ran and failed (unreadable or invalid input, a gate that matched, a lossy `--str
 | [`propose`](#datacopilot-propose) | Find boxes a dataset is probably missing and store them as a proposal set. |
 | [`review export`](#datacopilot-review-export) | Write the proposals as a separate layer of a CVAT dataset, next to the dataset's own boxes. |
 | [`review import`](#datacopilot-review-import) | Read the decisions of a reviewed CVAT export into a new, reviewed proposal set. |
+| [`split`](#datacopilot-split) | Re-split a dataset by group and write it as a NEW dataset; the original is not changed. |
 
 `--version` prints the version and exits.
 
@@ -274,3 +275,37 @@ datacopilot review import [OPTIONS] DATASET DIRECTORY
 |---|---|---|---|
 | `--proposals` (required) | `TEXT` |  | Proposal set id that was exported. |
 | `--from` (required) | `TEXT` |  | Annotation tool; only `cvat` is built. |
+
+## datacopilot split
+
+Re-split a dataset by group and write it as a NEW dataset; the original is not changed.
+
+Groups are images with the same --by-group key and, with --near-dup, near copies (every pair at or
+above the threshold). Whole groups are assigned, largest first, to the split that keeps the image
+counts (and with --stratify category the class counts) closest to --ratios; the same input, ratios
+and seed give the same assignment whatever the row order. The new dataset records the old version in
+its lineage. Prints the new version, a summary line and one line per split (`<split> images=N
+target=T deviation=D`). Exit codes: 0 written; 1 refused (an image that could not be embedded, too
+many near-copy pairs, a split identical to the current one, an output that exists or lies inside the
+dataset) or unreadable; 2 bad option.
+
+```text
+datacopilot split [OPTIONS] DATASET
+```
+
+| Argument | Description |
+|---|---|
+| `DATASET` | A dataset.dcp directory. |
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `--output` / `-o` (required) | `PATH` |  | New dataset directory (*.dcp). |
+| `--ratios` | `TEXT` | `0.8,0.1,0.1` | Train, val and test fractions that sum to 1. |
+| `--by-group` | `TEXT` | `group_id` | Images with the same key stay together: `group_id` (default), `source.<name>` or `re:<pattern>` over the file name (a bounded, safe pattern; the named group `g` or group 1 is the key). The new version's group_id is the key. |
+| `--near-dup` |  | off | Also keep near copies together: every image pair whose embeddings reach --similarity-threshold (needs --embedder; every image must be embedded). |
+| `--embedder` | `TEXT` |  | Embedder for --near-dup. |
+| `--similarity-threshold` | `FLOAT` |  | Cosine similarity of near copies (default 0.95). |
+| `--embed-batch` | `INT (1..1024)` |  | Images per embedder call. |
+| `--stratify` | `TEXT` |  | `category`: also balance each class across splits. |
+| `--seed` | `INT` | `0` | Breaks ties between groups of equal size (0 to 2^32-1). |
+| `--json` | `PATH` |  | Write the split report as JSON to this path. |

@@ -80,6 +80,18 @@ MANIFEST = "manifest.json"
 T = TypeVar("T")
 
 
+def ensure_outside(out: Path, source: Path) -> None:
+    """Refuse an output that is the source dataset, lies inside it or contains it (``apply`` and
+    ``split`` write a new directory next to the dataset, never into it).
+
+    Raises:
+        ValidationError: the two paths overlap.
+    """
+    src, dst = source.resolve(), out.resolve()
+    if dst == src or src in dst.parents or dst in src.parents:
+        raise ValidationError("the output must be a new directory outside the source dataset")
+
+
 def _fsync_file(path: Path) -> None:
     with path.open("rb") as handle:
         os.fsync(handle.fileno())

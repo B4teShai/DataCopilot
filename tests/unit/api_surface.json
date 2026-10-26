@@ -142,6 +142,28 @@
   "BaseException",
   "object"
  ],
+ "SplitReport": {
+  "classes": "dict[str, dict[str, datacopilot.core.schema.ClassShare]]=required",
+  "dataset_version": "<class 'str'>=required",
+  "embedder": "str | None=None",
+  "group_count": "<class 'int'>=required",
+  "group_key": "<class 'str'>=required",
+  "groups_across_splits": "<class 'int'>=required",
+  "image_count": "<class 'int'>=required",
+  "images_without_key": "<class 'int'>=required",
+  "key_groups": "<class 'int'>=required",
+  "largest_group": "<class 'int'>=required",
+  "max_class_deviation": "float | None=None",
+  "moved_images": "<class 'int'>=required",
+  "multi_image_groups": "<class 'int'>=required",
+  "near_duplicate_pairs": "<class 'int'>=required",
+  "near_duplicate_threshold": "float | None=None",
+  "parent_version": "<class 'str'>=required",
+  "ratios": "tuple[float, float, float]=required",
+  "seed": "<class 'int'>=required",
+  "splits": "dict[str, datacopilot.core.schema.SplitShare]=required",
+  "stratify": "typing.Literal['category'] | None=None"
+ },
  "StoreError": [
   "StoreError",
   "DataCopilotError",
@@ -161,5 +183,6 @@
  "audit": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:checks: Sequence[str] | Literal['all']='all', KEYWORD_ONLY:fail_on: Sequence[str]=('critical',), KEYWORD_ONLY:embedder: str | None=None, KEYWORD_ONLY:embed_batch: int | None=None, KEYWORD_ONLY:similarity_threshold: float | None=None, KEYWORD_ONLY:allow_test_embedder: bool=False, KEYWORD_ONLY:root: str | Path | None=None, KEYWORD_ONLY:workers: int | None=None, KEYWORD_ONLY:require_local_images: bool=False, KEYWORD_ONLY:include_model_annotations: bool=False) -> AuditRun",
  "export": "(POSITIONAL_OR_KEYWORD:dataset: Dataset | str | Path, POSITIONAL_OR_KEYWORD:format: str, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:strict: bool=False) -> ConversionReport",
  "load": "(POSITIONAL_OR_KEYWORD:path: str | Path, POSITIONAL_OR_KEYWORD:format: str | None=None, KEYWORD_ONLY:group_by: str | None=None, KEYWORD_ONLY:strict: bool=False) -> Dataset",
- "propose": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:proposer: str='grounding_dino', KEYWORD_ONLY:classes: Sequence[str] | None=None, KEYWORD_ONLY:min_score: float=0.35, KEYWORD_ONLY:class_min_score: Mapping[str, float] | None=None, KEYWORD_ONLY:time_budget_seconds: float=3600.0) -> ProposalSet"
+ "propose": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:proposer: str='grounding_dino', KEYWORD_ONLY:classes: Sequence[str] | None=None, KEYWORD_ONLY:min_score: float=0.35, KEYWORD_ONLY:class_min_score: Mapping[str, float] | None=None, KEYWORD_ONLY:time_budget_seconds: float=3600.0) -> ProposalSet",
+ "split": "(POSITIONAL_OR_KEYWORD:dataset: str | Path, POSITIONAL_OR_KEYWORD:out: str | Path, KEYWORD_ONLY:ratios: Sequence[float]=(0.8, 0.1, 0.1), KEYWORD_ONLY:by_group: str='group_id', KEYWORD_ONLY:near_duplicates: bool=False, KEYWORD_ONLY:embedder: str | None=None, KEYWORD_ONLY:similarity_threshold: float | None=None, KEYWORD_ONLY:stratify: Literal['category'] | None=None, KEYWORD_ONLY:seed: int=0) -> SplitReport"
 }

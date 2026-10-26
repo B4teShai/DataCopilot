@@ -39,7 +39,7 @@ from datacopilot.core.schema import Annotation, Dataset, DatasetManifest
 from datacopilot.logging import get_logger
 from datacopilot.models import registry as models
 from datacopilot.proposers.registry import check_proposer
-from datacopilot.store import DatasetStore, StoreLimits
+from datacopilot.store import DatasetStore, StoreLimits, ensure_outside
 
 
 def _check_model(ps: ProposalSet, allowed_licenses: frozenset[str], allow_test: bool) -> None:
@@ -75,12 +75,6 @@ def _reviews(ps: ProposalSet, parent: ProposalSet) -> bool:
         return parent.derive(list(ps.proposals)).set_id == ps.set_id
     except ValueError:
         return False
-
-
-def _check_output(out: Path, source: Path) -> None:
-    src, dst = source.resolve(), out.resolve()
-    if dst == src or src in dst.parents or dst in src.parents:
-        raise ValidationError("the output must be a new directory outside the source dataset")
 
 
 def apply_proposals(
@@ -128,7 +122,7 @@ def apply_proposals(
     accepted = ps.accepted()
     if not accepted:
         raise ValidationError("the proposal set has no accepted proposals: review it first")
-    _check_output(out, source)
+    ensure_outside(out, source)
     rows = [
         Annotation(
             ann_id=f"proposal:{p.proposal_id}",

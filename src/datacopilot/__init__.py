@@ -15,7 +15,7 @@ import datacopilot.audit as _audit_package
 __version__ = "0.1.0"
 
 if _typing.TYPE_CHECKING:
-    from datacopilot.api import apply, audit, export, load, propose
+    from datacopilot.api import apply, audit, export, load, propose, split
     from datacopilot.core.errors import (
         ConversionLossError,
         DataCopilotError,
@@ -35,6 +35,7 @@ if _typing.TYPE_CHECKING:
         DatasetManifest,
         Finding,
         Image,
+        SplitReport,
     )
     from datacopilot.io.report import ConversionReport
     from datacopilot.settings import SettingsError
@@ -56,6 +57,7 @@ __all__ = [
     "ModelError",
     "ProposalSet",
     "SettingsError",
+    "SplitReport",
     "StoreError",
     "ValidationError",
     "__version__",
@@ -64,6 +66,7 @@ __all__ = [
     "export",
     "load",
     "propose",
+    "split",
 ]
 
 _LAZY = {
@@ -71,6 +74,7 @@ _LAZY = {
     "export": "datacopilot.api",
     "load": "datacopilot.api",
     "propose": "datacopilot.api",
+    "split": "datacopilot.api",
     "ProposalSet": "datacopilot.core.proposals",
     "ConversionReport": "datacopilot.io.report",
     "SettingsError": "datacopilot.settings",
@@ -97,6 +101,7 @@ _LAZY = {
             "DatasetManifest",
             "Finding",
             "Image",
+            "SplitReport",
         )
     },
 }
