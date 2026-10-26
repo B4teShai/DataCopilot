@@ -801,3 +801,37 @@ def test_a_cache_in_an_older_format_is_stale_not_rejected_and_is_replaced(tmp_pa
     again = open_cache(tmp_path).load()
     assert again.state == "ok" and list(again.ids) == ids(2, 30)
     assert len(shard_files(tmp_path)) == 1
+
+
+# ------------------------------------------------------------ variants (box crops)
+def test_a_variant_is_a_separate_authenticated_cache_beside_the_image_cache(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "embeddings"
+    plain = ec.EmbeddingCache.open(root, ident(), SECRET)
+    plain.append(ids(2), unit(2), dg(2))
+    crops = ec.EmbeddingCache.open(root, ident(variant="crop-v1-p100-m32"), SECRET)
+    assert crops.load().state == "absent"
+    crops.append(ids(3, 10), unit(3, seed=1), dg(3, 10))
+    assert {p.name for p in root.iterdir()} == {"m@1", "m@1+crop-v1-p100-m32"}
+    again = ec.EmbeddingCache.open(root, ident(variant="crop-v1-p100-m32"), SECRET).load()
+    assert again.state == "ok" and again.ids == tuple(ids(3, 10))
+    assert ec.EmbeddingCache.open(root, ident(), SECRET).load().ids == tuple(ids(2))
+
+
+def test_another_variant_or_a_renamed_directory_is_never_trusted(tmp_path: Path) -> None:
+    root = tmp_path / "embeddings"
+    ec.EmbeddingCache.open(root, ident(variant="crop-v1-p100-m32"), SECRET).append(
+        ids(2), unit(2), dg(2)
+    )
+    (root / "m@1+crop-v1-p100-m32").rename(root / "m@1+crop-v1-p200-m32")
+    other = ec.EmbeddingCache.open(root, ident(variant="crop-v1-p200-m32"), SECRET).load()
+    assert other.ids == () and other.state in ("stale", "rejected")
+    (root / "m@1+crop-v1-p200-m32").rename(root / "m@1")
+    assert ec.EmbeddingCache.open(root, ident(), SECRET).load().ids == ()
+
+
+@pytest.mark.parametrize("bad", ["Crop", "crop/../x", "a" * 65, "-x"])
+def test_a_variant_is_a_plain_name(bad: str) -> None:
+    with pytest.raises(ValueError, match="variant"):
+        ident(variant=bad)

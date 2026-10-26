@@ -122,6 +122,7 @@ _NAME_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SHARD_NAME = re.compile(r"^shard-[0-9a-f]{32}\.parquet$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VERSION = re.compile(r"^[0-9a-f]{32}$")
+_VARIANT = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _NORM_TOLERANCE = 1e-2
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _META = {
@@ -150,6 +151,10 @@ class CacheIdentity:
         weights: ``file -> sha256`` of the weights and configuration, recorded for provenance;
             ``{}`` for a model without weights.
         preprocess: version of the decoding and preprocessing code (``PREPROCESS_VERSION``).
+        variant: what was embedded when it is not the whole image, for example the box-crop
+            geometry ``crop-v1-p100-m32-c50-s512`` (``audit/crops.py``); ``""`` for whole images.
+            A variant is its own directory (``<model_id>@<revision>+<variant>``) and is bound into
+            the MAC, so vectors of one geometry are never read as another's.
     """
 
     model_id: str
@@ -159,6 +164,7 @@ class CacheIdentity:
     dataset_version: str
     weights: dict[str, str] = field(default_factory=dict)
     preprocess: int = PREPROCESS_VERSION
+    variant: str = ""
 
     def __post_init__(self) -> None:
         if not _NAME_PART.fullmatch(self.model_id) or not _NAME_PART.fullmatch(self.revision):
@@ -175,10 +181,13 @@ class CacheIdentity:
             raise ValueError("weights must map plain file names to sha256 digests")
         if not 1 <= self.preprocess <= 10_000:
             raise ValueError("preprocess must be a small positive version number")
+        if self.variant and not _VARIANT.fullmatch(self.variant):
+            raise ValueError("variant must be a plain lower-case name")
 
     @property
     def directory_name(self) -> str:
-        return f"{self.model_id}@{self.revision}"
+        suffix = f"+{self.variant}" if self.variant else ""
+        return f"{self.model_id}@{self.revision}{suffix}"
 
     def binding(self) -> bytes:
         material = json.dumps(
@@ -191,6 +200,7 @@ class CacheIdentity:
                 self.dataset_version,
                 sorted(self.weights.items()),
                 self.preprocess,
+                *([self.variant] if self.variant else []),  # whole-image caches keep their MAC
             ],
             separators=(",", ":"),
         )
@@ -261,6 +271,7 @@ class _Manifest(BaseModel, frozen=True, extra="forbid"):
     dtype: Dtype
     dataset_version: str
     preprocess: int
+    variant: str = ""
     weights: dict[str, str] = Field(max_length=16)
     shards: tuple[_ShardEntry, ...] = Field(max_length=2_048)
     mac: str | None = None
@@ -633,6 +644,7 @@ class EmbeddingCache:
             or manifest.dataset_version != identity.dataset_version
             or manifest.weights != identity.weights
             or manifest.preprocess != identity.preprocess
+            or manifest.variant != identity.variant
         ):
             return self._empty("stale")
         expected_mac = mac_for(doc, self._secret, identity)
@@ -767,6 +779,8 @@ class EmbeddingCache:
             "weights": dict(sorted(identity.weights.items())),
             "shards": [s.model_dump() for s in shards],
         }
+        if identity.variant:
+            doc["variant"] = identity.variant
         doc["mac"] = mac_for(doc, self._secret, identity)
         _write_atomic(directory / "manifest.json", json.dumps(doc, sort_keys=True).encode("ascii"))
         self._shards = shards
