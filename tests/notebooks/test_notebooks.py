@@ -19,6 +19,7 @@ NAMES = (
     "02_edge_cases.ipynb",
     "03_propose_review_apply.ipynb",
     "04_label_noise.ipynb",
+    "05_split_and_crops.ipynb",
 )
 MAX_BYTES = 1_500_000
 MAX_PNG = 8
@@ -470,3 +471,31 @@ def test_the_label_noise_notebook_uses_a_private_folder_and_an_isolated_child_py
     setup = next(source(c) for c in load(NOISE)["cells"] if "def datacopilot(" in source(c))
     assert "mkdtemp(" in setup and "datacopilot-notebooks" not in setup
     assert re.search(r'"-I",\s*"-m",\s*"datacopilot"', setup)
+
+
+# ------------------------------------------------------------ the split and crop notebook
+SPLIT_CROPS = "05_split_and_crops.ipynb"
+
+
+def test_the_split_and_crop_notebook_ran_the_real_model_and_both_gates() -> None:
+    out = all_output(SPLIT_CROPS)
+    assert "model=dinov2_small@ed25f3a31f01" in out  # the pinned revision, not a test double
+    assert "--embedder hash" not in out
+    assert "cross-split clusters after the split: 0 | exit code: 0" in out
+    assert "planted copies on the same side as their original: 5 of 5" in out
+    assert "the same input, ratios and seed give the same version: True" in out
+    assert "report the same boxes in all 10 runs: True" in out
+    assert "same boxes: True" in out
+
+
+def test_the_split_and_crop_notebook_compares_both_rules_with_computed_numbers() -> None:
+    out = all_output(SPLIT_CROPS)
+    for needle in ("IMAGE RULE, over all boxes", "CROP RULE, over all boxes",
+                   "the image rule re-measured here gives the same three numbers: True",
+                   "highest precision in the grid"):  # fmt: skip
+        assert needle in out, needle
+    rows = re.findall(
+        r"^(precision|recall, all boxes|FP rate, all boxes) +([0-9.]+) +([0-9.]+)$", out, re.M
+    )
+    assert len(rows) == 3
+    assert "It is still weak" in out or "Most of its reports are planted mistakes" in out
