@@ -28,7 +28,7 @@ from __future__ import annotations
 import importlib
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -283,3 +283,70 @@ def knn(
         np.concatenate([b.indices for b in blocks]),
         np.concatenate([b.sims for b in blocks]),
     )
+
+
+@dataclass(frozen=True)
+class PairSearch:
+    """Outcome of :func:`pairs_at_least`.
+
+    Attributes:
+        rows: query rows whose pairs were all reported (fewer than the input when the deadline or
+            the pair cap ended the search).
+        pairs: pairs handed to the callback.
+        capped: the next block would have exceeded ``max_pairs``; it was not reported.
+    """
+
+    rows: int
+    pairs: int
+    capped: bool
+
+
+def pairs_at_least(
+    vectors: NDArray[np.float32],
+    threshold: float,
+    on_pairs: Callable[[NDArray[np.int64], NDArray[np.int64]], None],
+    *,
+    max_pairs: int,
+    max_block_bytes: int = DEFAULT_BLOCK_BYTES,
+    deadline: float | None = None,
+) -> PairSearch:
+    """Hand every pair ``(i, j)``, ``i < j``, whose cosine similarity is at least ``threshold`` to
+    ``on_pairs``, exactly and block by block.
+
+    Unlike a top-``k`` search this is complete: a crowd of near-identical rows yields every pair,
+    so a grouping built from it cannot miss an edge. Memory stays near one block (rows times the
+    remaining columns, sized by ``max_block_bytes``) plus the pairs of that block, which are counted
+    before they are materialised: a block that would take the total over ``max_pairs`` is not
+    reported and the search stops with ``capped``. ``deadline`` (a ``time.monotonic()`` value) is
+    checked before every block. Rows are normalised as in :func:`iter_knn`, so the similarities
+    equal the NumPy backend's.
+
+    Raises:
+        ValueError: wrong shape or dtype, non-finite or non-unit vectors, more than
+            ``MAX_KNN_ROWS`` rows, or ``max_pairs`` below 1.
+    """
+    if max_pairs < 1:
+        raise ValueError("max_pairs must be at least 1")
+    _validate(vectors, vectors, 1, True)
+    unit = unit_rows(vectors)
+    n = len(unit)
+    step = block_rows(n, max_block_bytes)
+    total = 0
+    for start in range(0, n, step):
+        if deadline is not None and time.monotonic() >= deadline:
+            return PairSearch(start, total, False)
+        stop = min(start + step, n)
+        with np.errstate(all="ignore"):  # see _numpy_block
+            sims = unit[start:stop] @ unit[start:].T  # columns from ``start``: the upper triangle
+        mask = sims >= threshold
+        del sims
+        for row in range(stop - start):
+            mask[row, : row + 1] = False  # the diagonal and the pairs already seen as (j, i)
+        count = int(np.count_nonzero(mask))
+        if total + count > max_pairs:
+            return PairSearch(start, total, True)
+        if count:
+            rows, cols = np.nonzero(mask)
+            on_pairs(rows.astype(np.int64) + start, cols.astype(np.int64) + start)
+        total += count
+    return PairSearch(n, total, False)
