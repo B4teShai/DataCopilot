@@ -17,6 +17,27 @@ hash on every read and bounds table size and row count before decoding anything.
   covers where each row came from (for example COCO ids), so a COCO copy of a YOLO dataset has another
   version although the boxes are the same. Record it next to a training run to reproduce it.
 
+## Record the dataset version in CV-Pilot
+
+[CV-Pilot](https://github.com/B4teShai/CV-Pilot), the training-run tracker built alongside
+DataCopilot, records which data a run trained on. Give it the `dataset.dcp` directory as
+`dataset_uri` and its run record holds `dataset_hash = "dcp:<manifest.version>"`:
+
+<!-- skip: needs CV-Pilot, a separate package installed from its own clone -->
+```python
+import cvpilot
+
+run = cvpilot.init("shop", task="detection", dataset_uri="shop.dcp")
+# `cvpilot runs show <run_id> --project shop` then prints
+# dataset_hash: dcp:9e96d9fb67b1d64fafe14c25ccdb43f0   (what `datacopilot ingest` printed)
+```
+
+CV-Pilot reads only the top-level `version` field of `shop.dcp/manifest.json`; for any other
+directory it records `merkle:<hex>` over file names, sizes and modification times instead. Neither
+package imports the other, so they can be installed and upgraded separately. A new version
+(`apply`, or another `ingest`) is a new `.dcp` directory or a new `manifest.json`: point the next run
+at it, and the two run records show that the data changed.
+
 ## Rows
 
 | Table | Main fields |

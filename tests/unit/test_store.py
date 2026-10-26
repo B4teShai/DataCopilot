@@ -210,3 +210,20 @@ def test_a_symlinked_dataset_directory_is_refused(tmp_path: Path) -> None:
     link.symlink_to(real, target_is_directory=True)
     with _pytest.raises(StoreError, match="symlink"):
         DatasetStore.open(link)
+
+
+def test_the_manifest_contract_cv_pilot_reads(tmp_path: Path, tables: Tables) -> None:
+    """CV-Pilot records ``dcp:<version>`` for a ``dataset.dcp`` directory by reading the top-level
+    ``version`` string of ``manifest.json`` (at most 64 MiB) and nothing else; there is no import
+    between the packages, so this file layout is the whole contract (docs/guide/concepts.md)."""
+    images, anns, cats = tables
+    store = create(tmp_path / "shop.dcp", tables)
+    raw = (tmp_path / "shop.dcp" / "manifest.json").read_bytes()
+    document = json.loads(raw)
+    assert isinstance(document, dict) and len(raw) < 64 * 1024 * 1024
+    assert isinstance(document["version"], str) and len(document["version"]) == 32
+    assert document["version"] == store.manifest().version == store.read().manifest.version
+    child = store.write_version(images, anns[:1], cats)  # a new version moves the top-level file
+    assert json.loads((tmp_path / "shop.dcp" / "manifest.json").read_text())["version"] == (
+        child.version
+    )
