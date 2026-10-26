@@ -86,5 +86,6 @@ after its header (a JPEG without `FFD9`, a PNG without `IEND`, a GIF without its
 Input is validated: paths cannot leave the dataset directory, XML with a DOCTYPE is rejected, boxes
 must lie inside their image and identical image content is reported by file name. `ingest --group-by
 "re:^images/(?P<g>[^/_]+)"` assigns a group (for example a camera or a session) from the file path,
-so that leakage findings can tell which images belong together. ImageFolder is classification only.
+so that leakage findings can tell which images belong together; the pattern must pass the safety rules
+described in [Split](split.md#groups) (bounded, no overlapping quantifiers), or `ingest` refuses it. ImageFolder is classification only.
 The exit codes are in [Settings](../reference/settings.md#exit-codes).

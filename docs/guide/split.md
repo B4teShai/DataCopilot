@@ -32,19 +32,25 @@ joined by either relation merge.
 
 Keys are compared like the leakage check compares them (case-insensitive, NFKC, surrounding space
 ignored), and the new version's `group_id` is the key, so the leakage check's `group_overlap` verifies
-the result. An image without a key is a group of its own.
+the result. An existing `group_id` always stays together as well, whatever the key: an image the key
+gives no label keeps its `group_id`, and a `group_id` the key replaces is kept in
+`source["group_id_before_split"]`. An image with neither is a group of its own.
 
 File names come from the dataset, so a pattern is refused unless it cannot backtrack badly: at most 200
 characters, no flags, back references or look-arounds, every quantifier on a single character or class,
 and between two variable-length quantifiers a required character the first one cannot match. Write
-`^(?P<g>[^_]+)_`, not `^(?P<g>\w+)_` (`\w` also matches `_`). File names longer than 255 characters are
+`^(?P<g>[^_]+)_`, not `^(?P<g>\w+)_` (`\w` also matches `_`). The same rules apply to `ingest
+--group-by`. A remote image's file name loses its URL query and fragment first (a presigned URL's
+signature never becomes a label). File names longer than 255 characters are
 refused.
 
 `--near-dup` (needs `--embedder`) joins **every** pair of images whose embeddings have a cosine
 similarity of at least `--similarity-threshold` (0.95), found exactly, not among a few nearest neighbours,
 so a crowd of copies cannot hide one. The pairs are taken down to the threshold less the small slack the
 leakage check allows (`1e-6` plus the `1e-4` that FAISS may differ by), so that check cannot find a
-cross-split pair the split did not group. It uses and fills the dataset's embedding cache.
+cross-split pair the split did not group. The vectors are computed for the run and not cached, so the
+source dataset is never written. The test embedder `hash` (it compares file bytes, not pictures) is
+refused unless `--allow-test-embedder` (`allow_test_embedder=True`) is given.
 
 ## Assignment
 
@@ -68,9 +74,14 @@ Nothing is written when:
   images by reason;
 - the near-copy search ended at the time budget, or found more than 2,000,000 pairs (raise the threshold
   or group by key);
-- the result equals the current dataset, the output exists, or it lies inside the source;
+- the result equals the current version or an earlier one in its lineage (the error says which);
+- the output exists, lies inside the source, or lies in a directory that does not hold the images
+  (relative image paths are rewritten for the output's directory; the audit reads no image outside
+  a dataset's directory, so such an output would have no readable images);
+- `--json PATH` lies inside the dataset, exists already or is a symlink (checked before any work);
 - an option is invalid (exit code 2): ratios that are not three numbers between 0 and 1 summing to 1,
-  an unknown or unsafe `--by-group`, `--near-dup` without `--embedder`.
+  an unknown or unsafe `--by-group`, `--near-dup` without `--embedder`, a test embedder without
+  `--allow-test-embedder`.
 
 ## What was measured
 

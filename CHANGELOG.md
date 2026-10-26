@@ -18,6 +18,21 @@ once a release is tagged.
   budget, over 2,000,000 pairs or a split equal to the current one write nothing (exit 1). The leakage check on the
   result finds no cross-split pair (tested, and in notebook 05). See [ADR-0010](docs/adr/0010-split-and-box-crops.md).
 
+### Fixed (review of split and apply)
+
+- `split` and `apply` into a directory other than the source's parent produced a dataset whose images no
+  check could read. Relative image paths are now rewritten for the output's directory; an output whose
+  directory does not hold the images is refused (exit 1), because the audit reads no image outside a dataset's
+  directory.
+- `split --by-group source.x|re:...` dropped existing `group_id` values; an existing `group_id` is now always a
+  constraint and is kept (or moved to `source["group_id_before_split"]` when the key replaces it).
+- A `re:` key no longer sees a URL's query or fragment; `ingest --group-by` patterns pass the same safety check
+  as `split --by-group` (an unsafe pattern is exit 2).
+- `split --near-dup` no longer writes embedding shards into the source dataset (it runs without the cache).
+- A test-only embedder needs `--allow-test-embedder` / `allow_test_embedder=True` for `split`.
+- `split --json PATH` must lie outside the dataset and is created exclusively, without following a symlink.
+- A split equal to an earlier version of the lineage is reported as such; class balancing sums in a fixed order.
+
 ### Changed (label noise from box crops)
 
 - `label_noise` now embeds **box crops** by default (boxes of at least `crop_min_side_px` = 32 pixels on the

@@ -34,19 +34,24 @@ authenticated cache, and the exact chunked similarity search.
 
 1. **Groups.** `--by-group` is `group_id` (default), `source.<name>` or `re:<pattern>` on the file name; labels
    use the leakage check's normalisation (one function in `core`), and the new version's `group_id` is the key.
+   An existing `group_id` is always a constraint too and is never lost (kept, or moved to
+   `source["group_id_before_split"]` when the key replaces it).
    `--near-dup` adds every pair at or above the threshold, found by an exact upper-triangle search
    (`knn.pairs_at_least`), not a top-k search, so a crowd of copies cannot hide an edge; pairs are taken down to
    the threshold less `SIM_EPSILON` and `BACKEND_TOLERANCE`, the slack the leakage check (with FAISS) allows.
 2. **Safe patterns.** A pattern is parsed with the standard library's parser and refused unless it is at most
    200 characters, has no flags, back references or look-arounds, quantifies only single characters or classes,
    and fences each variable-length quantifier from the next with a required character it cannot match. Names over
-   255 characters are refused. A search is then at most quadratic in a name of at most 255 characters.
+   255 characters (counted after a URL query is removed) are refused. A search is then at most quadratic in a
+   name of at most 255 characters. `ingest --group-by` uses the same check (`core/patterns.py`).
 3. **Assignment.** Whole groups, largest first, ties broken by `sha256(seed:members)`, each into the split whose
    squared image deviation (plus the mean squared class deviation with `--stratify category`) grows least. The
    result depends on the data, ratios and seed only. Deviations per split and per class are reported.
 4. **Append-only.** The output is a new directory written by `DatasetStore.create` with the parent's lineage plus
-   the parent's version; the source is never written, except that `--near-dup` fills its embedding cache as
-   `embed` does. A group in two splits after the assignment is an internal error, never a written dataset.
+   the parent's version; the source is never written (`--near-dup` runs without the embedding cache).
+   Relative image paths are rewritten for the output's directory, and an output whose directory does not
+   hold the images is refused (as for `apply`). A group in two splits after the assignment is an internal
+   error, never a written dataset; a result equal to the current or an earlier version is refused.
 5. **Fail closed.** An image without an embedding, a search ended by the budget, more than 2,000,000 pairs, or a
    split identical to the current one write nothing.
 6. **The package is `splits/`**, not `split/` as the components document planned: importing a sub-package named
@@ -91,7 +96,7 @@ finding names its `basis`. The defaults were fixed before the measurement.
 
 - With nothing to group a near-duplicate split is a plain stratified split; class deviations on small classes
   can be large (0.2 in the notebook) and are reported, not fixed.
-- A near-duplicate split trusts the verified, spot-checked embedding cache like the audit does.
+- A near-duplicate split computes its vectors afresh on every run (no cache), which costs a model pass.
 - Boxes under the size floor are invisible to the crop rule; on small-object data most boxes may be unscored and
   `annotations_not_scored` is then CRITICAL under the default gate.
 - Crops cost one model call per box (8.5 s for 513 crops on a CPU against 5.5 s for 128 photos).
