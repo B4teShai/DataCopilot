@@ -76,6 +76,10 @@ datacopilot/report/sarif_report.py
 datacopilot/report/templates/report.html.j2
 datacopilot/report/text.py
 datacopilot/settings.py
+datacopilot/splits/__init__.py
+datacopilot/splits/assign.py
+datacopilot/splits/groupkey.py
+datacopilot/splits/usecase.py
 datacopilot/store/__init__.py
 datacopilot/store/arrow.py
 datacopilot/store/dataset_store.py
