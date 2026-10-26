@@ -66,7 +66,7 @@ uv lock --check
 uv build --out-dir dist
 uv run twine check --strict dist/*
 sha256sum dist/*          # shasum -a 256 on macOS; record the digests in the release notes
-uv run python scripts/verify_install.py dist/datacopilot-*.whl --python 3.10 --python 3.13
+uv run python scripts/verify_install.py dist/datacopilot-*.whl --python 3.10 --python 3.14
 ```
 
 `verify_install.py` creates a throwaway virtual environment per interpreter, installs the wheel
@@ -123,7 +123,7 @@ residual risk is accepted and is why the build runs in a job without secrets or 
   script-type action's input), a secret reference, a missing minimal `permissions` block, a write to
   `GITHUB_ENV`, a pipe from the network into a shell, `skip-existing` or `repository-url`.
 - The locked runtime dependencies are audited with `pip-audit` (the locked version of the tool) in the
-  release build, in CI for Python 3.10 and 3.13, and nightly (`audit.yml`).
+  release build, in CI for Python 3.10 and 3.14, and nightly (`audit.yml`).
 - The publish job recomputes the digest of the downloaded files and compares it with the digest the
   build job exported as a job output, and requires exactly one wheel and one sdist named from the tag.
   This detects a corrupted or swapped artifact in transit through the artifact store; it does **not**

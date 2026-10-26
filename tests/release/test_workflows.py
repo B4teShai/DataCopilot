@@ -316,7 +316,7 @@ def test_ci_has_the_supply_chain_and_packaging_jobs() -> None:
 
 def test_ci_audits_once_per_supported_python_with_the_locked_tool() -> None:
     audit = load(WORKFLOWS / "ci.yml")["jobs"]["audit"]
-    assert audit["strategy"]["matrix"]["python"] == ["3.10", "3.13"]
+    assert audit["strategy"]["matrix"]["python"] == ["3.10", "3.14"]
     run = "\n".join(s.get("run", "") for s in audit["steps"])
     assert "uv run --locked --group release --python" in run and "pip-audit" in run
 
@@ -332,7 +332,7 @@ def test_the_nightly_audit_is_scheduled_minimal_and_audits_both_pythons() -> Non
     assert set(document["on"]) <= {"schedule", "workflow_dispatch"} and "schedule" in document["on"]
     assert document["permissions"] == {"contents": "read"}
     job = document["jobs"]["audit"]
-    assert job["strategy"]["matrix"]["python"] == ["3.10", "3.13"]
+    assert job["strategy"]["matrix"]["python"] == ["3.10", "3.14"]
     assert "pip-audit" in "\n".join(s.get("run", "") for s in job["steps"])
 
 
@@ -388,3 +388,19 @@ def test_the_lint_catches_every_mistake_it_exists_for(tmp_path: Path) -> None:
     assert secret_problems(document)
     assert len(pipe_to_shell(text)) >= 2
     assert len(environment_file_problems(document, "release.yml")) == 2
+
+
+def test_the_test_matrix_is_every_python_the_package_declares() -> None:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib  # type: ignore[no-redef]
+    project = tomllib.loads((WORKFLOWS.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    prefix = "Programming Language :: Python :: "
+    declared = sorted(
+        (c[len(prefix):] for c in project["project"]["classifiers"]
+         if c.startswith(prefix + "3.") and c[len(prefix) + 2:].isdigit()),
+        key=lambda v: int(v.split(".")[1]),
+    )  # fmt: skip
+    matrix = load(WORKFLOWS / "ci.yml")["jobs"]["test"]["strategy"]["matrix"]["python"]
+    assert matrix == declared and declared[0] == "3.10" and "3.14" in declared

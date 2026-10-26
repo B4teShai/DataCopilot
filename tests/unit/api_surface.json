@@ -121,7 +121,7 @@
   "dataset_version": "<class 'str'>=required",
   "images_done": "<class 'int'>=required",
   "images_total": "<class 'int'>=required",
-  "incomplete_reason": "typing.Optional[typing.Literal['time_budget', 'images_skipped', 'proposal_cap']]=required",
+  "incomplete_reason": "typing.Literal['time_budget', 'images_skipped', 'proposal_cap'] | None=required",
   "min_score": "<class 'float'>=required",
   "model_id": "<class 'str'>=required",
   "model_revision": "<class 'str'>=required",

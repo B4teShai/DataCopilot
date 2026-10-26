@@ -1,7 +1,7 @@
 r"""Install a built wheel into a throwaway virtual environment and run the installed program.
 
     python scripts/verify_install.py dist/datacopilot-X.Y.Z-py3-none-any.whl \
-        --python 3.10 --python 3.13
+        --python 3.10 --python 3.14
 
 For every interpreter: create an empty environment (``uv venv``), install the wheel and its
 dependencies, run ``datacopilot --version`` and ``datacopilot doctor`` and require exit code 0 and

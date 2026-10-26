@@ -139,6 +139,7 @@ def test_wheel_metadata_is_correct(wheel: Path, version: str) -> None:
     classifiers = meta.get_all("Classifier")
     assert "Programming Language :: Python :: 3.10" in classifiers
     assert "Programming Language :: Python :: 3.13" in classifiers
+    assert "Programming Language :: Python :: 3.14" in classifiers
     assert "Typing :: Typed" in classifiers
     assert not [c for c in classifiers if c.startswith("License ::")]  # the expression says it
     urls = {u.split(", ")[0]: u.split(", ")[1] for u in meta.get_all("Project-URL")}

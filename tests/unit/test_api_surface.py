@@ -44,8 +44,47 @@ def signature(fn: Any) -> str:
     return f"({', '.join(parts)}) -> {sig.return_annotation}"
 
 
+def _split_top(text: str) -> list[str]:
+    """``text`` cut at the commas that are not inside brackets."""
+    parts, depth, start = [], 0, 0
+    for n, char in enumerate(text):
+        depth += {"[": 1, "]": -1}.get(char, 0)
+        if char == "," and depth == 0:
+            parts.append(text[start:n].strip())
+            start = n + 1
+    return [*parts, text[start:].strip()]
+
+
+def _unions(text: str) -> str:
+    """``typing.Optional[X]`` and ``typing.Union[A, B]`` written as ``X | None`` and ``A | B``.
+
+    Python 3.14 prints every union in the ``|`` form, earlier versions print a union that holds a
+    ``Literal`` in the ``typing`` form; the surface is the same, so the snapshot uses one spelling.
+    """
+    for name in ("typing.Optional[", "typing.Union["):
+        while (start := text.find(name)) != -1:
+            depth, end = 0, start + len(name) - 1
+            for end in range(start + len(name) - 1, len(text)):
+                depth += {"[": 1, "]": -1}.get(text[end], 0)
+                if depth == 0:
+                    break
+            members = _split_top(text[start + len(name) : end])
+            if name == "typing.Optional[":
+                members = [*members, "None"]
+            text = text[:start] + " | ".join(members) + text[end + 1 :]
+    return text
+
+
 def _clean(text: str) -> str:
-    return re.sub(r" at 0x[0-9a-f]+", "", text)  # a function's address is not part of the surface
+    text = re.sub(r" at 0x[0-9a-f]+", "", text)  # a function's address is not part of the surface
+    return _unions(text)
+
+
+def test_union_spellings_are_normalised() -> None:
+    optional = "typing.Optional[typing.Literal['a', 'b']]=x"
+    assert _unions(optional) == "typing.Literal['a', 'b'] | None=x"
+    assert _unions("typing.Union[int, typing.Optional[str]]") == "int | str | None"
+    assert _unions("dict[str, int] | None") == "dict[str, int] | None"
 
 
 def _field(field: Any) -> str:

@@ -51,7 +51,7 @@ A change is done when all of the following are true:
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs lint, format check, type check and tests with coverage on
-Python 3.10 to 3.13, and jobs for the lock file, the strict docs build and the executed tutorial, the
+Python 3.10 to 3.14, and jobs for the lock file, the strict docs build and the executed tutorial, the
 package (artifact contents, `twine check --strict`, clean-environment install) and `pip-audit`, on every
 push to `main` and every pull request. A red CI blocks merge.
 
