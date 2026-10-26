@@ -107,4 +107,4 @@ never be placed in a free-text field or an exception message.
 | `cleanlab` | Cleanlab confident learning as a second, planned backend of the `label_noise` check (classification and detection); the check itself is built without it, over the existing embeddings, and a run that cannot score says so with a `WARN` `skipped` finding | `cleanlab` (AGPL-3.0; imported lazily inside the adapter). Notice: installing and using this extra makes the user's combined work subject to AGPL-3.0 ([ADR-0001](../adr/0001-scope-and-license.md)) | CPU |
 
 All extras are imported inside the function that needs them; a missing extra produces one
-error line naming the `pip install "datacopilot[<extra>]"` command and exit code 1.
+error line naming the extra (`datacopilot[<extra>]`, in a clone `uv sync --extra <extra>`) and exit code 1.

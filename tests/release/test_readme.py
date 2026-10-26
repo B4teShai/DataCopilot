@@ -38,8 +38,40 @@ def test_there_is_at_most_one_release_status_line_and_it_is_the_only_unpublished
     assert all(ln.startswith(STATUS) for ln in claims), claims
 
 
-def test_the_install_command_is_the_package_name() -> None:
-    assert "pip install datacopilot\n" in README
+CLONE = "git clone https://github.com/B4teShai/DataCopilot.git"
+_INDEX_INSTALL = re.compile(
+    r"^\s*(?:\$ )?(?:pip|uv pip) install ['\"]?datacopilot(?:\[[a-z,]+\])?['\"]?\s*$"
+)
+INSTALL_PAGE = (ROOT / "docs/guide/install.md").read_text(encoding="utf-8")
+
+
+def _commands(text: str) -> list[str]:
+    """Lines inside fenced code blocks."""
+    return [ln for block in re.findall(r"```[a-z]*\n(.*?)```", text, flags=re.S)
+            for ln in block.splitlines()]  # fmt: skip
+
+
+def test_the_install_is_from_a_clone_and_no_command_installs_from_the_package_index() -> None:
+    # nothing is published: a command that installs from PyPI fails for every reader
+    for name, text in (("README.md", README), ("install.md", INSTALL_PAGE)):
+        assert CLONE in text and "uv sync" in text, name
+        assert [ln for ln in _commands(text) if _INDEX_INSTALL.match(ln)] == [], name
+    assert "uv add git+https://github.com/B4teShai/DataCopilot" in README
+    assert 'pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot"' in README
+    assert 'pip install "datacopilot[' not in README
+
+
+def test_no_page_or_error_message_tells_the_reader_to_install_from_the_package_index() -> None:
+    index_install = re.compile(r"pip install ['\"]?datacopilot(?:\[[a-z,]+\])?['\"]?(?! @)")
+    paths = [ROOT / "README.md", *(ROOT / "docs").rglob("*.md"), *(ROOT / "src").rglob("*.py")]
+    offenders = [
+        f"{path.relative_to(ROOT)}: {line.strip()}"
+        for path in paths
+        if path.name != "release.md"  # the runbook describes the publishing step that is to come
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if index_install.search(line) and "does not work" not in line
+    ]  # fmt: skip
+    assert offenders == []
 
 
 def test_every_extra_the_readme_names_exists_and_none_is_empty() -> None:

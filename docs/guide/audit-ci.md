@@ -78,7 +78,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - run: pip install datacopilot
+      # not on PyPI: install from GitHub, pinned to a commit you have reviewed
+      - run: pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot@${DATACOPILOT_COMMIT}"
+        env:
+          DATACOPILOT_COMMIT: "<the full commit SHA you reviewed>"
       - run: datacopilot ingest data --format coco -o data.dcp
       - run: datacopilot audit data.dcp --no-hash-cache --fail-on critical
 ```

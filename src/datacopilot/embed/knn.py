@@ -247,7 +247,7 @@ def iter_knn(
         faiss = _import_faiss()
         if faiss is None and backend == "faiss":
             raise ModelError(
-                'faiss is not installed (pip install "datacopilot[embed]") or cannot be loaded '
+                'faiss is not installed (the extra "datacopilot[embed]") or cannot be loaded '
                 "after the tensor library on macOS; use the default NumPy index"
             )
     step = block_rows(len(base), max_block_bytes)

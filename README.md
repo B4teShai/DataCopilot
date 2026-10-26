@@ -17,13 +17,18 @@ the command line or Python: no server, and no GPU for the core.
 
 ## Quick start
 
-Needs Python 3.10 or newer.
+Needs Python 3.10 or newer. Install from a clone with [uv](https://docs.astral.sh/uv/) or pip:
 
 ```bash
-pip install datacopilot
+git clone https://github.com/B4teShai/DataCopilot.git && cd DataCopilot
+uv sync && source .venv/bin/activate    # or: python3 -m venv .venv && source .venv/bin/activate && pip install -e .
 ```
 
-> **Release status:** not yet published to PyPI; until then see the [release runbook](https://github.com/B4teShai/DataCopilot/blob/main/docs/engineering/release.md).
+> **Release status:** not yet published to PyPI, so `pip install datacopilot` does not work; install from a clone as above.
+
+To use it in your own project: `uv add git+https://github.com/B4teShai/DataCopilot`, or
+`pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot"`, or a local clone with
+`pip install -e ../DataCopilot`. Extras from a clone: `uv sync --extra embed` or `pip install -e ".[embed]"`.
 
 The [tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md) generates a small demo dataset, `shop/`, with planted mistakes. Then:
 
@@ -44,9 +49,9 @@ failed critical=0 warn=3 info=0 run_id=571c0043-41af-4ca4-b256-34bc66f25a61
 - Check a dataset: `datacopilot audit` finds broken boxes, missing files and class imbalance.
 - Catch duplicates and leaks: identical images, and train images copied into test.
 - Use it in CI: `--fail-on warn` turns findings into a non-zero exit code.
-- Find look-alike images with image models: `datacopilot audit --embedder` (optional, `pip install "datacopilot[embed]"`).
+- Find look-alike images with image models: `datacopilot audit --embedder` (optional extra `embed`).
 - Spot boxes with a doubtful class: `label_noise` leads over the same embeddings (weak; see the guide).
-- Find boxes your labels missed: `datacopilot propose`, then `review` in CVAT and `apply` (optional, `pip install "datacopilot[vlm]"`).
+- Find boxes your labels missed: `datacopilot propose`, then `review` in CVAT and `apply` (optional extra `vlm`).
 - Use it from Python: `dc.load`, `dc.audit`, `dc.export`, `dc.propose` and `dc.apply`.
 
 ## Learn more

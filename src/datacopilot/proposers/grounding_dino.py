@@ -48,7 +48,7 @@ TEXT_THRESHOLD = 0.25
 box threshold is the ``min_score`` of the call. A ``min_score`` below it lowers it too (the
 library drops a box whose label words are below the text threshold, so a fixed 0.25 made every
 lower ``min_score`` identical to 0.25)."""
-_INSTALL = 'pip install "datacopilot[vlm]"'
+_INSTALL = 'install the extra "datacopilot[vlm]" (in a clone: uv sync --extra vlm)'
 
 
 class GroundingDinoProposer:

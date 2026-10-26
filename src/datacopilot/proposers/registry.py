@@ -61,7 +61,8 @@ def _plugin(name: str, allowed_licenses: frozenset[str]) -> ProposerPlugin:
     except ImportError as exc:
         raise FormatError(
             f"proposer {name!r} needs an optional dependency that is not installed "
-            f'({exc.name or "a dependency"}): pip install "datacopilot[vlm]"'
+            f'({exc.name or "a dependency"}): install the extra "datacopilot[vlm]" '
+            "(in a clone: uv sync --extra vlm)"
         ) from None
     spec = getattr(plugin, "spec", None)
     if not isinstance(spec, PluginSpec) or spec.kind != "proposer":

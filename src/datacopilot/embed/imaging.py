@@ -35,7 +35,7 @@ _FORMATS = ("JPEG", "PNG", "GIF", "BMP")
 _EXIF_ORIENTATION = 0x0112
 
 
-_INSTALL = 'pip install "datacopilot[embed]"'
+_INSTALL = 'install the extra "datacopilot[embed]" (in a clone: uv sync --extra embed)'
 _BACKGROUND = (255, 255, 255)
 """Colour under transparent pixels: alpha is composited on white, so what an image hides under
 alpha 0 can neither change nor carry an embedding."""

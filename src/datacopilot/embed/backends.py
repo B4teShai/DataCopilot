@@ -51,7 +51,7 @@ HUB_TIMEOUT_SECONDS = 60
 """Per-request download timeout handed to the hub library (``HF_HUB_DOWNLOAD_TIMEOUT``)."""
 HUB_ETAG_TIMEOUT_SECONDS = 30
 """Timeout of the metadata request that precedes a download."""
-_INSTALL = 'pip install "datacopilot[embed]"'
+_INSTALL = 'install the extra "datacopilot[embed]" (in a clone: uv sync --extra embed)'
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)
 _PREPROCESS = {

@@ -264,7 +264,7 @@ def propose(
 
     Args:
         dataset: the path of a ``.dcp`` directory (the set has to be stored somewhere).
-        proposer: ``grounding_dino`` (needs ``pip install "datacopilot[vlm]"``; the license guard
+        proposer: ``grounding_dino`` (needs the extra ``datacopilot[vlm]``; the license guard
             runs first) or ``test_boxes``, a test double.
         classes: class names to look for (default: all).
         min_score: lowest confidence kept, above 0 and at most 1.

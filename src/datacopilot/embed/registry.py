@@ -71,7 +71,8 @@ def get_embedder(name: str, allowed_licenses: frozenset[str]) -> Embedder:
     except ImportError as exc:
         raise FormatError(
             f"embedder {name!r} needs an optional dependency that is not installed "
-            f'({exc.name or "a dependency"}): pip install "datacopilot[embed]"'
+            f'({exc.name or "a dependency"}): install the extra "datacopilot[embed]" '
+            "(in a clone: uv sync --extra embed)"
         ) from None
     spec = getattr(plugin, "spec", None)
     if not isinstance(spec, PluginSpec) or spec.kind != "embedder":

@@ -3,21 +3,50 @@
 DataCopilot needs Python 3.10 or newer. The core install is CPU-only and pulls no deep-learning
 framework: `click`, `jinja2`, `numpy`, `pyarrow`, `pydantic`, `structlog` and `typer`.
 
-<!-- skip: network install of a package that is published by the maintainer, not part of the tested tree -->
-```bash
-pip install datacopilot
-```
+DataCopilot is not on the Python Package Index: install it from a clone of the repository.
 
-> **Release status:** not yet published to PyPI. Until it is, install a wheel you built yourself (see the
-> [release runbook](../engineering/release.md)) or work from a checkout with
-> [`uv`](https://docs.astral.sh/uv/):
+> **Release status:** not yet published to PyPI, so `pip install datacopilot` does not work; install
+> from a clone as below.
 
-<!-- skip: needs a checkout and network access -->
+## From a clone, with uv
+
+<!-- skip: needs network access; scripts/check_clone.sh (pytest -m clone) runs the same steps on a fresh clone -->
 ```bash
 git clone https://github.com/B4teShai/DataCopilot.git
 cd DataCopilot
 uv sync
 uv run datacopilot --version
+uv run datacopilot doctor
+```
+
+`uv sync` creates `.venv/` with the locked versions; `source .venv/bin/activate` puts `datacopilot` on
+your `PATH`, or prefix every command with `uv run`.
+
+## From a clone, with pip
+
+<!-- skip: needs network access; scripts/check_clone.sh (pytest -m clone) runs the same steps on a fresh clone -->
+```bash
+git clone https://github.com/B4teShai/DataCopilot.git
+cd DataCopilot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+datacopilot --version
+```
+
+`pip install .` (without `-e`) installs a copy instead of linking the clone. pip resolves the
+dependencies itself, so it may pick newer versions than the lock file; `uv sync` uses the locked ones.
+
+## Use it in your own project
+
+Add it as a dependency straight from GitHub (pin a commit you have reviewed with `@<commit>`), or
+point at a local clone:
+
+<!-- skip: needs network access -->
+```bash
+uv add git+https://github.com/B4teShai/DataCopilot
+pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot"
+pip install -e ../DataCopilot
 ```
 
 ## Extras
@@ -27,10 +56,11 @@ uv run datacopilot --version
 | `embed` | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, `faiss-cpu`, and the tensor library | `--embedder dinov2_small`, `dinov2_base`, `siglip2_base` |
 | `vlm` | `pillow`, `safetensors`, `huggingface-hub`, `transformers`, and the tensor library | `propose --proposer grounding_dino` ([Propose, review, apply](proposals.md)) |
 
-<!-- skip: network install -->
+<!-- skip: needs network access -->
 ```bash
-pip install "datacopilot[embed]"
-pip install "datacopilot[vlm]"
+uv sync --extra embed                # in a clone, with uv
+pip install -e ".[embed]"            # in a clone, with pip
+uv add "datacopilot[vlm] @ git+https://github.com/B4teShai/DataCopilot"   # in your own project
 ```
 
 `embed` and `vlm` are the extras that exist. Extras for SAM 3 and the Cleanlab backend will be published
