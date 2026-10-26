@@ -1,6 +1,6 @@
 # ADR-0009: The label_noise check over existing embeddings
 
-**Status:** accepted
+**Status:** accepted; the default rule became box crops in [ADR-0010](0010-split-and-box-crops.md), this rule stays as `suspect_basis = "image"` and as the reported fallback
 **Date:** 2026-10-18
 
 ## Context

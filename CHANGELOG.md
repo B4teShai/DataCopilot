@@ -6,6 +6,42 @@ once a release is tagged.
 
 ## Unreleased
 
+### Added (split)
+
+- `datacopilot split DS.dcp -o NEW.dcp --ratios 0.8,0.1,0.1 [--by-group KEY] [--near-dup --embedder NAME]
+  [--stratify category] [--seed N] [--json PATH]` and `dc.split(...)`, returning the new `SplitReport` public
+  model. Images with the same key (`group_id`, `source.<name>` or a `re:` file-name pattern that is refused
+  unless it cannot backtrack badly) and, with `--near-dup`, every pair of near copies (an exact search of all
+  pairs, `knn.pairs_at_least`) stay in one split. Whole groups are assigned largest first by a deterministic,
+  seeded greedy rule, optionally balanced per class; the deviation per split and class is reported. The result
+  is a new dataset with lineage; nothing existing is written. An image without an embedding, a search ended by the
+  budget, over 2,000,000 pairs or a split equal to the current one write nothing (exit 1). The leakage check on the
+  result finds no cross-split pair (tested, and in notebook 05). See [ADR-0010](docs/adr/0010-split-and-box-crops.md).
+
+### Changed (label noise from box crops)
+
+- `label_noise` now embeds **box crops** by default (boxes of at least `crop_min_side_px` = 32 pixels on the
+  shorter side, `crop_padding` = 0.1, at most `max_crops_per_image` = 50 per image, downscaled to 512 pixels),
+  cached in the authenticated embedding cache under a variant named by the crop geometry. The whole-photo rule is
+  `suspect_basis = "image"`, used for classification datasets and as a fallback that is reported
+  (`crop_rule_unavailable`, WARN). Findings carry `basis`; `annotations_not_scored` carries `reasons`; the new
+  `skipped` reason `too_few_boxes`. The `embedder_error` and cache findings apply to crops as to photos. Finding
+  ids of `suspect_class` change because the payload gained `basis`.
+- Measured in `notebooks/05_split_and_crops.ipynb` on COCO128 with DINOv2-small (five seeds, 5 percent planted
+  flips): precision 0.250 against 0.108 for the whole-photo rule, recall 0.470 against 0.226, false-positive rate
+  0.073 against 0.097, 455 boxes scored against 296. Better, and still weak; the notebook says so.
+- Embedding cache identities have an optional `variant` (its own directory, bound into the MAC); existing caches
+  keep their MAC.
+
+### Changed (install, Python 3.14)
+
+- Nothing is on PyPI: the README, the install page and the CI example install from a clone (`uv sync`, or a
+  virtual environment and `pip install -e .`) or from GitHub (`uv add git+...`); missing-extra messages name the
+  extra and `uv sync --extra NAME`. `scripts/check_clone.sh` (and `pytest -m clone`) installs a fresh clone and
+  runs the README quick start; it passed on Python 3.10 and 3.14.
+- Python 3.14 is supported: classifier, CI test matrix, audit matrices.
+- The concepts page shows how CV-Pilot records `dcp:<manifest.version>` for a `dataset.dcp` directory.
+
 ### Added (label noise)
 
 - Audit check `label_noise` (rule `suspect_class`): with `--embedder`, a box is reported as an INFO lead when

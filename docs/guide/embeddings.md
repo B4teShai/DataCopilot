@@ -28,6 +28,9 @@ ignored and counted, never trusted; a sample of cached vectors is re-embedded on
 cache needs `DATACOPILOT_CACHE_KEY`. `datacopilot embed DATASET --embedder NAME` fills the cache
 ahead of time.
 
+`label_noise` caches its box-crop vectors beside them, in a directory per crop geometry
+(`<model>@<revision>+crop-v1-p100-m32-c50-s512`), under the same rules; see [Label noise](label-noise.md).
+
 ## Failing closed
 
 Images that could not be embedded, an embedder error or a budget that ended the run are findings:
