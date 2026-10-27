@@ -1,10 +1,10 @@
 # Split
 
-`datacopilot split` assigns every image to `train`, `val` or `test` again so that images that belong
-together stay on one side, and writes the result as a **new** dataset. The original is not changed; the
-new one names it in its `lineage`.
+`datacopilot split` assigns every image to `train`, `val` or `test` again, so that images that
+belong together stay on one side. It writes a **new** dataset. The original is unchanged, and the
+new one lists it in its [lineage](concepts.md).
 
-<!-- skip: needs a dataset; the unit tests and notebook 05 run these commands -->
+<!-- skip: needs a dataset; the unit tests run these commands -->
 ```bash
 datacopilot split shop.dcp -o shop_split.dcp --ratios 0.8,0.1,0.1 --stratify category --seed 0
 datacopilot split shop.dcp -o shop_split.dcp --by-group 're:^(?P<g>[^_]+)_'
@@ -21,74 +21,51 @@ print(report.dataset_version, report.groups_across_splits, report.splits["val"].
 
 ## Groups
 
-Images form one group when they share a key, and with `--near-dup` when they are near copies; groups
-joined by either relation merge.
+Images form one group when they share a key. With `--near-dup` they also join when they are near
+copies. Groups joined by either rule merge.
 
 | `--by-group` | Key of an image |
 |---|---|
-| `group_id` (default) | its `group_id` (set by `ingest --group-by` or by the source format) |
-| `source.<name>` | a string or integer field the reader kept in `source`, for example a COCO `video_id` |
-| `re:<pattern>` | a match of the pattern on the **file name** (the named group `g`, else group 1, else the whole match) |
+| `group_id` (default) | Its `group_id`, set by `ingest --group-by` or by the source format. |
+| `source.<name>` | A string or integer field the reader kept in `source`, such as a COCO `video_id`. |
+| `re:<pattern>` | A match on the **file name**: the named group `g`, else group 1, else the whole match. |
 
-Keys are compared like the leakage check compares them (case-insensitive, NFKC, surrounding space
-ignored), and the new version's `group_id` is the key, so the leakage check's `group_overlap` verifies
-the result. An existing `group_id` always stays together as well, whatever the key: an image the key
-gives no label keeps its `group_id`, and a `group_id` the key replaces is kept in
-`source["group_id_before_split"]`. An image with neither is a group of its own.
+An existing `group_id` always stays together, whatever the key. A `group_id` that the key replaces
+is kept in `source["group_id_before_split"]`.
 
-File names come from the dataset, so a pattern is refused unless it cannot backtrack badly: at most 200
-characters, no flags, back references or look-arounds, every quantifier on a single character or class,
-and between two variable-length quantifiers a required character the first one cannot match. Write
-`^(?P<g>[^_]+)_`, not `^(?P<g>\w+)_` (`\w` also matches `_`). The same rules apply to `ingest
---group-by`. A remote image's file name loses its URL query and fragment first (a presigned URL's
-signature never becomes a label). File names longer than 255 characters are
-refused.
+A `re:` pattern must be safe. It has no flags, back references or look-arounds, every quantifier
+applies to one character or class, and two variable-length parts are separated by a character the
+first cannot match. Write `^(?P<g>[^_]+)_`, not `^(?P<g>\w+)_` (`\w` also matches `_`). The same
+rules apply to `ingest --group-by`.
 
-`--near-dup` (needs `--embedder`) joins **every** pair of images whose embeddings have a cosine
-similarity of at least `--similarity-threshold` (0.95), found exactly, not among a few nearest neighbours,
-so a crowd of copies cannot hide one. The pairs are taken down to the threshold less the small slack the
-leakage check allows (`1e-6` plus the `1e-4` that FAISS may differ by), so that check cannot find a
-cross-split pair the split did not group. The vectors are computed for the run and not cached, so the
-source dataset is never written. The test embedder `hash` (it compares file bytes, not pictures) is
-refused unless `--allow-test-embedder` (`allow_test_embedder=True`) is given.
+`--near-dup` needs `--embedder`. It joins every pair of images with cosine similarity at or above
+`--similarity-threshold` (default 0.95), found exactly rather than among a few nearest neighbours,
+so a crowd of copies cannot hide one. The `hash` test embedder is refused unless you pass
+`--allow-test-embedder`.
 
 ## Assignment
 
-Whole groups are placed largest first, in the split whose share of images (and with
-`--stratify category` the share of boxes of each class) moves least away from `--ratios`. Groups of equal
-size are ordered by a hash of their members and `--seed`, so the same data, ratios and seed give the same
-assignment, byte for byte, whatever the order of the rows. A split with ratio 0 receives nothing.
+Whole groups are placed largest first, into the split whose share of images moves least away from
+`--ratios`. With `--stratify category`, the share of boxes of each class counts too. Ties are broken
+by a hash of the members and `--seed`, so the same data, ratios and seed give the same result in any
+row order.
 
-Splitting whole groups cannot always meet the ratios: a group can be larger than a target, and a class
-that lives in one group cannot be in every split. The report says how far it ended instead of claiming
-balance: per split the images, the target and the deviation, and per split and class the boxes, the share
-and the deviation (`--json PATH` writes it all; the command prints the new version, a summary line and one
-line per split). `groups_across_splits` is checked after the assignment and is 0 in every written report.
+Whole groups cannot always meet the ratios: one group can be larger than a target, and a class that
+lives in one group cannot be in every split. The report says how far it ended: per split the images,
+target and deviation, and per split and class the boxes, share and deviation. `--json PATH` writes it
+all. `groups_across_splits` is 0 in every written report.
 
 ## It fails closed
 
 Nothing is written when:
 
-- an image could not be embedded for `--near-dup` (missing, unreadable, undecodable, changed since ingest
-  or outside the root): its copies are unknown, so it could be the leaked one; the error counts the
-  images by reason;
-- the near-copy search ended at the time budget, or found more than 2,000,000 pairs (raise the threshold
+- an image could not be embedded for `--near-dup`, because it could be the leaked one;
+- the near-copy search hit its time budget or found more than 2,000,000 pairs (raise the threshold
   or group by key);
-- the result equals the current version or an earlier one in its lineage (the error says which);
-- the output exists, lies inside the source, or lies in a directory that does not hold the images
-  (relative image paths are rewritten for the output's directory; the audit reads no image outside
-  a dataset's directory, so such an output would have no readable images);
-- `--json PATH` lies inside the dataset, exists already or is a symlink (checked before any work);
-- an option is invalid (exit code 2): ratios that are not three numbers between 0 and 1 summing to 1,
-  an unknown or unsafe `--by-group`, `--near-dup` without `--embedder`, a test embedder without
-  `--allow-test-embedder`.
+- the result equals the current version or an earlier one in its lineage;
+- the output exists, lies inside the source, or lies in a folder that does not hold the images;
+- `--json PATH` lies inside the dataset, exists already or is a symlink;
+- an option is invalid (exit 2): ratios not three numbers between 0 and 1 that sum to 1, an unknown
+  or unsafe `--by-group`, `--near-dup` without `--embedder`.
 
-## What was measured
-
-[`notebooks/05_split_and_crops.ipynb`](https://github.com/B4teShai/DataCopilot/blob/main/notebooks/05_split_and_crops.ipynb)
-found no near-copy pair in COCO128 down to cosine 0.8 with DINOv2-small, so it planted five re-encoded
-copies of train photos in `val`. The leakage gate failed on them (5 cross-split clusters, exit 1);
-`split --near-dup --stratify category` kept all five with their originals, and the gate passed on the new
-version (0 clusters, exit 0). The same input and seed gave the same version again; with
-`--stratify category` the largest class deviation was 0.2, for classes whose boxes all ended in `train`
-(the three largest: 5, 21 and 1 boxes).
+The design and the measured result are in [ADR-0010](../adr/0010-split-and-box-crops.md).

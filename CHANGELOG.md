@@ -6,6 +6,45 @@ once a release is tagged.
 
 ## Unreleased
 
+### Measured (details moved out of the user guide and the architecture pages)
+
+- Label noise on COCO128 (128 photos, 929 boxes, 71 classes), real DINOv2-small, five seeds of 5 percent
+  planted random class flips (46 boxes), default settings, caps lifted; means. Whole photos against box crops:
+  precision 0.108 against 0.250 (per seed 0.210 to 0.287); recall over all boxes 0.226 against 0.470 (0.370 to
+  0.587); false-positive rate over all boxes 0.097 against 0.073; boxes scored 296 against 455; recall over
+  scorable boxes 0.831 against 0.962; false-positive rate over scorable boxes 0.303 against 0.149; reports on the
+  untouched dataset 0.097 against 0.071 of the boxes; same-photo confusion recall 0.091 against 0.252.
+  416 of the 929 boxes are under 32 pixels and are not cropped; 58 more have too few close neighbours. With the
+  default caps the command line reported 94 boxes on seed 0 and counted 474 not scored (a CRITICAL
+  `annotations_not_scored`). Settings tuned on the same data (an upper bound): a 16-pixel floor scores 659 boxes,
+  recall 0.665 at precision 0.243; the best precision in the grid was 0.318 at recall 0.217 (similarity floor
+  0.5). Cutting and embedding 513 crops took 8.5 s on a CPU against 5.5 s for 128 photos; the check itself runs
+  in 11 to 12 ms over cached vectors. Not measured: a large single-domain dataset, real (unplanted) errors.
+- Proposals on COCO128 (929 boxes), a seeded 19 percent (178 boxes) deleted as an answer key, real Grounding DINO
+  tiny on a CPU (about 4 minutes for 128 photos), threshold 0.35: 215 proposals, 84 matching a deleted box (IoU 0.5,
+  same class), precision 0.39, recall 0.47, 39 labels dropped (37 merged, 2 fragments). At threshold 0.7
+  precision was 0.96 and recall 0.15, tuned on the data it is graded on. Accepting the matches restored part of
+  the classes the deletion removed from validation (30 classes in the complete dataset, 27 with holes, 29 after
+  applying). The reviewer is an oracle and the deletions are random, so recall is optimistic.
+- Split on COCO128 with DINOv2-small: no near-copy pair down to cosine 0.8, so five re-encoded copies of train
+  photos were planted in `val`; the leakage gate failed (5 cross-split clusters), `split --near-dup --stratify
+  category` kept all five with their originals and the gate passed (0 clusters); the same input and seed gave
+  the same version. The largest class deviation was 0.2, for classes whose boxes all ended in `train` (the
+  three largest: 5, 21 and 1 boxes).
+- Install size (Python 3.13, macOS arm64): about 162 MB for the core install, of which `pyarrow` is about
+  123 MB and `numpy` 22 MB; no `torch`, `nvidia-*` or `cuda` package.
+- `benchmarks/audit_cpu.py`: 50,000 images, 500,000 boxes, 200 classes, 64 KiB header-valid JPEGs, 12 cores
+  (Apple M4 Pro), Python 3.13, warm OS file cache. 37.6 s end to end with a cold hash cache (reading tables 8.3 s;
+  checks 29.3 s = integrity 17.0 + duplicates 9.7 + imbalance 0.3 + boxes 2.0; reports 0.02 s), 31.1 s with a
+  warm hash cache, 32.6 s with `--no-hash-cache`. Hashing ran at about 330 MB/s, so real 250 KiB files would add
+  about 30 s. Peak memory 1.35 GB. Not measured: a cold OS file cache, 8 cores, Linux, real photographs.
+- `benchmarks/embed_checks.py`: synthetic 50,000 x 768 float16 embeddings (200 classes, 80/10/10 split, 400
+  planted near-duplicate pairs), Python 3.10, 12 cores, exact NumPy kNN, k = 10: `near_duplicates` 15.2 s,
+  `leakage` 5.4 s, `outliers` 0.4 s (21.0 s for the three; a later run gave 16.9, 6.0 and 0.4 s), `label_noise`
+  alone 16.5 s, kNN alone 14.7 s, cache write 1.2 s (73.0 MB), verified read 0.6 s; recall of the planted pairs
+  1.0 and 1.0. Whole-process peak memory 2.89 GB on macOS. Not measured: embedding 50,000 real images on a GPU,
+  the sample re-embedding of a warm cache, a CPU-only embedding run, FAISS.
+
 ### Added (split)
 
 - `datacopilot split DS.dcp -o NEW.dcp --ratios 0.8,0.1,0.1 [--by-group KEY] [--near-dup --embedder NAME]
