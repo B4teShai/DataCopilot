@@ -39,7 +39,7 @@ extra:
 nav:
   - Home: index.md
   - Tutorial: tutorial.md
-  - What is built and planned: status.md
+  - Status: status.md
   - User guide:
       - Install: guide/install.md
       - Concepts: guide/concepts.md

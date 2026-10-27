@@ -29,7 +29,7 @@ Reviewers check, in this order:
 3. **Contracts:** exit codes and logging follow
    [errors-and-logging.md](errors-and-logging.md); settings are validated; no secrets.
 4. **Dependencies and licenses:** [dependencies-and-licensing.md](dependencies-and-licensing.md).
-5. **Docs:** architecture documents and diagrams updated; status markers (built/planned)
+5. **Docs:** architecture documents and diagrams updated; `docs/status.md`
    correct; every documented command was actually run.
 6. **Scope:** nothing unrelated slipped in.
 

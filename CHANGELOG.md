@@ -6,6 +6,16 @@ once a release is tagged.
 
 ## Unreleased
 
+### Changed (documentation)
+
+- Documentation rewritten for a reader who has never heard of the tool: a glossary at the top of the
+  concepts page, `docs/status.md` as the only place that says what is built, shorter guide and
+  architecture pages, and ADR-0007 and ADR-0008 trimmed. The README now says plainly that only missing
+  boxes can be proposed.
+- Diagrams redrawn to be readable at page width: `components` (four layers), `context`, `data-model`,
+  `flow-a` and `flow-b` (which no longer shows planned features). The `containers`, `system-context` and
+  `runtime` diagrams are removed.
+
 ### Measured (details moved out of the user guide and the architecture pages)
 
 - Label noise on COCO128 (128 photos, 929 boxes, 71 classes), real DINOv2-small, five seeds of 5 percent
