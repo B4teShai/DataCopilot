@@ -742,7 +742,7 @@ def review_export(
     proposals: Annotated[
         str, typer.Option("--proposals", help="Proposal set id (from `propose`).")
     ],
-    to: Annotated[str, typer.Option("--to", help="Annotation tool; only `cvat` is built.")],
+    to: Annotated[str, typer.Option("--to", help="Annotation tool; currently supports `cvat`.")],
     output: Annotated[Path, typer.Option("--output", "-o", help="Empty or new output directory.")],
 ) -> None:
     """Write the proposals as a separate layer of a CVAT dataset, next to the dataset's own boxes.
@@ -769,7 +769,9 @@ def review_import(
     proposals: Annotated[
         str, typer.Option("--proposals", help="Proposal set id that was exported.")
     ],
-    source: Annotated[str, typer.Option("--from", help="Annotation tool; only `cvat` is built.")],
+    source: Annotated[
+        str, typer.Option("--from", help="Annotation tool; currently supports `cvat`.")
+    ],
 ) -> None:
     """Read the decisions of a reviewed CVAT export into a new, reviewed proposal set.
 

@@ -248,7 +248,7 @@ datacopilot review export [OPTIONS] DATASET
 | Option | Value | Default | Description |
 |---|---|---|---|
 | `--proposals` (required) | `TEXT` |  | Proposal set id (from `propose`). |
-| `--to` (required) | `TEXT` |  | Annotation tool; only `cvat` is built. |
+| `--to` (required) | `TEXT` |  | Annotation tool; currently supports `cvat`. |
 | `--output` / `-o` (required) | `PATH` |  | Empty or new output directory. |
 
 ## datacopilot review import
@@ -274,7 +274,7 @@ datacopilot review import [OPTIONS] DATASET DIRECTORY
 | Option | Value | Default | Description |
 |---|---|---|---|
 | `--proposals` (required) | `TEXT` |  | Proposal set id that was exported. |
-| `--from` (required) | `TEXT` |  | Annotation tool; only `cvat` is built. |
+| `--from` (required) | `TEXT` |  | Annotation tool; currently supports `cvat`. |
 
 ## datacopilot split
 
