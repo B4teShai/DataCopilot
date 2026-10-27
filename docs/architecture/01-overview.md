@@ -2,99 +2,77 @@
 
 ## Purpose
 
-DataCopilot turns a dataset export into a versioned, queryable directory (`dataset.dcp/`),
-audits it with reproducible checks, converts it to other formats without silent loss, and
-produces model-generated fix proposals that a person reviews before they are applied.
-It is a CLI and a Python library. It runs in one process, on CPU, without a server.
+DataCopilot turns a dataset export into a versioned folder (`dataset.dcp/`), audits it with
+reproducible checks, converts it to other formats without silent loss, and can propose boxes your
+labels missed for a person to review. It is a command-line tool and a Python library. It runs in one
+process, on the CPU, without a server. See [Status](../status.md) for what runs today.
 
 ## Users
 
-| Persona | What they do with DataCopilot |
+| Who | What they do |
 |---|---|
-| CV engineer preparing training data | Ingests a CVAT or COCO export, runs `audit`, fixes leakage and box errors, re-splits by session, exports YOLO for training. Records `manifest.version` with the run (via CV-Pilot). |
-| Label reviewer (annotator, QA) | Receives proposals as a separate layer in CVAT, FiftyOne or X-AnyLabeling; accepts or rejects; never touches DataCopilot directly. |
-| CI maintainer | Adds `datacopilot audit --fail-on leakage,critical` to a pipeline, uploads the SARIF report, blocks merges on exit code 1. |
-| Plugin author | Packages a format reader, a check, a proposer or an embedder as an entry point ([ADR-0005](../adr/0005-plugin-system.md)). |
+| CV engineer | Ingests an export, audits it, fixes leaks and box errors, re-splits, exports YOLO for training. |
+| Label reviewer | Accepts or rejects proposed boxes in CVAT. Never runs DataCopilot. |
+| CI maintainer | Adds `datacopilot audit --fail-on leakage,critical` to a pipeline and blocks merges on exit code 1. |
+| Plugin author | Packages a format, check, proposer or embedder as an entry point ([ADR-0005](../adr/0005-plugin-system.md)). |
 
 ## Scope
 
-In scope: detection (axis-aligned boxes) and classification datasets; six formats with a
-round-trip contract; audit checks (integrity, duplicates, near-duplicates, split leakage,
-imbalance, box sanity, label noise, outliers, SKU confusion); group-aware re-splitting;
-proposals (`add_box`, `change_class`, `refine_box`, `delete_box`, `flag_ambiguous`) with
-consensus gating; HTML, JSON and SARIF reports; review export and import for CVAT and
-FiftyOne; a content-hashed, append-only dataset version.
+In scope: detection (axis-aligned boxes) and classification datasets; six formats with a round-trip
+contract; the audit checks; group-aware re-splitting; `add_box` proposals with CVAT review; HTML,
+JSON and SARIF reports; a content-hashed, append-only dataset version.
 
-Explicit non-goals:
+Out of scope:
 
 - No GUI, annotation tool, dataset browser or hosted service.
-- No training, no model serving, no multi-user labeling.
-- No automatic application of model output; every proposal goes through review.
-- No polygons, masks, video or tracks in the first versions (schema reserves the field).
-- No database server of any kind.
+- No training, no model serving.
+- No automatic application of model output: every proposal goes through review.
+- No polygons, masks, video or tracks (the schema reserves the field).
+- No database server.
 
-## Quality attributes
+## Context
 
-Reference input for every number: **R50k** = 50,000 JPEG images (1920x1080) with 500,000
-boxes across 200 categories, COCO JSON, images on local SSD. Numbers are budgets until a
-benchmark script records them; a release that misses a budget says so in the CHANGELOG.
+![DataCopilot and the people and tools around it](../diagrams/png/context.png)
 
-| Attribute | Budget | How verified | Status |
-|---|---|---|---|
-| Core install size | `site-packages` delta ≤ 250 MB for the core wheel and its dependencies; no `torch`, `nvidia-*` or `cuda` package in the core lock | CI job diffs `uv tree` of the core group against a deny-list; `benchmarks/install.sh` records size | measured with the Phase 2 dependencies (Python 3.13, macOS arm64): about 162 MB installed (Phase 1: 140 MB), of which `pyarrow` is about 123 MB, `numpy` 22 MB, `jinja2` and `markupsafe` under 1 MB; no `torch`, `nvidia-*` or `cuda`; CI deny-list check planned |
-| Core install time | ≤ 90 s cold on a 100 Mbit link, ≤ 15 s with a warm cache | `benchmarks/install.sh` in a clean virtualenv | planned |
-| Startup | `datacopilot --version` p95 ≤ 400 ms; `doctor` p95 ≤ 600 ms, 20 runs on a laptop | `hyperfine` via `benchmarks/startup.sh` | planned (commands exist; not yet measured) |
-| Ingest throughput | R50k COCO ingest ≤ 60 s without image decoding; ≤ 6 min with `--hash-images` (sha256 of every file, 8 workers) | `benchmarks/ingest.py` | planned |
-| Audit throughput, CPU | R50k, all CPU checks (integrity, exact duplicates, imbalance, boxes) ≤ 10 min on 8 cores | `benchmarks/audit_cpu.py` | measured (`benchmarks/audit_cpu.py`): 50,000 images, 500,000 boxes, 200 classes, 64 KiB header-valid JPEGs, 12 cores (Apple M4 Pro), Python 3.13, warm OS file cache: 37.6 s end to end cold hash cache (reading tables 8.3 s; checks 29.3 s = integrity 17.0 + duplicates 9.7 + imbalance 0.3 + boxes 2.0; reports 0.02 s), 31.1 s with a warm hash cache, 32.6 s with `--no-hash-cache`. Hashing ran at about 330 MB/s, so real 250 KiB files would add about 30 s. Not measured: a cold OS file cache, 8 cores, Linux, real photographs |
-| Audit throughput, GPU | R50k, all checks with cached embeddings ≤ 10 min; embedding R50k with DINOv2-B on one 8 GB GPU ≤ 20 min including decode | `benchmarks/audit_gpu.py` (nightly, self-hosted) | partly measured, not the GPU part: `benchmarks/embed_checks.py` on synthetic 50,000 x 768 float16 embeddings (200 classes, 80/10/10 split, 400 planted near-duplicate pairs), Python 3.10, 12 cores (Apple M4 Pro, macOS), exact NumPy kNN pinned for every phase (`--backend numpy`, the default), k = 10: `near_duplicates` 15.2 s, `leakage` 5.4 s, `outliers` 0.4 s (21.0 s for the three; approximate, one machine and one run: a later run on the same machine gave 16.9 s, 6.0 s and 0.4 s, and `label_noise` alone took 16.5 s, against the 10 min budget minus the 37.6 s CPU audit), kNN alone 14.7 s, cache write 1.2 s (73.0 MB), verified read 0.6 s; the script asserts a recall of at least 0.95 of the planted pairs (measured 1.0 and 1.0) and the budgets. Not measured: embedding 50,000 real images on a GPU (the 20 min budget), the sample re-embedding of a warm cache (needs images and a model), a CPU-only embedding run, FAISS. Real-weight smoke runs (DINOv2-small, SigLIP2-B on CPU) passed but were not timed |
-| Memory ceiling | Audit of R50k ≤ 4 GB RSS on CPU; images are never decoded and each hash worker holds one 1 MiB chunk | `benchmarks/audit_cpu.py` records peak RSS | measured: 1.35 GB peak RSS for the same run (tables as Pydantic objects dominate); tables are read through the bounded store reader, not DuckDB The embedding benchmark's whole-process peak RSS is 2.89 GB on macOS (`ru_maxrss` is bytes there, KiB on Linux, and the script records the platform); it includes generating the synthetic vectors, the 50,000 dataset rows, the float32 vectors (154 MB), their normalised working copies and one 256 MiB similarity block, so it bounds the checks from above and is not their increment |
-| Determinism | Same input directory and options produce byte-identical `images/annotations/categories.parquet`, identical `manifest.version`, identical JSON report after removing `run_id`, `started_at` and `timings_ms` | golden tests run the command twice and diff | built for `ingest` (`tests/golden/test_roundtrip_matrix.py`, `tests/unit/test_cli_convert.py`) and for audit reports (`tests/golden/test_audit_golden.py`: JSON, SARIF and HTML are byte-compared with committed files) |
-| Round-trip losslessness | For each of the 6 formats, read → write → read gives field-identical tables and `ConversionReport.dropped == 0`; for cross-format pairs the dropped-field matrix is published in the docs and asserted by tests | `tests/golden/` matrix | built for COCO, YOLO, VOC, CVAT XML, Label Studio and ImageFolder |
-| Parity | Box IoU and area match `pycocotools` and `supervision` within 1e-6; label-noise flags match Cleanlab `find_label_issues` on identical probabilities with Jaccard ≥ 0.99; cosine distances match a NumPy reference within 1e-5 | `tests/parity/` with pinned versions | planned |
-| Exit-code contract | 0 / 1 / 2 / 130 as in [errors-and-logging.md](../engineering/errors-and-logging.md) | `tests/unit/test_cli.py`, `tests/unit/test_cli_audit.py` | built (including `audit`: 0 pass, 1 gate matched or dataset unreadable, 2 usage) |
-| Logging contract | Every record has the seven required fields; secrets redacted by key | `tests/unit/test_logging_contract.py` | built |
+| Outside party | How it talks to DataCopilot |
+|---|---|
+| CV engineer | Runs `datacopilot ...` or `import datacopilot`. |
+| Dataset files | COCO, YOLO, VOC, CVAT, Label Studio and ImageFolder files, read and written. |
+| CI runner | Reads the exit code and `report.sarif`. |
+| CVAT | Receives proposals as a review folder; its decisions come back as a file. |
+| Hugging Face Hub | Source of model weights, downloaded over HTTPS. Nothing is redistributed. |
+| CV-Pilot | Reads `manifest.json` to record the dataset version of a training run. |
+
+## Quality goals
+
+Reference input **R50k**: 50,000 JPEG images with 500,000 boxes in 200 classes, as COCO JSON on a
+local disk. Budgets are goals; a release that misses one says so in the changelog.
+
+| Goal | Budget | Checked by |
+|---|---|---|
+| Core install size | At most 250 MB, no `torch` or CUDA package. | `tests/release/test_core_dependencies.py` |
+| CPU audit time | R50k, all CPU checks, at most 10 min on 8 cores. | `benchmarks/audit_cpu.py` |
+| Embedding checks | R50k with cached vectors, at most 10 min. | `benchmarks/embed_checks.py` |
+| Memory | R50k audit at most 4 GB; images are never decoded by the CPU checks. | `benchmarks/audit_cpu.py` |
+| Determinism | Same input and options give the same tables, version and report. | golden tests |
+| Round trip | Same-format read, write, read is field-identical. | `tests/golden/` |
+| Exit codes | 0, 1, 2 and 130 as in [errors and logging](../engineering/errors-and-logging.md). | CLI tests |
+| Logging | Every record has the seven required fields; secrets redacted. | `tests/unit/test_logging_contract.py` |
+
+Measured on one machine (Apple M4 Pro, 12 cores, Python 3.13): the CPU audit of R50k took 37.6 s
+with 1.35 GB peak memory, and the three embedding checks took about 21 s on synthetic vectors. The
+conditions and the other numbers are in the
+[changelog](https://github.com/B4teShai/DataCopilot/blob/main/CHANGELOG.md). Embedding 50,000 real
+images on a GPU was not measured.
 
 ## Constraints
 
 | Constraint | Source |
 |---|---|
-| Apache-2.0 project; copyleft libraries never in core, only behind an optional extra with lazy import and a license notice; copyleft-derived code only as a separate package | [ADR-0001](../adr/0001-scope-and-license.md), [dependencies-and-licensing.md](../engineering/dependencies-and-licensing.md) |
-| CPU-only core: PyTorch, CUDA, transformers only behind `[embed]`, `[vlm]`, `[sam3]` | [ADR-0003](../adr/0003-repo-and-tooling.md) |
-| Core runtime dependencies are exactly `typer`, `click`, `pydantic`, `structlog`, `pyarrow`, `numpy`, `jinja2`; a new core dependency is an ADR-0003 change | [ADR-0003](../adr/0003-repo-and-tooling.md) |
-| Python ≥ 3.10 for the core; the `[sam3]` extra needs Python ≥ 3.12, PyTorch ≥ 2.7, CUDA ≥ 12.6 (upstream requirement) | [standards.md](../engineering/standards.md), SAM 3 README |
-| No database server; local Parquet + DuckDB only | [ADR-0006](../adr/0006-dataset-format.md) |
-| Images referenced, never copied | [ADR-0006](../adr/0006-dataset-format.md) |
-| Model weights never vendored; gated downloads by the user with their own token | [ADR-0001](../adr/0001-scope-and-license.md) |
-| Four layers, downward imports, registries for infrastructure | [ADR-0004](../adr/0004-layering-and-dependency-rule.md) |
-
-## Context view
-
-![System context](../diagrams/png/context.png)
-
-| External system | Direction | Protocol / format | Why |
-|---|---|---|---|
-| CV engineer (person) | → DataCopilot | shell (`datacopilot …`), `import datacopilot` | Runs every command; the only direct user of the CLI and API |
-| Label reviewer (person) | → Annotation tools | the tool's own UI | Accepts or rejects proposals; decisions flow back through the tool |
-| Raw dataset exports | ↔ | files: COCO JSON, YOLO txt + `data.yaml`, VOC XML, CVAT 1.1 XML, Label Studio JSON, ImageFolder | Input of `ingest`, output of `export` |
-| Annotation tools: CVAT, FiftyOne, X-AnyLabeling | ↔ | CVAT REST via `cvat-sdk`; FiftyOne Python SDK (local MongoDB owned by FiftyOne); X-AnyLabeling JSON files | Proposals pushed as a separate layer; decisions (`status`, `reviewer_id`) imported |
-| Hugging Face Hub | ← DataCopilot | HTTPS, `huggingface_hub`; gated repos need the user's token | Source of DINOv2/DINOv3/SigLIP2, Grounding DINO, SAM 3 weights; nothing is redistributed |
-| vLLM endpoint | ← DataCopilot | HTTP, OpenAI-compatible chat API, images as base64 | Qwen3-VL class verification without loading the model locally |
-| Object storage: S3, GCS, Azure | ← DataCopilot | `fsspec` URIs, range reads | Image bytes for hashing, decoding, embedding; `dataset.dcp/` directories can live there |
-| CI runner | → DataCopilot | process exit code; `report.sarif`, `report.json` as artifacts | Audit as a merge gate |
-| CV-Pilot (sibling project) | ← DataCopilot | reads `manifest.json` | Records `manifest.version` as `Repro.dataset_hash` for a training run |
-
-## Container view
-
-![Containers](../diagrams/png/containers.png)
-
-| Container | Responsibility | Technology | Status |
-|---|---|---|---|
-| `datacopilot` CLI | Parses options, loads settings, configures logging, calls use cases, maps failures to exit codes | Typer, structlog | **built** (`--version`, `doctor`, `ingest`, `export`, `formats`, `audit`, `embed`, `propose`, `review export`, `review import`, `apply`) |
-| Python API (`import datacopilot`) | `load`, `audit`, `split`, `propose`, `apply`, `export` as functions over `Dataset` and `ProposalSet` objects | Python, Pydantic | **built** |
-| Core library | `core/schema.py` entities and invariants, `core/version.py` content hash and lineage, `core/geometry.py` box math | Pydantic v2, standard library, NumPy for array helpers | **built** (`iou_xyxy` and the `Finding` / `AuditRun` models; `rescale_grid` planned) |
-| Format adapters | `io/` readers and writers with the round-trip contract; `integrations/` for CVAT, FiftyOne, Cleanlab bridge, Lightly, supervision | pure Python (standard-library `expat`, a restricted YAML subset parser), `cvat-sdk`, `fiftyone` (extras) | **built** for COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder; `integrations/` planned |
-| Audit engine | Checks, findings, `--fail-on` gate, group-aware split, proposers with consensus, apply with lineage | Python, NumPy (DuckDB and `imagehash` planned) | **built** for the registry, runner, gate and the checks `integrity`, `duplicates`, `imbalance`, `boxes`, `near_duplicates`, `leakage`, `label_noise` (box crops, still weak: [ADR-0010](../adr/0010-split-and-box-crops.md)), `outliers`, and the group-aware split in `splits/`; the Cleanlab backend of label noise planned; `propose`, review and `apply` are built in `proposals/` (one model, `add_box` only, no consensus) |
-| Model runtime | Embedders (DINOv2, SigLIP2 built; DINOv3 planned), proposers (Grounding DINO tiny built; SAM 3 and Qwen3-VL via vLLM planned), license guard, weight hashes | PyTorch, transformers, FAISS; extras `[embed]`, `[vlm]`, `[sam3]`; GPU optional | **built** for the embedders, the Grounding DINO proposer, license guard, weight hashes, cache and exact kNN |
-| Dataset store | `dataset.dcp/` layout, Parquet tables, DuckDB queries, atomic snapshot writes, embedding cache | `pyarrow` (`duckdb`, `fsspec` with audit) | **built** (tables, manifest, atomic versions, bounded reads, atomic audit runs, authenticated embedding cache, content-addressed proposal sets, a new dataset with lineage); queries planned |
-| Report generator | HTML (Jinja2, inline SVG; no script, no remote resources), JSON, SARIF from an `AuditRun` | Jinja2 | **built** (Vega-Lite charts, thumbnails and the leakage and cluster views planned) |
-| Plugin host | Entry-point registries for `datacopilot.formats`, `.checks`, `.proposers`, `.embedders`; `PluginSpec` validation; license gate | `importlib.metadata` | **built** for `datacopilot.formats`, `datacopilot.checks` and `datacopilot.embedders` (duplicate names rejected, lazy load, plugin output re-validated, license gate for embedders and proposers); `.proposers` has `grounding_dino` and the test-only `test_boxes` |
+| Apache-2.0. Copyleft libraries never in core. | [ADR-0001](../adr/0001-scope-and-license.md) |
+| CPU-only core. PyTorch and transformers only behind `embed` and `vlm`. | [ADR-0003](../adr/0003-repo-and-tooling.md) |
+| Core dependencies are exactly `typer`, `click`, `pydantic`, `structlog`, `pyarrow`, `numpy`, `jinja2`. | [ADR-0003](../adr/0003-repo-and-tooling.md) |
+| Python 3.10 or newer. | [standards](../engineering/standards.md) |
+| No database server. Parquet files only. Images referenced, never copied. | [ADR-0006](../adr/0006-dataset-format.md) |
+| Model weights are never vendored. | [ADR-0001](../adr/0001-scope-and-license.md) |
+| Four layers, imports point downward. | [ADR-0004](../adr/0004-layering-and-dependency-rule.md) |
