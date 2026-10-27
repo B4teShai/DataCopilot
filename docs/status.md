@@ -1,32 +1,19 @@
-# What is built and what is planned
+# Status
 
-DataCopilot is a dataset doctor (it converts, checks and reports) with a first model-assisted fix
-workflow: `propose`, `review` and `apply` for missing boxes. Anything not listed as built below does not
-run today.
+What works today. This page is the only place that says so; other pages describe how things work.
+"Built" is implemented and tested. "Experimental" runs but its results are weak. "Planned" does not
+run yet.
 
-## Built and tested
-
-| Area | What works |
-|---|---|
-| Convert | `ingest` and `export` between COCO, YOLO, Pascal VOC, CVAT for images 1.1 XML, Label Studio JSON and ImageFolder, through a versioned `dataset.dcp/` directory. Every field a conversion cannot carry is counted; `--strict` turns any loss into a failure, on `export` and on `ingest`. See [Formats](guide/formats.md). |
-| Version | An order-independent `manifest.version`: the same data in the same format gives the same version whatever the file order. See [Concepts](guide/concepts.md). |
-| Audit | Four checks on the CPU (integrity, exact duplicates, class imbalance, box sanity) and, with `--embedder`, four more (near-duplicates, split leakage, label-noise leads from box crops, per-class outliers). Reports in JSON, static HTML and SARIF 2.1.0; the run is stored as `audits/<run_id>.json`. Exit code 1 when `--fail-on` matches. See [Audit in CI](guide/audit-ci.md) and [Label noise](guide/label-noise.md). |
-| Embeddings | `datacopilot embed` fills the embedding cache ahead of time; `dinov2_small`, `dinov2_base` and `siglip2_base` (extra `[embed]`) and the test-only `hash` embedder. See [Embeddings](guide/embeddings.md). |
-| Diagnose | `datacopilot --version`, `formats` and `doctor` (versions, extras, settings, cache directory, FAISS and GPU; `--json` for a machine-readable report). |
-| Split | `split` re-splits a dataset into train, val and test as a new version with lineage: images with the same key (`group_id`, a source field or a safe file-name pattern) and, with `--near-dup`, every near-copy pair stay together; whole groups are assigned deterministically, optionally balanced per class, and the deviation from the ratios is reported. See [Split](guide/split.md). |
-| Propose, review, apply | `propose` finds boxes a dataset is probably missing with Grounding DINO (tiny, Apache-2.0, extra `[vlm]`) and stores them as a proposal set; `review export` and `review import` round-trip them through CVAT files; `apply` writes the accepted ones as a new dataset version with lineage. Only missing boxes (`add_box`) are proposed. See [Propose, review, apply](guide/proposals.md). |
-| Python | `load`, `audit`, `export`, `split`, `propose` and `apply`. See [Python API](guide/python-api.md). |
-| Settings | Environment variables, listed in [Settings](reference/settings.md). Logs are JSON on standard error. |
-
-Benchmark (`benchmarks/audit_cpu.py`, 50,000 images and 500,000 boxes, 64 KiB files, 12 cores): 37.6 s
-end to end, 1.35 GB peak memory; details in the [architecture overview](architecture/01-overview.md).
-
-## Planned, not implemented
-
-| Planned | What it will do |
-|---|---|
-| better label noise | An optional Cleanlab backend for `label_noise`; with box crops it is better than before and still weak (see [Label noise](guide/label-noise.md)). |
-| more proposals | Proposals that change a class, delete a box or refine a box; SAM 3 and Qwen3-VL proposers; consensus between models; review in FiftyOne. See [ADR-0008](adr/0008-propose-review-apply.md) for what was left out on purpose. |
-| more extras | Extras for SAM 3 and the Cleanlab backend; today the extras are `embed` and `vlm`. |
-
-The [architecture documents](architecture/README.md) mark every component as built or planned.
+| Area | Status | What it covers |
+|---|---|---|
+| Convert formats | Built | COCO, YOLO, VOC, CVAT, Label Studio and ImageFolder; losses counted. See [Formats](guide/formats.md). |
+| Dataset folder and version | Built | `ingest` writes `dataset.dcp`; same content gives the same version. |
+| CPU audit | Built | Integrity, exact duplicates, class imbalance, box sanity; reports in JSON, HTML and SARIF. |
+| Image-model audit | Built | Near-duplicates, leakage and outliers with `--embedder`. See [Embeddings](guide/embeddings.md). |
+| Label noise | Experimental | Box-crop leads are better than before but weak. See [Label noise](guide/label-noise.md). |
+| Split | Built | Group-aware re-split into a new version. See [Split](guide/split.md). |
+| Propose missing boxes | Experimental | Grounding DINO proposes `add_box` only; precision is low. See [Propose, review, apply](guide/proposals.md). |
+| Review and apply | Built | CVAT round trip, then a new version with lineage. |
+| Python API and `doctor` | Built | `load`, `audit`, `export`, `split`, `propose`, `apply`; `doctor` checks the install. |
+| More proposal kinds | Planned | Change a class, delete a box, refine a box; consensus between models. |
+| More models and tools | Planned | SAM 3 and Qwen3-VL proposers, FiftyOne review, a Cleanlab label-noise backend. |

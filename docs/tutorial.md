@@ -1,26 +1,22 @@
-# Tutorial: audit, gate and convert a dataset
+# Tutorial
 
-This tutorial builds a small synthetic dataset with a few planted problems, then walks the whole
-loop: ingest it, audit it, turn the audit into a CI gate, find a leaked image with embeddings and
-convert the dataset to other formats while counting what each conversion loses. Nothing is
-downloaded and no real data is used.
+In ten minutes you will build a small demo dataset with planted mistakes, audit it, make a CI build
+fail on it, find a copied picture, and convert it to other formats. Nothing is downloaded. You need
+DataCopilot installed (see [Install](guide/install.md)) and an empty scratch directory.
 
-Every command and script on this page is executed by the test suite
-(`tests/docs/test_tutorial.py`) against the code in this repository, and its output is checked
-against what is shown. Values that differ from run to run are written as `<uuid>`, `<hex32>` or
-`...`.
-
-You need DataCopilot installed (see [Install](guide/install.md)) and a scratch directory.
+Every command on this page is run by the test suite, and its output is checked against what is
+shown. Values that change from run to run are written `<uuid>`, `<hex32>` or `...`. Unfamiliar word?
+See [Concepts](guide/concepts.md).
 
 ## 1. Generate the dataset
 
-The script writes twelve tiny PNG pictures and a COCO annotation file per split into `shop/`. The
-problems are planted on purpose:
+The script writes twelve tiny pictures and a COCO annotation file per split into `shop/`. The
+mistakes are planted on purpose:
 
-- `v0.png` (validation) is `t0.png` (training) with one pixel changed: the same picture, but not the
-  same bytes, so only an embedding check can see it.
+- `v0.png` (validation) is `t0.png` (training) with one pixel changed. It is the same picture but
+  not the same bytes, so only an image model can see it.
 - `t1.png` has a one-pixel box.
-- 12 of the 15 boxes are `cup`, only one is `bowl`, and the validation split has no `bowl` at all.
+- 12 of the 15 boxes are `cup`, one is `bowl`, and validation has no `bowl` at all.
 
 <!-- run -->
 ```python
@@ -91,9 +87,8 @@ for split, (images, annotations) in documents.items():
 
 ## 2. Ingest
 
-`ingest` reads a dataset in any supported format, checks its invariants and writes a versioned
-`shop.dcp/` directory. It prints the content version: the same data always gives the same version,
-whatever the file order or format it came from.
+`ingest` reads a dataset, checks it and writes a `shop.dcp/` folder. It prints the dataset's
+version: the same content always gives the same version.
 
 <!-- run -->
 ```console
@@ -103,9 +98,8 @@ $ datacopilot ingest shop --format coco -o shop.dcp
 
 ## 3. Audit
 
-`audit` runs the CPU checks (file integrity, exact duplicates, class balance, box sanity), writes
-`report.html`, `report.json` and `report.sarif` next to each other and prints one line. The default
-gate is `--fail-on critical`.
+`audit` runs the CPU checks, writes `report.html`, `report.json` and `report.sarif`, and prints one
+line: pass or fail, then the number of findings per severity.
 
 <!-- run -->
 ```console
@@ -113,8 +107,8 @@ $ datacopilot audit shop.dcp --no-hash-cache
 passed critical=0 warn=3 info=0 run_id=<uuid>
 ```
 
-Three warnings (the one-pixel box and two imbalance findings), nothing critical, so the command
-exits 0. Make warnings fail the run, as a stricter CI job would:
+There are three warnings (the one-pixel box and two imbalance findings) and nothing critical, so
+the exit code is 0. Make warnings fail the run, as a strict CI job would:
 
 <!-- run -->
 ```console
@@ -122,16 +116,15 @@ $ datacopilot audit shop.dcp --no-hash-cache --fail-on warn  # exit 1
 failed critical=0 warn=3 info=0 run_id=<uuid>
 ```
 
-`--no-hash-cache` is what a CI gate should use: the file-hash cache is an optimisation that a gate
-does not need (see [Audit in CI](guide/audit-ci.md)).
+`--no-hash-cache` is what CI should use; see [Audit in CI](guide/audit-ci.md).
 
-## 4. Find the leaked image with embeddings
+## 4. Find the copied picture
 
-The exact-duplicate check compares file bytes, so `v0.png` slips through. The embedding checks
-compare what the pictures look like. This tutorial uses the built-in `hash` embedder, a
-dependency-free test double that compares file bytes in a fuzzy way: it finds this planted copy,
-but it is not a model, so it is refused for a gate unless you say `--allow-test-embedder`. For real
-datasets use `--embedder dinov2_base` (extra `[embed]`, see [Embeddings](guide/embeddings.md)).
+The exact-duplicate check compares bytes, so `v0.png` slips through. The image-model checks compare
+what pictures look like. This tutorial uses `hash`, a built-in stand-in that needs no download. It
+finds this planted copy but is not a real model, so a gate refuses it unless you add
+`--allow-test-embedder`. For real data use `--embedder dinov2_base` (see
+[Embeddings](guide/embeddings.md)).
 
 <!-- run -->
 ```console
@@ -140,7 +133,7 @@ failed critical=2 warn=4 info=1 run_id=<uuid>
 warning: embedder 'hash' is a test double that compares file bytes, not pictures; its verdicts say nothing about look-alike images
 ```
 
-The warning goes to standard error. Read the machine-readable report to see which checks fired:
+The warning goes to standard error. Read `report.json` to see which checks fired:
 
 <!-- run -->
 ```python
@@ -161,15 +154,14 @@ near_duplicates CRITICAL
 outliers INFO
 ```
 
-`leakage` is CRITICAL because the near copy sits in a different split than the picture it copies:
-the validation score would be inflated. `label_noise` is a WARN that says it did not run: a shop
-this small has too few annotated images to compare a box with its neighbours, and a skipped check
-is reported, never counted as a pass.
+`leakage` is CRITICAL because the copy sits in a different split from its original. `label_noise` is
+a WARN that says it did not run: the shop is too small to compare a box with its neighbours. A
+skipped check is reported, never counted as a pass.
 
 ## 5. Convert and count the loss
 
-Export the dataset as YOLO. Every field YOLO cannot hold is counted and logged, never dropped
-silently; `--strict` turns any loss into a failure and writes nothing:
+Export as YOLO. Every value YOLO cannot hold is counted and logged. `--strict` turns any loss into a
+failure and writes nothing:
 
 <!-- run -->
 ```console
@@ -183,9 +175,8 @@ $ datacopilot export shop.dcp --format yolo -o shop_strict --strict  # exit 1
 error: conversion dcp -> yolo is lossy: annotations.source.id=15, categories.id=3, images.source.id=12
 ```
 
-The source COCO ids are not part of YOLO, so a strict export refuses. CVAT and Label Studio formats
-are written and read the same way. The CVAT file we just wrote reads back with `--strict`, which
-also fails if the reader had to skip anything (a polygon, a track):
+YOLO has no place for the original COCO ids, so a strict export refuses. Reading a file back with
+`--strict` also fails if the reader had to skip anything:
 
 <!-- run -->
 ```console
@@ -195,7 +186,8 @@ $ datacopilot ingest shop_cvat --format cvat_xml -o shop_cvat.dcp --strict
 <hex32>
 ```
 
-`datacopilot formats` lists every format and what it can do:
+`formats` lists every format and what it can do. [Formats](guide/formats.md) says what each pair
+loses.
 
 <!-- run -->
 ```console
@@ -208,12 +200,9 @@ voc read,write Apache-2.0 -
 yolo read,write Apache-2.0 -
 ```
 
-[Formats](guide/formats.md) lists, for each pair, exactly what is lost.
+## 6. The same from Python
 
-## 6. The same thing from Python
-
-The Python API has three functions, `load`, `audit` and `export`, over the same code as the commands
-(see [Python API](guide/python-api.md)). Logs are JSON on standard error, as on the command line.
+`load`, `audit` and `export` run the same code as the commands. See [Python API](guide/python-api.md).
 
 <!-- run -->
 ```python
@@ -236,29 +225,10 @@ False 3
 ['annotations.source.id', 'categories.id', 'images.source.id']
 ```
 
-## 7. Check the installation
+Run `datacopilot doctor` any time to check the installation.
 
-`doctor` reports versions, which extras are installed, the validated settings, the cache directory,
-FAISS and GPU visibility, and never prints a secret. `--json` gives the same report as one JSON
-object.
+## Next
 
-<!-- run -->
-```console
-$ datacopilot doctor
-ok
-package: datacopilot ... (dcp schema 1)
-python: ... on ...
-dependencies: ok (...)
-extras: ...
-settings: ok (...)
-cache: ...
-faiss: ...
-gpu: ...
-plugins: formats=6, checks=8, embedders=4
-```
-
-## Where to go next
-
-- [Audit in CI](guide/audit-ci.md): exit codes, reports, SARIF and a workflow example.
-- [Trust model](guide/trust-model.md): what DataCopilot does with files you do not control.
+- [Audit in CI](guide/audit-ci.md): exit codes, reports and a workflow example.
+- [Trust model](guide/trust-model.md): what happens with files you do not control.
 - [CLI reference](reference/cli.md): every command and option.
