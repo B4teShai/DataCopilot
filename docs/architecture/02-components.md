@@ -5,7 +5,9 @@
 *Each layer may import only the layers below it.*
 
 The import package is `datacopilot`. It has four layers, defined in
-[ADR-0004](../adr/0004-layering-and-dependency-rule.md). Imports point down only, and every layer may import the domain, which imports none of them.
+[ADR-0004](../adr/0004-layering-and-dependency-rule.md).
+
+Imports point down only. Every layer may import the domain, and the domain imports none of them.
 
 | Layer | Packages |
 |---|---|
@@ -60,20 +62,22 @@ def gate_failed(run: AuditRun, fail_on) -> bool   # True means exit code 1
 | `imbalance` | WARN, INFO | Class counts per split. |
 | `boxes` | CRITICAL, WARN | Box bounds, size, aspect, duplicates and class conflicts. |
 | `near_duplicates` | CRITICAL across splits, WARN within | Clusters of embeddings at cosine 0.95 or above. |
-| `leakage` | CRITICAL | Near copies across splits and `group_id` shared across splits. |
+| `leakage` | CRITICAL, plus an INFO note (`images_without_group`) | Near copies across splits and `group_id` shared across splits. |
 | `outliers` | INFO | Images far from their class. |
 | `label_noise` | INFO, plus WARN or CRITICAL for unscored boxes | Box crops whose neighbours disagree on the class. |
 
-The four embedding checks share one pipeline, `audit/embedding.py`. It takes verified cached vectors,
-re-embeds a sample to authenticate them, embeds the rest in batches, and fails closed: an image that
-cannot be embedded is a finding, not a pass. `audit/crops.py` does the same for box crops. A named
-check that is not part of the run is a usage error (exit 2).
+The four embedding checks share one pipeline, `audit/embedding.py` (`audit/crops.py` for box crops):
 
-Run rules: an empty dataset is refused. A plugin that raises anything but `KeyboardInterrupt` fails the
-audit instead of ending the process. Each check's output is re-validated and may only refer to rows of
-the audited dataset. Identical findings collapse to the most severe one, and each check is capped at
-50,000 findings with a truncation finding that keeps the gate's verdict. Image paths are classified in
-`audit/paths.py` and opened with `O_NOFOLLOW` inside the dataset root.
+- It uses verified cached vectors, re-embeds a sample to authenticate them, and embeds the rest in batches.
+- It fails closed: an image that cannot be embedded is a finding, not a pass.
+- Naming an embedding check without `--embedder` is a usage error (exit 2).
+
+Rules a contributor must keep:
+
+- A check may only refer to rows of the audited dataset. Its output is re-validated.
+- A plugin that raises anything but `KeyboardInterrupt` fails the audit; it never ends the process.
+- Open image paths only through `audit/paths.py` (inside the dataset root, `O_NOFOLLOW`).
+- Each check is capped at 50,000 findings, with a truncation finding that keeps the gate's verdict.
 
 **`splits/`** re-splits a dataset by group and writes a new version. Groups are the connected
 components of "same key" and, with near-duplicates, every pair found by `embed/knn.pairs_at_least`.

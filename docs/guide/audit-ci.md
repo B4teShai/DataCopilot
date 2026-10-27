@@ -26,9 +26,11 @@ passed|failed critical=N warn=N info=N run_id=ID
 The command exits 1 if any finding matches. The default is `critical`; `--fail-on none` applies no
 gate. Reports are written even when the gate fails.
 
-A gate that cannot examine the data fails instead of passing: an empty dataset, more than half of
-the images unreadable or outside the dataset folder, or a time or byte budget that ended a check
-early all count as findings.
+A gate that cannot examine the data fails instead of passing. These all count as findings:
+
+- an empty dataset;
+- more than half of the images unreadable or outside the dataset folder;
+- a time or byte budget that ended a check early.
 
 Exit codes: `0` passed (or no gate); `1` a match, an empty or unreadable dataset, or an embedder
 that is not allowed or fails; `2` a usage or configuration error.

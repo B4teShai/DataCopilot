@@ -12,14 +12,8 @@ value may be null. Terms are in the [glossary](../guide/concepts.md).
 
 ### Category
 
-Table `categories.parquet`. Key: `id`. `name` is unique.
-
-| Field | Type | Meaning |
-|---|---|---|
-| `id` | int | Category id; source ids are kept where the source has them. |
-| `name` | str | Display name. |
-| `aliases` | list[str] | Synonyms; also used as text prompts for proposers. |
-| `attributes` | dict[str, str] | Free metadata. |
+Table `categories.parquet`. Key `id` (source ids are kept where the source has them). Fields: `name`
+(unique), `aliases` (synonyms, also used as text prompts for proposers) and free `attributes`.
 
 ### Image
 
@@ -51,81 +45,54 @@ Table `annotations.parquet`. Key: `ann_id`. Foreign keys: `image_id`, `category_
 
 ### DatasetManifest
 
-File `manifest.json`, with an immutable copy under `versions/<version>/`. Key: `version`.
+File `manifest.json`, with an immutable copy under `versions/<version>/`. Key `version`.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `version` | str (32 hex) | Content hash of the three tables. CV-Pilot records it. |
-| `schema_version` | int | Table schema generation, starting at 1. |
-| `name`, `task` | str, `detection` or `classification` | `task` decides which checks apply. |
-| `categories` | list[Category] | Copy for readers without Parquet. |
-| `lineage` | list[str] | Parent versions, oldest first. |
-| `image_count`, `annotation_count` | int | Must equal the table rows; checked on read. |
-| `created_at` | datetime (UTC) | Not part of the hash. |
+- `version` (32 hex) is the content hash of the three tables. CV-Pilot records it.
+- `schema_version` is the table schema generation, starting at 1.
+- `name` and `task` (`detection` or `classification`; `task` decides which checks apply).
+- `categories` is a copy for readers without Parquet.
+- `lineage` lists parent versions, oldest first.
+- `image_count` and `annotation_count` must equal the table rows; they are checked on read.
+- `created_at` is not part of the hash.
 
 ### ProposalSet and Proposal
 
-File `proposals/<set_id>.json`. A set is content-addressed: `set_id` is the first 32 hex digits of the
-SHA-256 of the canonical JSON of every other field, recomputed on build and on read, so an edited file
-no longer matches its name. Reads are bounded at 128 MiB and 200,000 proposals.
+File `proposals/<set_id>.json`, read with a bound of 128 MiB and 200,000 proposals. A set is
+content-addressed: `set_id` is the first 32 hex digits of the SHA-256 of every other field, recomputed
+on build and on read, so an edited file no longer matches its name.
 
 | ProposalSet field | Meaning |
 |---|---|
-| `set_id` | Digest of the rest of the document; also the file name. |
-| `dataset_version` | The version the run read. `apply` refuses another. |
-| `proposer`, `model_id`, `model_revision`, `weights` | Which model, pinned revision and file hashes made it. |
-| `prompt_hash` | SHA-256 of the sorted phrases the model was asked about. |
+| `set_id`, `dataset_version` | The digest, and the version the run read. `apply` refuses another version. |
+| `proposer`, `model_id`, `model_revision`, `weights`, `prompt_hash` | Which pinned model and prompts made it. |
 | `min_score`, `class_min_score`, `overlap_iou` | Thresholds used. |
 | `images_total`, `images_done`, `incomplete_reason` | Set when a run did not reach every image. |
 | `rejected` | Dropped candidates, counted by reason. |
-| `parent_set_id` | The set a review was derived from. `apply` requires it. |
-| `test_only` | The proposer is a test double. `apply` refuses it unless asked. |
+| `parent_set_id`, `test_only` | The set a review came from (`apply` requires it), and the test-double flag. |
 | `proposals` | The proposals, in canonical order. |
 
-| Proposal field | Meaning |
-|---|---|
-| `proposal_id` | Unique in its set. |
-| `kind` | Always `add_box`. |
-| `image_id`, `category_id` | Where the box was found and its class. |
-| `bbox_xyxy_abs` | Pixel box. After a review, the reviewer's box. |
-| `score` | Model confidence, above 0 and at most 1, rounded to 4 decimals. |
-| `prompt` | The class name or alias the model was asked about. |
-| `status` | `pending`, `accepted` or `rejected`. `review import` writes a new set. |
-| `edited` | The reviewer moved the box before accepting it. |
+A `Proposal` has `proposal_id`, `kind` (always `add_box`), `image_id`, `category_id`, a pixel box
+`bbox_xyxy_abs`, `score` (above 0, at most 1, 4 decimals), the `prompt` it answers, a `status`
+(`pending`, `accepted`, `rejected`; `review import` writes a new set) and `edited` (the reviewer moved
+the box).
 
 ### AuditRun and Finding
 
-File `audits/<run_id>.json`. `run_id` equals the `request_id` of the command. Findings are embedded.
+File `audits/<run_id>.json`. `run_id` equals the `request_id` of the command, and findings are embedded.
 
-| AuditRun field | Meaning |
-|---|---|
-| `run_id`, `dataset_version`, `started_at` | Identity of the run and the version audited. |
-| `checks`, `embedder` | What ran. |
-| `counts` | Findings per severity. |
-| `passed`, `fail_on` | The verdict and the gate that produced it. |
-| `timings_ms`, `summary` | Wall time per check; totals and per-split class counts. |
-
-| Finding field | Meaning |
-|---|---|
-| `finding_id` | `sha256` of check, image, annotation and payload, cut to 16 hex. Reruns dedupe. |
-| `check`, `severity` | Check name and `CRITICAL`, `WARN` or `INFO`. |
-| `image_id`, `ann_id` | The row concerned, if any. |
-| `payload` | Check-specific data, bounded to 64 KiB of JSON, depth 6, finite numbers. |
-
-### SplitReport
-
-Returned by `dc.split` and written by `split --json`. It is not stored in the dataset. It records the
-parent and new version, seed, ratios, group counts, `groups_across_splits` (0 when written), and the
-deviation from the target per split and per class.
+- **AuditRun:** `run_id`, `dataset_version`, `started_at`, `checks`, `embedder`, `counts` (findings per
+  severity), `passed` and `fail_on` (the verdict and its gate), `timings_ms` and `summary`.
+- **Finding:** `finding_id` (a hash of check, image, annotation and payload, so reruns dedupe), `check`,
+  `severity` (`CRITICAL`, `WARN`, `INFO`), optional `image_id` and `ann_id`, and a `payload` bounded to
+  64 KiB of JSON, depth 6, finite numbers.
 
 ### Embedding
 
-Cache folder `embeddings/<model_id>@<model_revision>/` with a `manifest.json` and `shard-<32 hex>.parquet`
-files ([ADR-0007](../adr/0007-embedding-cache-and-index.md)). A shard row has `image_id`, `vector`
-(L2-normalised, float16 or float32) and `content_sha256` (the digest of the image bytes it came from).
-The manifest names the model, dimensions, preprocessing version and dataset version, lists the shards
-with their digests, and carries an HMAC over everything. Box-crop vectors for `label_noise` use the same
-format in `...@<revision>+<variant>/`, where the variant names the crop geometry.
+Cache folder `embeddings/<model_id>@<model_revision>/` with a `manifest.json` and
+`shard-<32 hex>.parquet` files ([ADR-0007](../adr/0007-embedding-cache-and-index.md)). A shard row has
+`image_id`, an L2-normalised `vector` and `content_sha256`. The manifest names the model, preprocessing
+and dataset version, lists shard digests and carries an HMAC. Box-crop vectors use the same format in
+`...@<revision>+<variant>/`, where the variant names the crop geometry.
 
 ## Relations
 
@@ -187,16 +154,13 @@ dataset.dcp/
 
 - A new version is written to `versions/<version>.tmp-<uuid>/`, fsynced, renamed, and only then are
   the top-level tables and `manifest.json` replaced by rename. Readers ignore `*.tmp-*` folders.
-- `bbox_xyxy_abs` is `list<float64>` of length 4. `source` and `attributes` are `map<string,string>`
-  holding canonical JSON text, so numbers and booleans survive. Rows are sorted by key, so output is
-  byte-deterministic.
+- `source` and `attributes` are `map<string,string>` holding canonical JSON text, so numbers and
+  booleans survive. Rows are sorted by key, so output is byte-deterministic.
 - Images are never inside `dataset.dcp/`. `file_path` may be relative to the folder's parent, absolute
   or a URI.
-- Reads are bounded. A table is rejected before decoding if its file exceeds 1 GiB, its rows exceed
-  `DATACOPILOT_MAX_TABLE_ROWS` (5,000,000), its uncompressed size exceeds `DATACOPILOT_MAX_TABLE_BYTES`
-  (4 GiB), or its schema differs from the expected one.
+- Reads are bounded: a table over 1 GiB, over the row or byte limits in
+  [Settings](../reference/settings.md), or with another schema is rejected before decoding.
 - Embeddings, audits and proposals are not part of the version and are not copied into `versions/`.
-  Embeddings are still bound to the dataset version they were computed for.
 - Two audits of the same dataset and options give byte-identical JSON, SARIF and HTML after the
   run-specific content is replaced: `started_at`, `timings_ms` and the run id.
   `tests/golden/test_audit_golden.py` checks this with different run ids and worker counts.
@@ -215,13 +179,11 @@ What changes the version: any field value in the three tables except `file_path`
 category rename, `schema_version`. What does not: row order, file locations, `created_at`, `name`,
 embeddings, audits, proposals, lineage.
 
-**Schema version.** It starts at 1. Adding a nullable column with a default does not bump it.
-Removing or retyping a column, or changing the hash procedure, does. A store with a higher
-`schema_version` than the installed package is refused with exit code 1 and a message naming the
-package version needed. `schema_version` 1 is the only generation so far, so there is no migration.
+**Schema version.** It starts at 1. Adding a nullable column does not bump it; removing or retyping a
+column, or changing the hash procedure, does. A store with a higher `schema_version` than the installed
+package is refused (exit 1). There is no migration yet because 1 is the only generation.
 
-**Promise.** For a given input, `manifest.version` is stable within a `schema_version`, so CV-Pilot
-and users can compare versions across releases.
+**Promise.** For a given input, `manifest.version` is stable within a `schema_version`.
 
 ## Format mapping and loss matrix
 
@@ -240,11 +202,9 @@ Rules shared by every reader and writer:
 - COCO `bbox` and VOC `bndbox` are taken as given. YOLO coordinates are normalised and written with 7
   decimals. Boxes outside the image are an error, except YOLO overshoot of up to 0.001 pixel, which is
   snapped.
-- Splits come from COCO file names, YOLO `images/<split>/`, VOC `ImageSets/Main/<split>.txt` and
-  ImageFolder top-level folders. Only COCO holds `group_id`; other formats count it as dropped.
+- Only COCO holds `group_id`; other formats count it as dropped.
 - YOLO, VOC and ImageFolder re-number category ids; a changed id is counted in `categories.id`.
-- `ingest --strict` fails if a reader dropped or skipped anything, before writing anything. Report
-  columns are bounded names, and a report holds at most 200 distinct columns.
+- `ingest --strict` fails if a reader dropped or skipped anything, before writing anything.
 
 How CVAT and Label Studio are read is in [Formats](../guide/formats.md).
 
@@ -262,18 +222,15 @@ conversions drop nothing, and ingest, export, ingest is a fixed point.
 
 The counts come from these columns:
 
-- **From COCO:** `annotations.is_crowd` 1; `annotations.source.{area,id,segmentation}` 4 each;
-  `categories.attributes` 3; `categories.id` 3; `images.source.{date_captured,id,license}` 4 each.
-  Into Label Studio, `categories.id` is 1 instead of 3.
-- **From YOLO:** only `categories.id` 3, and only into Label Studio.
-- **From VOC:** `annotations.attributes` 4; `annotations.source.pose` 4; `annotations.truncated` 4;
-  `images.source.{depth,folder,segmented}` 4 each. Into CVAT XML, `annotations.attributes_stringified`
-  4 replaces `annotations.attributes`. Into Label Studio, add `categories.id` 3.
-- **From CVAT XML:** `annotations.attributes` 1; `annotations.occluded` 4; `annotations.source.z_order`
-  4; `categories.attributes` 3; `images.source.id` 4. Into VOC, `annotations.occluded` is kept (12 in all). Into
-  Label Studio, add `categories.id` 3.
-- **From Label Studio:** `annotations.source.{from_name,id,to_name}` 4 each;
-  `images.source.{annotation,id}` 4 each.
+- **COCO:** `annotations.is_crowd` and `categories.attributes`/`id`, plus the source keys `area`,
+  `id`, `segmentation`, `date_captured` and `license`. Into Label Studio, `categories.id` is 1 not 3.
+- **VOC:** `annotations.attributes`, `truncated` and the source keys `pose`, `depth`, `folder`,
+  `segmented`. Into CVAT XML, `attributes_stringified` replaces `attributes`.
+- **CVAT XML:** `annotations.attributes`, `occluded` (kept by VOC) and `z_order`,
+  `categories.attributes`, and the source `id`.
+- **Label Studio:** the source keys `from_name`, `id`, `to_name` and `annotation`.
+- **YOLO:** nothing, except `categories.id` into Label Studio.
+- Label Studio as a target adds `categories.id` 3 for VOC and CVAT XML sources.
 
 ImageFolder to ImageFolder drops nothing. ImageFolder to or from COCO, YOLO, VOC and CVAT XML is
 refused; Label Studio holds both tasks, so ImageFolder to Label Studio converts. YOLO into COCO, VOC or

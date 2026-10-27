@@ -56,9 +56,13 @@ Moving a box first makes it an edited proposal. Deleting a box decides nothing.
 
 `review import` reads the decisions and stores a **new** set that names the reviewed one as its
 parent. Your own boxes in the file are ignored and counted: a review never edits a label. The whole
-file is refused if it names an unknown, repeated or foreign proposal, changes a class, uses another
-decision word, moves an accepted box outside its image, lists an image missing from the folder,
-holds a rotated box, or decides nothing.
+file is refused if it:
+
+- names an unknown, repeated or foreign proposal;
+- changes a class or uses another decision word;
+- moves an accepted box outside its image, or holds a rotated box;
+- lists an image missing from the folder;
+- decides nothing.
 
 ## What `apply` refuses
 
