@@ -34,6 +34,8 @@ Out of scope:
 
 ![DataCopilot and the people and tools around it](../diagrams/png/context.png)
 
+*DataCopilot talks to you, your files, CI, CVAT, the model hub and CV-Pilot.*
+
 | Outside party | How it talks to DataCopilot |
 |---|---|
 | CV engineer | Runs `datacopilot ...` or `import datacopilot`. |

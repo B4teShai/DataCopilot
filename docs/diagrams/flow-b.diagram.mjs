@@ -1,43 +1,30 @@
-// Flow B: propose -> review export -> apply (new dataset version with lineage).
-import { sequence } from "../../../tools/diagrams/lib/sequence.mjs";
-import { note } from "../../../tools/diagrams/lib/scene.mjs";
-import { c4Legend } from "../../../tools/diagrams/lib/c4.mjs";
+// Flow B: propose, review, apply. A person decides; the old version is never changed.
+import { arrow, box, heading, note, COLORS } from "../../../tools/diagrams/lib/scene.mjs";
 
-const steps = [
-  { from: "user", to: "cli", text: "propose --proposer missing_boxes" },
-  { from: "cli", to: "propose", text: "run(proposer, models, consensus)" },
-  { from: "propose", to: "store", text: "load images, annotations, embeddings" },
-  { from: "propose", to: "runtime", text: "infer(model_id, prompts)" },
-  { from: "runtime", to: "runtime", text: "license guard; record weight + prompt hash" },
-  { from: "runtime", to: "propose", text: "candidates + evidence crops", kind: "return" },
-  { from: "propose", to: "propose", text: "consensus gate: IoU >= 0.7, agreement >= 2" },
-  { from: "propose", to: "store", text: "write proposals/<set_id>.parquet" },
-  { divider: "review" },
-  { from: "cli", to: "tool", text: "review --to cvat: push proposals as a layer" },
-  { from: "tool", to: "cli", text: "decisions: status, reviewer_id", kind: "return" },
-  { divider: "apply" },
-  { from: "cli", to: "propose", text: "apply --accepted-only" },
-  { from: "propose", to: "store", text: "write new version; append lineage" },
-  { note: "existing rows are never mutated; manifest.version is recomputed", at: "store" },
-  { from: "store", to: "cli", text: "new manifest.version", kind: "return" },
-];
-const totalH = 80 + 64 + 30 + steps.length * 64 + 40;
+const F = { fontSize: 18 };
+const x = (c) => 40 + c * 380;
+const y = (r) => 90 + r * 190;
+const B = (id, c, r, text, bg) => box(id, x(c), y(r), 260, 90, text, bg, F);
+const dcp = B("dcp", 0, 0, "dataset.dcp/\nyour dataset", COLORS.store);
+const propose = B("propose", 1, 0, "propose\nmodel finds boxes", COLORS.core);
+const set = B("set", 2, 0, "Proposal set\nstored in the .dcp", COLORS.store);
+const exportR = B("export", 2, 1, "review export\nCVAT files", COLORS.core);
+const person = B("person", 1, 1, "Reviewer\naccepts or rejects", COLORS.agent);
+const importR = B("import", 0, 1, "review import\nnew proposal set", COLORS.core);
+const apply = B("apply", 0, 2, "apply\naccepted boxes only", COLORS.core);
+const out = B("out", 1, 2, "New dataset\nold one unchanged", COLORS.built);
 
 export default {
   elements: [
-    sequence({
-      title: "Flow B: propose -> review -> apply",
-      actors: [
-        { id: "user", label: "CV engineer", kind: "person" },
-        { id: "cli", label: "cli/ (ingest, export built)" },
-        { id: "propose", label: "propose/ + patch/" },
-        { id: "runtime", label: "model runtime (extras)" },
-        { id: "store", label: "dataset.dcp/", kind: "store" },
-        { id: "tool", label: "CVAT / FiftyOne", kind: "external" },
-      ],
-      steps,
-    }),
-    c4Legend(40, totalH + 20),
-    note("n1", "Planned flow. Logged events: proposal_set_written, review_exported, review_imported, proposals_applied, command_failed.", 40, totalH + 60, 14),
+    heading("t", "Flow B: propose, review, apply", 40, 20),
+    dcp, propose, set, exportR, person, importR, apply, out,
+    arrow(dcp, propose, "reads", F),
+    arrow(propose, set, "writes", F),
+    arrow(set, exportR, "exports", F),
+    arrow(exportR, person, "opens", F),
+    arrow(person, importR, "decisions", F),
+    arrow(importR, apply, "reviewed set", F),
+    arrow(apply, out, "writes", F),
+    note("cap", "Nothing changes until a person accepts a box. Only missing boxes are proposed.", 40, 610, 18),
   ],
 };

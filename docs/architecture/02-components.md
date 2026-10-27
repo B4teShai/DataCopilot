@@ -2,15 +2,17 @@
 
 ![The four layers of DataCopilot and the dependency rule](../diagrams/png/components.png)
 
+*Each layer may import only the layers below it.*
+
 The import package is `datacopilot`. It has four layers, defined in
-[ADR-0004](../adr/0004-layering-and-dependency-rule.md). Imports point down only.
+[ADR-0004](../adr/0004-layering-and-dependency-rule.md). Imports point down only, and every layer may import the domain, which imports none of them.
 
 | Layer | Packages |
 |---|---|
 | Interface | `cli/`, `api.py` |
 | Application | `convert.py`, `audit/`, `proposals/`, `splits/`, `report/`, `doctor.py` |
-| Domain | `core/` (`schema.py`, `version.py`, `geometry.py`, `proposals.py`, `patterns.py`, `errors.py`) |
 | Infrastructure | `io/`, `store/`, `embed/`, `models/`, `proposers/` |
+| Domain | `core/` (`schema.py`, `version.py`, `geometry.py`, `proposals.py`, `patterns.py`, `errors.py`) |
 | Beside the layers | `logging.py`, `settings.py`, `deprecation.py` |
 
 ## Interface

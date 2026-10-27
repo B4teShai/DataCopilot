@@ -16,6 +16,8 @@ the dataset is fit to train on.
 
 ![Flow A: ingest, audit, report, exit code](../diagrams/png/flow-a.png)
 
+*A dataset is ingested once, then exported or audited.*
+
 1. `datacopilot ingest ./export --format coco -o ds.dcp` checks options (the output must end in
    `.dcp`) and loads settings. A bad option or `DATACOPILOT_*` value is exit 2.
 2. `convert.ingest` finds the reader by name in the `io/` registry. The reader yields rows, keeps
@@ -65,6 +67,8 @@ as a new dataset version with provenance and lineage.
 who can open CVAT for images 1.1 files.
 
 ![Flow B: propose, review, apply](../diagrams/png/flow-b.png)
+
+*A person decides in CVAT, and apply writes a new dataset.*
 
 1. `datacopilot propose ds.dcp` (options `--classes`, `--min-score`, `--min-score-for`,
    `--time-budget`). The proposer and its license are resolved before the dataset is read. Prompts come

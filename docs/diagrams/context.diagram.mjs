@@ -1,45 +1,26 @@
-// C4 level 1: DataCopilot in its environment.
-import { grid, actor, arrow, heading, note } from "../../../tools/diagrams/lib/scene.mjs";
-import { system, external, c4Legend } from "../../../tools/diagrams/lib/c4.mjs";
+// DataCopilot and the people and tools around it.
+import { arrow, box, heading, note, COLORS } from "../../../tools/diagrams/lib/scene.mjs";
 
-const g = grid({ x: 40, y: 110, colW: 250, rowH: 100, gapX: 200, gapY: 50 });
-const at = (c, r) => g(c, r);
-
-// Row 0: people and the model hub.
-const engineer = actor("engineer", at(0, 0).x, at(0, 0).y, "CV engineer", 250);
-const hub = external("hub", at(1, 0).x, at(1, 0).y, 250, 100, "Hugging Face Hub", "gated SAM 3 / DINOv3 repos, HTTPS");
-const reviewer = actor("reviewer", at(2, 0).x, at(2, 0).y, "Label reviewer", 250);
-
-// Rows 1-2: the system in the middle, two rows tall.
-const s = at(1, 1);
-const sys = system("sys", s.x, s.y, s.w, s.h * 2 + 50, "DataCopilot", "CLI + Python library: ingest, audit, propose, convert");
-
-// Left column.
-const exports_ = external("exports", at(0, 1).x, at(0, 1).y, 250, 100, "Raw dataset exports", "COCO, YOLO, VOC, CVAT XML, Label Studio, ImageFolder");
-const ci = external("ci", at(0, 2).x, at(0, 2).y, 250, 100, "CI runner", "GitHub Actions or similar");
-const cvpilot = external("cvpilot", at(0, 3).x, at(0, 3).y, 250, 100, "CV-Pilot", "sibling project: training run companion");
-
-// Right column.
-const tools = external("tools", at(2, 1).x, at(2, 1).y, 250, 100, "Annotation tools", "CVAT, FiftyOne, X-AnyLabeling");
-const vllm = external("vllm", at(2, 2).x, at(2, 2).y, 250, 100, "vLLM endpoint", "Qwen3-VL, OpenAI-style HTTP");
-
-// Bottom.
-const objstore = external("objstore", at(1, 3).x, at(1, 3).y, 250, 100, "Object storage", "S3 / GCS / Azure via fsspec");
+const F = { fontSize: 18 };
+const side = { fontSize: 18 };
+const engineer = box("eng", 40, 90, 240, 90, "CV engineer\nruns commands", COLORS.agent, side);
+const files = box("files", 40, 250, 240, 110, "Dataset files\nCOCO, YOLO, VOC, CVAT,\nLabel Studio", COLORS.external, side);
+const ci = box("ci", 40, 430, 240, 90, "CI runner\npass or fail", COLORS.external, side);
+const dc = box("dc", 410, 160, 180, 280, "DataCopilot\ncommand line\nand Python\nlibrary", COLORS.core, { fontSize: 20, strokeWidth: 2 });
+const cvat = box("cvat", 720, 90, 240, 90, "CVAT\nreviewer decides", COLORS.external, side);
+const hub = box("hub", 720, 250, 240, 110, "Hugging Face Hub\nmodel weights", COLORS.external, side);
+const pilot = box("pilot", 720, 430, 240, 90, "CV-Pilot\ntracks training runs", COLORS.external, side);
 
 export default {
   elements: [
-    heading("t", "DataCopilot: system context (C4 L1)", 40, 20),
-    engineer, hub, reviewer, sys, exports_, ci, cvpilot, tools, vllm, objstore,
-    arrow(engineer[0], sys, "runs CLI / imports API"),
-    arrow(reviewer[0], tools, "accepts / rejects"),
-    arrow(sys, hub, "downloads weights"),
-    arrow(sys, exports_, "reads, writes files"),
-    arrow(ci, sys, "gate: exit code, SARIF"),
-    arrow(cvpilot, sys, "reads manifest.version"),
-    arrow(sys, tools, "proposals / decisions"),
-    arrow(sys, vllm, "HTTP class check"),
-    arrow(sys, objstore, "image bytes by URI"),
-    c4Legend(40, 720),
-    note("n1", "Arrows point from caller to callee and name the artifact or protocol.", 40, 760),
+    heading("t", "DataCopilot and its surroundings", 40, 20),
+    engineer, files, ci, dc, cvat, hub, pilot,
+    arrow(engineer, dc, "runs", F),
+    arrow(files, dc, "files", F),
+    arrow(dc, ci, "exit code", F),
+    arrow(dc, cvat, "review", F),
+    arrow(dc, hub, "weights", F),
+    arrow(pilot, dc, "version", F),
+    note("cap", "Orange boxes are outside tools. Arrows point from caller to callee.", 40, 570, 18),
   ],
 };

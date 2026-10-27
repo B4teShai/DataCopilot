@@ -2,6 +2,8 @@
 
 ![The stored entities and how they relate](../diagrams/png/data-model.png)
 
+*A manifest owns its images and categories; audits, proposals and embeddings point back at them.*
+
 Models are Pydantic v2 classes in `core/schema.py` and `core/proposals.py`. Tables are Parquet files
 with explicit Arrow schemas ([ADR-0006](../adr/0006-dataset-format.md)). A `?` after a type means the
 value may be null. Terms are in the [glossary](../guide/concepts.md).
