@@ -4,9 +4,9 @@ DataCopilot checks computer-vision datasets (object detection and classification
 before you train on them. It converts between COCO, YOLO, Pascal VOC, CVAT and Label Studio, audits
 a dataset, can fail your CI build, and can propose boxes your labels missed for a person to review.
 
-![DataCopilot reads your dataset, converts and audits it, and gives you a clean dataset and a pass or fail for CI](diagrams/png/overview.png)
+![DataCopilot reads your dataset, converts and audits it, and gives you a checked dataset or a corrected copy, and a pass or fail for CI](diagrams/png/overview.png)
 
-*A dataset goes in; a clean dataset and a pass or fail come out.*
+*A dataset goes in; a checked dataset or a corrected copy, and a pass or fail, come out.*
 
 ## Start here
 

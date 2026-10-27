@@ -1,10 +1,10 @@
 # How DataCopilot is built
 
-DataCopilot reads a dataset, converts and audits it, and gives you a clean dataset and a pass or
-fail. This section is for people who will change the code. Read [Concepts](../guide/concepts.md)
+DataCopilot reads a dataset, converts and audits it, and gives you a checked dataset or a corrected
+copy, and a pass or fail. This section is for people who will change the code. Read [Concepts](../guide/concepts.md)
 first if a term is new, and [Status](../status.md) to see what runs today.
 
-![DataCopilot reads your dataset, converts and audits it, and gives you a clean dataset and a pass or fail for CI](../diagrams/png/overview.png)
+![DataCopilot reads your dataset, converts and audits it, and gives you a checked dataset or a corrected copy, and a pass or fail for CI](../diagrams/png/overview.png)
 
 - You give it a dataset in COCO, YOLO, Pascal VOC, CVAT or Label Studio format.
 - It reads the dataset into one internal format, a `dataset.dcp/` folder.

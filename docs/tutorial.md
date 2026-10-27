@@ -8,6 +8,11 @@ Every command on this page is run by the test suite, and its output is checked a
 shown. Values that change from run to run are written `<uuid>`, `<hex32>` or `...`. Unfamiliar word?
 See [Concepts](guide/concepts.md).
 
+Results go to standard output. DataCopilot also writes JSON log lines to standard error, one per
+event at level INFO by default. Add `2>/dev/null` to hide them, or set `DATACOPILOT_LOG_LEVEL=WARNING`.
+A failed command, such as the `--strict` export in step 5, logs its error there too, with a traceback.
+That is the normal error log, not a crash.
+
 ## 1. Generate the dataset
 
 The script writes twelve tiny pictures and a COCO annotation file per split into `shop/`. The
@@ -99,7 +104,8 @@ $ datacopilot ingest shop --format coco -o shop.dcp
 ## 3. Audit
 
 `audit` runs the CPU checks, writes `report.html`, `report.json` and `report.sarif`, and prints one
-line: pass or fail, then the number of findings per severity.
+line: pass or fail, then the number of findings per severity. `--no-hash-cache` skips the cache of
+file hashes that speeds up repeated audits. A clean run, and CI, should not use it.
 
 <!-- run -->
 ```console
@@ -116,7 +122,7 @@ $ datacopilot audit shop.dcp --no-hash-cache --fail-on warn  # exit 1
 failed critical=0 warn=3 info=0 run_id=<uuid>
 ```
 
-`--no-hash-cache` is what CI should use; see [Audit in CI](guide/audit-ci.md).
+See [Audit in CI](guide/audit-ci.md) for the CI settings.
 
 ## 4. Find the copied picture
 
@@ -124,7 +130,8 @@ The exact-duplicate check compares bytes, so `v0.png` slips through. The image-m
 what pictures look like. This tutorial uses `hash`, a built-in stand-in that needs no download. It
 finds this planted copy but is not a real model, so a gate refuses it unless you add
 `--allow-test-embedder`. For real data use `--embedder dinov2_base` (see
-[Embeddings](guide/embeddings.md)).
+[Embeddings](guide/embeddings.md)). `--fail-on leakage` names a check, not a severity: the run fails
+if that check reports anything.
 
 <!-- run -->
 ```console

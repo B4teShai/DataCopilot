@@ -16,7 +16,7 @@ Every term DataCopilot uses is defined once, here. Other pages link to this tabl
 | near-duplicate | An image that looks almost the same as another, although the files differ. |
 | embedder | An image model that turns a picture into a list of numbers (an embedding). Similar pictures get similar numbers. Needs the `embed` extra. |
 | extra | An optional install group: `embed` (image models) or `vlm` (the box-proposing model). |
-| nearest-neighbour search | Finding the images with the closest embeddings (kNN). Done exactly in NumPy; the FAISS library helps on large sets. |
+| nearest-neighbour search | Finding the images with the closest embeddings (kNN). Exact NumPy search is the default; the optional FAISS library only speeds up large sets. |
 | audit | A run of checks over a dataset. Each check reports findings. |
 | finding | One problem a check found, with a severity: `CRITICAL`, `WARN` or `INFO`. |
 | gate | The rule that turns findings into exit code 1, set with `--fail-on`. Use it to fail a CI build. |
@@ -31,11 +31,12 @@ Every term DataCopilot uses is defined once, here. Other pages link to this tabl
 
 ## Identity and version
 
-- `image_id` follows the bytes. Two files with identical bytes cannot be ingested together; a
-  near copy is found by an embedder check instead (see the [tutorial](../tutorial.md)).
-- The version hashes the three tables, not the file paths. It also covers where each row came from,
-  so a COCO copy of a YOLO dataset has another version although the boxes are the same. Record it
-  next to a training run to reproduce the run.
+- `image_id` follows the bytes, not the file name.
+- Two files with identical bytes cannot be ingested together.
+- A near copy is found by an embedder check instead (see the [tutorial](../tutorial.md)).
+- The version hashes the three tables, not the file paths.
+- It also covers where each row came from. A COCO copy of a YOLO dataset has another version.
+- Record the version next to a training run to reproduce the run.
 
 ## Conversion reports
 
@@ -58,10 +59,8 @@ run = cvpilot.init("shop", task="detection", dataset_uri="shop.dcp")
 # dataset_hash: dcp:9e96d9fb67b1d64fafe14c25ccdb43f0   (what `datacopilot ingest` printed)
 ```
 
-CV-Pilot reads only the top-level `version` field of `shop.dcp/manifest.json`. For any other
-folder it records `merkle:<hex>` over file names, sizes and modification times. Neither package
-imports the other. A new version (`apply`, or another `ingest`) is a new folder or a new
-`manifest.json`: point the next run at it.
+CV-Pilot reads only the top-level `version` field of `shop.dcp/manifest.json`; neither package
+imports the other. A new version (`apply`, or another `ingest`) is a new folder, so point the next run at it.
 
 ## Exit codes
 

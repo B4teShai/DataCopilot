@@ -5,20 +5,20 @@ DataCopilot finds and fixes mistakes in computer-vision datasets (object detecti
 ## What is it?
 
 A command-line tool and Python library for people who train detection or classification models.
-Point it at a dataset folder and it reports what is wrong: broken or tiny boxes, files that are
-missing, classes with almost no examples, and the same picture in both train and test (which makes
-your test score look better than it is).
+Point it at a dataset folder and it reports broken or tiny boxes, missing files, classes with almost
+no examples, and the same picture in both train and test (which makes your test score look better
+than it is).
 
-It also converts between COCO, YOLO, Pascal VOC, CVAT and Label Studio, and tells you what a
-conversion could not carry. It can make your CI build fail when a dataset is bad.
+It also converts between COCO, YOLO, Pascal VOC, CVAT, Label Studio and ImageFolder, and tells you
+what a conversion could not carry. It can fail your CI build when a dataset is bad.
 
 It can propose a fix for one kind of mistake: boxes your labels missed. A person reviews every
 proposal before anything changes. All other mistakes it reports, and you fix them.
-It runs on your machine, with no server and no GPU for the core.
+It runs on your machine, with no server. The core install (no extras) needs no GPU.
 
-![DataCopilot reads your dataset, converts and audits it, and gives you a clean dataset and a pass or fail for CI](https://raw.githubusercontent.com/B4teShai/DataCopilot/main/docs/diagrams/png/overview.png)
+![DataCopilot reads your dataset, converts and audits it, and gives you a checked dataset or a corrected copy, and a pass or fail for CI](https://raw.githubusercontent.com/B4teShai/DataCopilot/main/docs/diagrams/png/overview.png)
 
-*A dataset goes in; a clean dataset and a pass or fail come out.*
+*A dataset goes in; a checked dataset or a corrected copy, and a pass or fail, come out.*
 
 ## Quick start
 
@@ -31,12 +31,12 @@ uv sync && source .venv/bin/activate    # or: python3 -m venv .venv && source .v
 
 > **Release status:** not yet published to PyPI, so `pip install datacopilot` does not work; install from a clone as above.
 
-To use it in your own project, pin a commit you have reviewed (a bare URL follows the default branch):
+In your own project, pin a commit you have reviewed:
 `uv add "git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"` or
 `pip install "datacopilot @ git+https://github.com/B4teShai/DataCopilot@<full-commit-sha>"`.
-Optional image models: `uv sync --extra embed` or `pip install -e ".[embed]"`.
+Optional features are installed as extras. Image models need `embed`: `uv sync --extra embed` or `pip install -e ".[embed]"`.
 
-The [tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md) generates a small demo dataset, `shop/`, with planted mistakes. Then:
+Step 1 of the [tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md) has a script that creates a demo dataset, `shop/`, with planted mistakes. Run it in an empty folder first, then:
 
 ```console
 $ datacopilot ingest shop --format coco -o shop.dcp          # read a COCO dataset
@@ -57,16 +57,16 @@ and the findings per severity.
 - Convert formats: `datacopilot ingest`, then `export`.
 - Check a dataset: `datacopilot audit` finds broken boxes, missing files and class imbalance.
 - Fail a CI build: `--fail-on warn` turns findings into a non-zero exit code.
-- Find look-alike images with an image model: `datacopilot audit --embedder dinov2_small`
-  (needs the `embed` extra). This catches copies in both train and test.
-- Re-split without copies across sides: `datacopilot split`.
-- Find boxes your labels missed: `datacopilot propose`, review them in CVAT, then `datacopilot apply`
-  (needs the `vlm` extra).
+- Find look-alike images with an image model: `datacopilot audit --embedder dinov2_base`
+  (needs `embed`).
+- Re-split so copies stay on one side: `datacopilot split`.
+- Find boxes your labels missed: `datacopilot propose`, review them in CVAT, then `datacopilot apply`.
+  Needs the `vlm` extra; precision is low, see [status](https://github.com/B4teShai/DataCopilot/blob/main/docs/status.md).
 - Use it from Python: `dc.load`, `dc.audit`, `dc.export`, `dc.split`, `dc.propose` and `dc.apply`.
 
 ## Learn more
 
-- [Tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md): ten minutes, every command runs
+- [Tutorial](https://github.com/B4teShai/DataCopilot/blob/main/docs/tutorial.md): ten minutes
 - [Terms explained](https://github.com/B4teShai/DataCopilot/blob/main/docs/guide/concepts.md)
 - [How it works](https://github.com/B4teShai/DataCopilot/blob/main/docs/architecture/README.md)
 - [What works today](https://github.com/B4teShai/DataCopilot/blob/main/docs/status.md)
