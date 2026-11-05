@@ -24,3 +24,5 @@ htmlcov/
 /report.json
 /report.sarif
 /site/
+CLAUDE.md
+.mcp.json
