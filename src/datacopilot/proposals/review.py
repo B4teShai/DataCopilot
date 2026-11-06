@@ -30,11 +30,11 @@ from datacopilot import convert
 from datacopilot.core.errors import ValidationError
 from datacopilot.core.proposals import Proposal, ProposalSet, validate_against
 from datacopilot.core.schema import (
-    SCHEMA_VERSION,
     Annotation,
     Category,
     Dataset,
     DatasetManifest,
+    schema_version_for,
     validate_tables,
 )
 from datacopilot.core.version import models_version
@@ -111,8 +111,10 @@ def export_review(ds: Dataset, ps: ProposalSet, out: Path) -> ConversionReport:
     annotations = [*ds.annotations, *layer]
     validate_tables(ds.images, annotations, categories, task=ds.manifest.task)
     manifest = DatasetManifest(
-        version=models_version(ds.images, annotations, categories, schema_version=SCHEMA_VERSION),
-        schema_version=SCHEMA_VERSION,
+        version=models_version(
+            ds.images, annotations, categories, schema_version=schema_version_for(annotations)
+        ),
+        schema_version=schema_version_for(annotations),
         name=ds.manifest.name,
         task=ds.manifest.task,
         categories=tuple(sorted(categories, key=lambda c: c.id)),

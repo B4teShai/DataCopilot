@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from datacopilot import __version__
-from datacopilot.core.schema import SCHEMA_VERSION
+from datacopilot.core.schema import MAX_SCHEMA_VERSION
 from datacopilot.report.text import clean_text
 from datacopilot.settings import Settings
 
@@ -226,7 +226,7 @@ def diagnose(settings: Settings | None, *, settings_error: str | None = None) ->
             "version": __version__,
             "python": platform.python_version(),
             "platform": clean_text(platform.system(), 40),
-            "dcp_schema_version": SCHEMA_VERSION,
+            "dcp_schema_version": MAX_SCHEMA_VERSION,
         },
         "dependencies": dependencies,
         "extras": _extras(),

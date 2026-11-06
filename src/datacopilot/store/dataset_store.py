@@ -27,7 +27,7 @@ from pydantic import ValidationError as PydanticValidationError
 from datacopilot.core.errors import FormatError, StoreError, ValidationError
 from datacopilot.core.proposals import ProposalSet
 from datacopilot.core.schema import (
-    SCHEMA_VERSION,
+    MAX_SCHEMA_VERSION,
     Annotation,
     AuditRun,
     Category,
@@ -35,6 +35,7 @@ from datacopilot.core.schema import (
     DatasetManifest,
     Image,
     Task,
+    schema_version_for,
     validate_tables,
 )
 from datacopilot.core.version import extend_lineage, models_version
@@ -177,11 +178,14 @@ def _write_tables(directory: Path, tables: dict[str, pa.Table], manifest: Datase
 
 
 def _arrow_tables(
-    images: Sequence[Image], annotations: Sequence[Annotation], categories: Sequence[Category]
+    images: Sequence[Image],
+    annotations: Sequence[Annotation],
+    categories: Sequence[Category],
+    schema_version: int,
 ) -> dict[str, pa.Table]:
     return {
         "images.parquet": arrow.images_to_table(images),
-        "annotations.parquet": arrow.annotations_to_table(annotations),
+        "annotations.parquet": arrow.annotations_to_table(annotations, schema_version),
         "categories.parquet": arrow.categories_to_table(categories),
     }
 
@@ -273,10 +277,10 @@ def _read_manifest(path: Path) -> DatasetManifest:
         manifest = DatasetManifest.model_validate(raw)
     except (OSError, ValueError) as exc:  # JSONDecodeError and pydantic errors are ValueErrors
         raise StoreError(f"{MANIFEST} is invalid: {type(exc).__name__}") from None
-    if manifest.schema_version > SCHEMA_VERSION:
+    if manifest.schema_version > MAX_SCHEMA_VERSION:
         raise StoreError(
             f"dataset has schema_version {manifest.schema_version}; this package supports up to "
-            f"{SCHEMA_VERSION}. Upgrade datacopilot."
+            f"{MAX_SCHEMA_VERSION}. Upgrade datacopilot."
         )
     return manifest
 
@@ -334,7 +338,8 @@ class DatasetStore:
         if root.exists():
             raise StoreError(f"{root} already exists; refusing to overwrite")
         validate_tables(images, annotations, categories, task=task)
-        version = models_version(images, annotations, categories, schema_version=SCHEMA_VERSION)
+        generation = schema_version_for(annotations)
+        version = models_version(images, annotations, categories, schema_version=generation)
         if (
             not all(isinstance(v, str) and _VERSION.fullmatch(v) for v in lineage)
             or len(set(lineage)) != len(lineage)
@@ -343,7 +348,7 @@ class DatasetStore:
             raise ValidationError("lineage must list distinct versions and not the new version")
         manifest = DatasetManifest(
             version=version,
-            schema_version=SCHEMA_VERSION,
+            schema_version=generation,
             name=name,
             task=task,
             categories=tuple(sorted(categories, key=lambda c: c.id)),
@@ -356,7 +361,7 @@ class DatasetStore:
         tmp = _tmp_name(root)
         try:
             tmp.mkdir()
-            _write_tables(tmp, _arrow_tables(images, annotations, categories), manifest)
+            _write_tables(tmp, _arrow_tables(images, annotations, categories, generation), manifest)
             snapshot = tmp / "versions" / version
             snapshot.mkdir(parents=True)
             for file in (*TABLES, MANIFEST):
@@ -395,14 +400,15 @@ class DatasetStore:
         """
         parent = self._manifest
         validate_tables(images, annotations, categories, task=parent.task)
-        version = models_version(images, annotations, categories, schema_version=SCHEMA_VERSION)
+        generation = schema_version_for(annotations)
+        version = models_version(images, annotations, categories, schema_version=generation)
         lineage = extend_lineage(parent, version)
         snapshot = self.path / "versions" / version
         if snapshot.exists():
             raise StoreError(f"version {version} already exists in this dataset")
         manifest = DatasetManifest(
             version=version,
-            schema_version=SCHEMA_VERSION,
+            schema_version=generation,
             name=parent.name,
             task=parent.task,
             categories=tuple(sorted(categories, key=lambda c: c.id)),
@@ -411,7 +417,7 @@ class DatasetStore:
             lineage=lineage,
             created_at=datetime.now(timezone.utc),
         )
-        tables = _arrow_tables(images, annotations, categories)
+        tables = _arrow_tables(images, annotations, categories, generation)
         tmp = _tmp_name(snapshot)
         try:
             tmp.mkdir(parents=True)
@@ -445,7 +451,7 @@ class DatasetStore:
         )
         annotations = _read_table(
             self.path / "annotations.parquet",
-            arrow.ANNOTATIONS_SCHEMA,
+            arrow.annotations_schema(self._manifest.schema_version),
             arrow.table_to_annotations,
             limits,
         )

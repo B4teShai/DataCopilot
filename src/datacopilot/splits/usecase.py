@@ -48,7 +48,7 @@ from datacopilot.audit.context import CheckConfig, CheckContext
 from datacopilot.audit.embedding import DEFAULT_DTYPE, DEFAULT_EMBED_BATCH, PipelineProvider
 from datacopilot.audit.usecase import check_threshold, embedder_label, resolve_embedder
 from datacopilot.core.errors import StoreError, ValidationError
-from datacopilot.core.schema import SCHEMA_VERSION, Dataset, Image, SplitReport
+from datacopilot.core.schema import Dataset, Image, SplitReport, schema_version_for
 from datacopilot.core.version import models_version
 from datacopilot.embed import knn
 from datacopilot.embed.protocol import Embedder
@@ -273,7 +273,10 @@ def split_dataset(
         raise ValidationError(f"internal error: {across} groups ended in more than one split")
     lineage = (*ds.manifest.lineage, ds.manifest.version)
     version = models_version(
-        new_images, ds.annotations, ds.categories, schema_version=SCHEMA_VERSION
+        new_images,
+        ds.annotations,
+        ds.categories,
+        schema_version=schema_version_for(ds.annotations),
     )
     if version == ds.manifest.version:
         raise ValidationError(

@@ -10,7 +10,7 @@ import pytest
 
 from datacopilot import __version__, doctor
 from datacopilot.cli import app as cli
-from datacopilot.core.schema import SCHEMA_VERSION
+from datacopilot.core.schema import MAX_SCHEMA_VERSION
 from datacopilot.logging import clear_request_context
 from datacopilot.settings import Settings, load_settings
 
@@ -48,7 +48,7 @@ def test_report_has_the_documented_sections() -> None:
         "gpu", "plugins",
     }  # fmt: skip
     package = report["package"]
-    assert package["version"] == __version__ and package["dcp_schema_version"] == SCHEMA_VERSION
+    assert package["version"] == __version__ and package["dcp_schema_version"] == MAX_SCHEMA_VERSION
     assert package["python"].count(".") == 2 and package["platform"]
     assert set(report["dependencies"]) == {
         "click", "jinja2", "numpy", "pyarrow", "pydantic", "structlog", "typer"
