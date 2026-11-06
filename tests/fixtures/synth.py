@@ -122,7 +122,7 @@ OBB_IMAGES: list[tuple[str, int, int, str, list[str]]] = [
         [
             "0 0.125 0.25 0.5 0.125 0.625 0.5 0.25 0.625",  # a turned quadrilateral
             "1 0.75 0.5 0.9375 0.5 0.9375 0.875 0.75 0.875",  # axis-aligned, clockwise on screen
-            "2 0.5 0.75 0.5 1 0 1 0.1 0.75",  # trapezoid on the bottom edge, other direction
+            "2 0.5 0.75 0.5 1 0 1 0.25 0.75",  # trapezoid on the bottom edge, other direction
         ],
     ),
     ("s2.png", 80, 60, "val", ["1 0.2 0.1 0.6 0.15 0.55 0.55 0.15 0.5 0.875"]),  # a prediction

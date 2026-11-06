@@ -23,7 +23,10 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
         tiny_box_side_px: a box whose width or height is below this many pixels is "tiny".
         tiny_box_area_fraction: a box covering less than this fraction of its image is "tiny".
         max_box_aspect_ratio: ``max(w/h, h/w)`` above which a box is "extreme".
-        duplicate_box_iou: same-class boxes of one image with IoU above this are duplicates.
+        duplicate_box_iou: same-class boxes of one image with IoU above this are duplicates
+            (the rotated IoU for oriented boxes).
+        min_obb_rectangularity: an oriented box whose area is below this fraction of its
+            minimum-area rectangle is reported as not rectangular.
         max_image_bytes: files larger than this are reported, never hashed or read.
         max_check_seconds: wall-time budget of one file-reading check; images not reached are
             reported in an ``audit_incomplete`` finding.
@@ -64,6 +67,7 @@ class CheckConfig(BaseModel, frozen=True, extra="forbid"):
     tiny_box_area_fraction: float = Field(default=1e-4, gt=0.0, lt=1.0, allow_inf_nan=False)
     max_box_aspect_ratio: float = Field(default=20.0, gt=1.0, le=1e9, allow_inf_nan=False)
     duplicate_box_iou: float = Field(default=0.9, gt=0.0, le=1.0, allow_inf_nan=False)
+    min_obb_rectangularity: float = Field(default=0.9, gt=0.0, le=1.0, allow_inf_nan=False)
     max_image_bytes: int = Field(default=1024**3, ge=1)
     max_check_seconds: float = Field(default=1800.0, gt=0.0, le=1e7, allow_inf_nan=False)
     max_hash_bytes: int = Field(default=200 * 1024**3, ge=1)

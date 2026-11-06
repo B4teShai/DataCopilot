@@ -30,6 +30,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "boxes/zero_area": "Box has zero or negative area",
     "boxes/tiny_box": "Box is very small",
     "boxes/extreme_aspect": "Box has an extreme aspect ratio",
+    "boxes/obb_not_rectangular": "Oriented box is far from a rectangle",
     "boxes/duplicate_box": "Duplicate box of the same class",
     "boxes/conflicting_class": "Same box labelled with different classes",
     "boxes/pairwise_skipped": "Pair search skipped for images with too many boxes",

@@ -37,9 +37,9 @@ def test_corner_order_is_kept(tmp_path: Path) -> None:
     src = synth.build_yolo_obb(tmp_path / "src")
     ds, _ = convert.load_dataset(src, "yolo_obb")
     by_id = {a.ann_id: a for a in ds.annotations}
-    # "2 0.5 0.75 0.5 1 0 1 0.1 0.75" on a 64x48 image, in the given (counter-screen) order
+    # "2 0.5 0.75 0.5 1 0 1 0.25 0.75" on a 64x48 image, in the given (counter-screen) order
     trapezoid = by_id["train/s1.png:2"].obb_xyxyxyxy_abs
-    assert trapezoid == pytest.approx((32.0, 36.0, 32.0, 48.0, 0.0, 48.0, 6.4, 36.0))
+    assert trapezoid == pytest.approx((32.0, 36.0, 32.0, 48.0, 0.0, 48.0, 16.0, 36.0))
     assert by_id["train/s1.png:2"].bbox_xyxy_abs == pytest.approx((0.0, 36.0, 32.0, 48.0))
     prediction = by_id["val/s2.png:0"]
     assert prediction.score == 0.875 and prediction.provenance == "model"

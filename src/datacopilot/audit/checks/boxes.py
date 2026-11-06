@@ -15,6 +15,14 @@ duplicate and a conflict). ``pairwise_skipped`` (WARN: images with more than
 ``MAX_BOXES_PER_IMAGE_FOR_PAIRS`` valid boxes are not searched for pairs, so a gate must notice)
 and ``boxes_truncated`` (a rule hit
 ``MAX_FINDINGS_PER_RULE``; carries the number dropped, with the severity of the truncated rule).
+
+Oriented boxes (``kind == "obb"``, ADR-0011): ``out_of_bounds`` means a corner outside the image
+(the enclosing box is tested) and ``zero_area`` a degenerate quadrilateral (crossed, collinear or
+repeated corners); ``tiny_box`` and ``extreme_aspect`` use the sides of the box's minimum-area
+rectangle and its own area, not the enclosing box; ``obb_not_rectangular`` (WARN) is a box whose
+area is below ``min_obb_rectangularity`` of that rectangle (training code such as Ultralytics
+replaces the box by the rectangle); duplicates and conflicts use the rotated IoU
+(``core.obb.iou_obb``). Payloads of oriented boxes carry the corners under ``obb``.
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ from numpy.typing import NDArray
 from datacopilot.audit.context import CheckContext
 from datacopilot.audit.findings import make_finding
 from datacopilot.audit.paths import clip
+from datacopilot.core import obb
 from datacopilot.core.geometry import iou_xyxy
 from datacopilot.core.schema import Dataset, Finding, PluginSpec, Severity
 
@@ -44,6 +53,7 @@ _SEVERITY: dict[str, Severity] = {
     "zero_area": "CRITICAL",
     "tiny_box": "WARN",
     "extreme_aspect": "WARN",
+    "obb_not_rectangular": "WARN",
     "duplicate_box": "WARN",
     "conflicting_class": "WARN",
 }
@@ -61,6 +71,15 @@ def _r(value: float) -> float:
     return round(float(value), 4)
 
 
+def _convex(quads: NDArray[np.float64]) -> NDArray[np.bool_]:
+    """Rows whose corners turn the same way at all four corners (``geometry.check_quad``)."""
+    pts = quads.reshape(-1, 4, 2)
+    a = np.roll(pts, -1, axis=1) - pts
+    b = np.roll(pts, -2, axis=1) - np.roll(pts, -1, axis=1)
+    turn = a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+    return np.asarray((turn > 0).all(axis=1) | (turn < 0).all(axis=1))
+
+
 def _pairs(
     order: NDArray[np.int64],
     box: NDArray[np.float64],
@@ -68,15 +87,19 @@ def _pairs(
     ann_ids: list[str],
     threshold: float,
     hits: dict[str, list[_Hit]],
+    quads: NDArray[np.float64] | None = None,
 ) -> None:
     """Report, for each box, its earliest same-image match above ``threshold`` (one block of
-    columns at a time)."""
+    columns at a time). With ``quads`` (an image with oriented boxes) the IoU is rotated."""
     n = len(order)
-    b = box[order]
+    b = box[order] if quads is None else quads[order]
     cb = cat[order]
     for j0 in range(0, n, PAIR_BLOCK):
         j1 = min(n, j0 + PAIR_BLOCK)
-        iou = iou_xyxy(b[:j1], b[j0:j1])
+        if quads is None:
+            iou = iou_xyxy(b[:j1], b[j0:j1])
+        else:  # pairs that cannot exceed the threshold are never clipped
+            iou = obb.iou_obb(b[:j1], b[j0:j1], min_iou=threshold)
         earlier = np.arange(j1)[:, None] < np.arange(j0, j1)[None, :]
         over = earlier & (iou > threshold)
         same_class = cb[:j1, None] == cb[None, j0:j1]
@@ -114,7 +137,7 @@ class BoxesCheck:
         rows = [
             a
             for a in ds.annotations
-            if a.kind == "bbox" and a.bbox_xyxy_abs is not None and a.image_id in size
+            if a.kind in ("bbox", "obb") and a.bbox_xyxy_abs is not None and a.image_id in size
         ]
         if not rows:
             return []
@@ -124,20 +147,45 @@ class BoxesCheck:
         cat = np.array([a.category_id for a in rows], dtype=np.int64)
         dims = np.array([size[i] for i in image_ids], dtype=np.float64)
         width, height = dims[:, 0], dims[:, 1]
+        oriented = np.array([a.obb_xyxyxyxy_abs is not None for a in rows], dtype=bool)
+        quads = box[:, [0, 1, 2, 1, 2, 3, 0, 3]]  # an axis-aligned box as its four corners
+        for i in np.flatnonzero(oriented):
+            quads[i] = rows[int(i)].obb_xyxyxyxy_abs
         hits: dict[str, list[_Hit]] = {rule: [] for rule in _SEVERITY}
         with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
             x1, y1, x2, y2 = box[:, 0], box[:, 1], box[:, 2], box[:, 3]
-            finite = np.isfinite(box).all(axis=1)
+            finite = np.isfinite(box).all(axis=1) & np.isfinite(quads).all(axis=1)
             w, h = x2 - x1, y2 - y1
-            zero = finite & ((w <= 0) | (h <= 0))
+            area = w * h
+            if oriented.any():  # sides and area of the box itself, not of its enclosing box
+                long_side, short_side, rect_area = obb.min_area_rects(quads)
+                poly_area = obb.areas(quads)
+                w = np.where(oriented, long_side, w)
+                h = np.where(oriented, short_side, h)
+                area = np.where(oriented, poly_area, area)
+                degenerate = oriented & finite & ~_convex(quads)
+                rectangularity = np.where(rect_area > 0, poly_area / rect_area, 0.0)
+            else:
+                degenerate = np.zeros(len(rows), dtype=bool)
+                rectangularity = np.ones(len(rows))
+            zero = finite & ((w <= 0) | (h <= 0) | degenerate)
             oob = finite & ((x1 < 0) | (y1 < 0) | (x2 > width) | (y2 > height))
             ok = finite & ~zero
             tiny = ok & (
                 (np.minimum(w, h) < cfg.tiny_box_side_px)
-                | (w * h < cfg.tiny_box_area_fraction * width * height)
+                | (area < cfg.tiny_box_area_fraction * width * height)
             )
             aspect = np.where(ok, np.maximum(w / h, h / w), 0.0)
             extreme = ok & (aspect > cfg.max_box_aspect_ratio)
+            skewed = ok & oriented & (rectangularity < cfg.min_obb_rectangularity)
+
+        def shape(i: int) -> dict[str, object]:
+            """The box in a payload: the enclosing box, and the corners of an oriented box."""
+            out: dict[str, object] = {"bbox": [_r(v) for v in box[i]]}
+            if oriented[i]:
+                out["obb"] = [_r(v) for v in quads[i]]
+            return out
+
         for i in np.flatnonzero(~finite):
             hits["invalid_box"].append(_Hit(int(i), {"rule": "invalid_box"}))
         for i in np.flatnonzero(oob):
@@ -146,16 +194,14 @@ class BoxesCheck:
                     int(i),
                     {
                         "rule": "out_of_bounds",
-                        "bbox": [_r(v) for v in box[i]],
+                        **shape(int(i)),
                         "width": int(width[i]),
                         "height": int(height[i]),
                     },
                 )
             )
         for i in np.flatnonzero(zero):
-            hits["zero_area"].append(
-                _Hit(int(i), {"rule": "zero_area", "bbox": [_r(v) for v in box[i]]})
-            )
+            hits["zero_area"].append(_Hit(int(i), {"rule": "zero_area", **shape(int(i))}))
         for i in np.flatnonzero(tiny):
             hits["tiny_box"].append(
                 _Hit(
@@ -164,7 +210,18 @@ class BoxesCheck:
                         "rule": "tiny_box",
                         "width": _r(w[i]),
                         "height": _r(h[i]),
-                        "area_fraction": round(float(w[i] * h[i] / (width[i] * height[i])), 6),
+                        "area_fraction": round(float(area[i] / (width[i] * height[i])), 6),
+                    },
+                )
+            )
+        for i in np.flatnonzero(skewed):
+            hits["obb_not_rectangular"].append(
+                _Hit(
+                    int(i),
+                    {
+                        "rule": "obb_not_rectangular",
+                        "rectangularity": _r(rectangularity[i]),
+                        "obb": [_r(v) for v in quads[i]],
                     },
                 )
             )
@@ -173,7 +230,7 @@ class BoxesCheck:
                 _Hit(int(i), {"rule": "extreme_aspect", "aspect_ratio": _r(aspect[i])})
             )
         skipped_images = self._search_pairs(
-            ok, image_ids, ann_ids, box, cat, cfg.duplicate_box_iou, hits
+            ok, image_ids, ann_ids, box, cat, cfg.duplicate_box_iou, hits, quads, oriented
         )
         findings: list[Finding] = []
         for rule, items in hits.items():
@@ -226,6 +283,8 @@ class BoxesCheck:
         cat: NDArray[np.int64],
         threshold: float,
         hits: dict[str, list[_Hit]],
+        quads: NDArray[np.float64],
+        oriented: NDArray[np.bool_],
     ) -> int:
         """Run the pair search per image; return the number of images skipped for size."""
         by_image: dict[str, list[int]] = {}
@@ -239,7 +298,8 @@ class BoxesCheck:
                 skipped += 1
                 continue
             order = np.array(sorted(members, key=ann_ids.__getitem__), dtype=np.int64)
-            _pairs(order, box, cat, ann_ids, threshold, hits)
+            rotated = quads if oriented[order].any() else None
+            _pairs(order, box, cat, ann_ids, threshold, hits, rotated)
         return skipped
 
 

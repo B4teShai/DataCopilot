@@ -232,13 +232,17 @@ def propose(
     Raises:
         OptionError (a ``ValueError``): an invalid option, an unknown class, a threshold key the
             set cannot hold, or no usable class name; all found before the model runs.
-        ValidationError: the dataset is not a detection dataset.
+        ValidationError: the dataset is not a detection dataset, or it holds oriented boxes.
         ModelError: the model failed (nothing is returned).
     """
     thresholds = dict(class_min_score or {})
     _check_options(min_score, thresholds, overlap_iou, time_budget_seconds)
     if ds.manifest.task != "detection":
         raise ValidationError("propose needs a detection dataset (it suggests boxes)")
+    if any(a.kind == "obb" for a in ds.annotations):  # ADR-0011: one kind of box per dataset
+        raise ValidationError(
+            "propose suggests axis-aligned boxes; this dataset holds oriented boxes (obb)"
+        )
     log = get_logger(__name__)
     rejected: Counter[str] = Counter()
     phrase_class = _phrases(ds, classes, rejected)
