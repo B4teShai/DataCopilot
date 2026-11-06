@@ -111,6 +111,40 @@ def build_yolo(root: Path) -> Path:
     return root
 
 
+# name, width, height, split, oriented boxes as label lines after the class: normalised corners
+# (six decimals, trailing zeros stripped as the writer prints them), optional confidence last
+OBB_IMAGES: list[tuple[str, int, int, str, list[str]]] = [
+    (
+        "s1.png",
+        64,
+        48,
+        "train",
+        [
+            "0 0.125 0.25 0.5 0.125 0.625 0.5 0.25 0.625",  # a turned quadrilateral
+            "1 0.75 0.5 0.9375 0.5 0.9375 0.875 0.75 0.875",  # axis-aligned, clockwise on screen
+            "2 0.5 0.75 0.5 1 0 1 0.1 0.75",  # trapezoid on the bottom edge, other direction
+        ],
+    ),
+    ("s2.png", 80, 60, "val", ["1 0.2 0.1 0.6 0.15 0.55 0.55 0.15 0.5 0.875"]),  # a prediction
+    ("s3.png", 50, 50, "val", []),
+]
+
+
+def build_yolo_obb(root: Path) -> Path:
+    """Ultralytics YOLO-OBB layout: data.yaml, images/<split>/x.png, labels/<split>/x.txt with
+    ``class x1 y1 x2 y2 x3 y3 x4 y4 [conf]``."""
+    for n, (name, w, h, split, lines) in enumerate(OBB_IMAGES):
+        write_png(root / "images" / split / name, w, h, 40 + n)
+        label = root / "labels" / split / (Path(name).stem + ".txt")
+        label.parent.mkdir(parents=True, exist_ok=True)
+        label.write_text("".join(line + "\n" for line in lines))
+    names = "\n".join(f"  {i}: {n}" for i, n in enumerate(CATEGORIES))
+    (root / "data.yaml").write_text(
+        f"path: .\ntrain: images/train\nval: images/val\nnames:\n{names}\n"
+    )
+    return root
+
+
 def build_voc(root: Path) -> Path:
     """Pascal VOC layout: Annotations/*.xml, JPEGImages/*, ImageSets/Main/<split>.txt."""
     sets: dict[str, list[str]] = {}

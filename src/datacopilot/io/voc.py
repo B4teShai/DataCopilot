@@ -398,6 +398,7 @@ class VocFormat:
             ("is_crowd", ann.is_crowd),
             ("score", ann.score is not None),
             ("provenance", ann.provenance != "human"),
+            ("obb_xyxyxyxy_abs", ann.obb_xyxyxyxy_abs is not None),
         ):
             if present:
                 dropped[f"annotations.{column}"] += 1

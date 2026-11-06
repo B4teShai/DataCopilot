@@ -392,6 +392,7 @@ def test_formats_lists_every_builtin_format_with_capabilities(
         "label_studio",
         "voc",
         "yolo",
+        "yolo_obb",
     ]
     assert all(r[1] == "read,write" and r[2] == "Apache-2.0" for r in rows)
     assert logs(err) == []

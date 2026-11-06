@@ -19,12 +19,13 @@ from datacopilot.store import DatasetStore
 BUILD: dict[str, Callable[[Path], Path]] = {
     "coco": synth.build_coco,
     "yolo": synth.build_yolo,
+    "yolo_obb": synth.build_yolo_obb,
     "voc": synth.build_voc,
     "cvat_xml": synth.build_cvat_xml,
     "label_studio": synth.build_label_studio,
     "imagefolder": synth.build_imagefolder,
 }
-DETECTION_ONLY = ("coco", "yolo", "voc", "cvat_xml")  # refuse classification datasets
+DETECTION_ONLY = ("coco", "yolo", "yolo_obb", "voc", "cvat_xml")  # refuse classification datasets
 DETECTION = (*DETECTION_ONLY, "label_studio")  # detection sources
 
 _COCO_LOSS = {
@@ -59,6 +60,8 @@ _LS_LOSS = {
     "images.source.annotation": 4,
     "images.source.id": 4,
 }
+# the oriented-box fixture: 4 boxes, one a prediction with a score (ADR-0011)
+_OBB = {"annotations.obb_xyxyxyxy_abs": 4}
 # (source format, target format) -> dropped column counts for the synthetic fixtures
 MATRIX: dict[tuple[str, str], dict[str, int]] = {
     ("coco", "coco"): {},
@@ -96,6 +99,19 @@ MATRIX: dict[tuple[str, str], dict[str, int]] = {
     ("label_studio", "voc"): _LS_LOSS,
     ("label_studio", "cvat_xml"): _LS_LOSS,
     ("label_studio", "label_studio"): {},
+    # oriented boxes: every other format keeps the enclosing box and counts the corners
+    ("yolo_obb", "yolo_obb"): {},
+    ("yolo_obb", "coco"): _OBB,
+    ("yolo_obb", "yolo"): _OBB,
+    ("yolo_obb", "voc"): {**_OBB, "annotations.score": 1, "annotations.provenance": 1},
+    ("yolo_obb", "cvat_xml"): {**_OBB, "annotations.score": 1},
+    ("yolo_obb", "label_studio"): {**_OBB, "categories.id": 3},
+    # axis-aligned boxes become four corners: nothing is lost
+    ("yolo", "yolo_obb"): {},
+    ("coco", "yolo_obb"): _COCO_LOSS,
+    ("voc", "yolo_obb"): _VOC_LOSS,
+    ("cvat_xml", "yolo_obb"): {**_CVAT_LOSS, "annotations.occluded": 4},
+    ("label_studio", "yolo_obb"): _LS_LOSS,
 }
 
 

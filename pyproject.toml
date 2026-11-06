@@ -77,6 +77,7 @@ vlm = [
 [project.entry-points."datacopilot.formats"]
 coco = "datacopilot.io.coco:plugin"
 yolo = "datacopilot.io.yolo:plugin"
+yolo_obb = "datacopilot.io.yolo_obb:plugin"
 voc = "datacopilot.io.voc:plugin"
 imagefolder = "datacopilot.io.imagefolder:plugin"
 cvat_xml = "datacopilot.io.cvat:plugin"

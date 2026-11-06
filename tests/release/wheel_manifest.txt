@@ -57,6 +57,7 @@ datacopilot/io/report.py
 datacopilot/io/voc.py
 datacopilot/io/xmlsafe.py
 datacopilot/io/yolo.py
+datacopilot/io/yolo_obb.py
 datacopilot/logging.py
 datacopilot/models/__init__.py
 datacopilot/models/registry.py

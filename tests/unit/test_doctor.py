@@ -55,7 +55,7 @@ def test_report_has_the_documented_sections() -> None:
     }  # fmt: skip
     assert all(isinstance(v, str) for v in report["dependencies"].values())
     assert report["plugins"]["formats"] == [
-        "coco", "cvat_xml", "imagefolder", "label_studio", "voc", "yolo"
+        "coco", "cvat_xml", "imagefolder", "label_studio", "voc", "yolo", "yolo_obb"
     ]  # fmt: skip
     assert "boxes" in report["plugins"]["checks"] and "hash" in report["plugins"]["embedders"]
 

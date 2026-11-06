@@ -5,7 +5,13 @@ Layout: ``data.yaml`` (class names), ``images/[train|val|test/]<name>`` and the 
 A missing label file means an image without objects. Polygon (segmentation) lines are rejected.
 
 Boxes are written with 7 decimals, so a box is reproduced to within 5e-8 of the image size; a
-box that moves by more than 1e-3 pixel is counted in ``annotations.bbox_xyxy_abs``.
+box that moves by more than 1e-3 pixel is counted in ``annotations.bbox_xyxy_abs``. An oriented
+box (ADR-0011) is written as its enclosing box and counted in ``annotations.obb_xyxyxyxy_abs``; a
+nine-field label line is refused with a pointer to the ``yolo_obb`` format.
+
+The layout, ``data.yaml`` handling and file naming are shared with ``yolo_obb``, which subclasses
+:class:`YoloFormat` and replaces the per-line geometry (``_check_fields``, ``_shape``,
+``_geometry``).
 """
 
 from __future__ import annotations
@@ -17,7 +23,7 @@ from pathlib import Path, PurePosixPath
 
 from datacopilot.core import geometry
 from datacopilot.core.errors import FormatError
-from datacopilot.core.schema import Annotation, Category, Dataset, Image, PluginSpec, Split
+from datacopilot.core.schema import Annotation, Category, Dataset, Image, Kind, PluginSpec, Split
 from datacopilot.io import files
 from datacopilot.io.common import (
     NATIVE_KEY,
@@ -113,12 +119,15 @@ class YoloFormat:
             file_name = "/".join(parts[1:] if split != "unassigned" else parts)
             rel_key = "/".join(parts)
             image = make_image(
-                rel, split=split, source={NATIVE_KEY: NAME, "file_name": file_name}, ref=rel_key
+                rel,
+                split=split,
+                source={NATIVE_KEY: self.spec.name, "file_name": file_name},
+                ref=rel_key,
             )
             images.append(image)
             annotations.extend(self._labels(root, parts, image, rel_key, names))
         return ReadResult(
-            name=root.name or NAME,
+            name=root.name or self.spec.name,
             task="detection",
             images=images,
             annotations=annotations,
@@ -127,9 +136,8 @@ class YoloFormat:
             skipped=dict(skipped),
         )
 
-    @staticmethod
     def _labels(
-        root: Path, parts: tuple[str, ...], image: Image, rel_key: str, names: list[str]
+        self, root: Path, parts: tuple[str, ...], image: Image, rel_key: str, names: list[str]
     ) -> list[Annotation]:
         label_rel = "labels/" + "/".join(parts[:-1] + (PurePosixPath(parts[-1]).stem + ".txt",))
         label = files.safe_join(root, label_rel)
@@ -142,10 +150,7 @@ class YoloFormat:
                 continue
             where = f"{label.name}:{number}"
             tokens = line.split()
-            if len(tokens) > 6:
-                raise FormatError(f"{where}: polygon/segmentation labels are not supported")
-            if len(tokens) < 5:
-                raise FormatError(f"{where}: expected 'class cx cy w h [conf]'")
+            self._check_fields(tokens, where)
             try:
                 cls = int(tokens[0])
             except ValueError:
@@ -153,21 +158,8 @@ class YoloFormat:
             if not 0 <= cls < len(names):
                 raise FormatError(f"{where}: class {cls} is not defined in data.yaml")
             values = [_number(t, where) for t in tokens[1:]]
-            try:
-                box = _canonical(
-                    geometry.clip_to_image(
-                        geometry.cxcywh_norm_to_xyxy(
-                            (values[0], values[1], values[2], values[3]), image.width, image.height
-                        ),
-                        image.width,
-                        image.height,
-                        tol=CLIP_TOLERANCE_PX,
-                    ),
-                    image,
-                )
-            except ValueError:
-                raise FormatError(f"{where}: box lies outside the image") from None
-            score = values[4] if len(values) == 5 else None
+            kind, shape, rest = self._shape(values, image, where)
+            score = rest[0] if rest else None
             out.append(
                 build_row(
                     Annotation,
@@ -175,20 +167,56 @@ class YoloFormat:
                     ann_id=f"{rel_key}:{len(out)}",
                     image_id=image.image_id,
                     category_id=cls,
-                    kind="bbox",
-                    bbox_xyxy_abs=box,
+                    kind=kind,
                     score=score,
                     provenance="model" if score is not None else "human",
-                    source={NATIVE_KEY: NAME},
+                    source={NATIVE_KEY: self.spec.name},
+                    **shape,
                 )
             )
         return out
+
+    @staticmethod
+    def _check_fields(tokens: list[str], where: str) -> None:
+        """Refuse a line whose field count is not this format's."""
+        if len(tokens) in (9, 10):
+            raise FormatError(
+                f"{where}: an oriented-box line (class and four corners); read it with the "
+                "yolo_obb format"
+            )
+        if len(tokens) > 6:
+            raise FormatError(f"{where}: polygon/segmentation labels are not supported")
+        if len(tokens) < 5:
+            raise FormatError(f"{where}: expected 'class cx cy w h [conf]'")
+
+    @staticmethod
+    def _shape(
+        values: list[float], image: Image, where: str
+    ) -> tuple[Kind, dict[str, object], list[float]]:
+        """The row's kind and geometry fields from the numbers after the class, and the numbers
+        left over (the optional confidence)."""
+        try:
+            box = _canonical(
+                geometry.clip_to_image(
+                    geometry.cxcywh_norm_to_xyxy(
+                        (values[0], values[1], values[2], values[3]), image.width, image.height
+                    ),
+                    image.width,
+                    image.height,
+                    tol=CLIP_TOLERANCE_PX,
+                ),
+                image,
+            )
+        except ValueError:
+            raise FormatError(f"{where}: box lies outside the image") from None
+        return "bbox", {"bbox_xyxy_abs": box}, values[4:]
 
     # ----------------------------------------------------------------- write
     def write(self, ds: Dataset, out: Path) -> ConversionReport:
         out = Path(out)
         require_empty_dir(out)
-        require_task(ds.manifest.task, "detection", NAME)
+        name = self.spec.name
+        require_task(ds.manifest.task, "detection", name)
         dropped: Counter[str] = Counter()
         categories = sorted(ds.categories, key=lambda c: c.id)
         index = {c.id: i for i, c in enumerate(categories)}
@@ -203,13 +231,13 @@ class YoloFormat:
 
         used: dict[str, set[str]] = {}
         placed: dict[str, str] = {}
-        for image in sorted(ds.images, key=lambda i: (_hint(i), i.image_id)):
+        for image in sorted(ds.images, key=lambda i: (_hint(i, name), i.image_id)):
             placed[image.image_id] = _unique_stem(
-                _hint(image), used.setdefault(image.split, set()), image.image_id[:8]
+                _hint(image, name), used.setdefault(image.split, set()), image.image_id[:8]
             )
             if image.group_id is not None:
                 dropped["images.group_id"] += 1
-            if not is_native(image.source, NAME):
+            if not is_native(image.source, name):
                 foreign_source_drops(dropped, "images", image.source, _NAME_HINTS)
         anns_of: dict[str, list[Annotation]] = {}
         for ann in sorted(ds.annotations, key=lambda a: natural_key(a.ann_id)):
@@ -217,10 +245,12 @@ class YoloFormat:
 
         for image in ds.images:
             folder = "" if image.split == "unassigned" else image.split + "/"
-            name = placed[image.image_id]
-            files.copy_file(Path(image.file_path), files.safe_join(out / "images", folder + name))
+            placed_name = placed[image.image_id]
+            files.copy_file(
+                Path(image.file_path), files.safe_join(out / "images", folder + placed_name)
+            )
             label = files.safe_join(
-                out / "labels", folder + str(PurePosixPath(name).with_suffix(".txt"))
+                out / "labels", folder + str(PurePosixPath(placed_name).with_suffix(".txt"))
             )
             label.parent.mkdir(parents=True, exist_ok=True)
             lines = [
@@ -239,29 +269,17 @@ class YoloFormat:
         (out / "data.yaml").write_text("\n".join(yaml_lines) + "\n", encoding="utf-8")
         rows = len(ds.images) + len(ds.annotations)
         return ConversionReport(
-            source_format=NAME,
-            target_format=NAME,
+            source_format=name,
+            target_format=name,
             rows_read=rows,
             rows_written=rows,
             dropped=dict(dropped),
         )
 
-    @staticmethod
-    def _line(ann: Annotation, image: Image, cls: int, dropped: Counter[str]) -> str:
+    def _line(self, ann: Annotation, image: Image, cls: int, dropped: Counter[str]) -> str:
         if ann.bbox_xyxy_abs is None:
             raise FormatError(f"annotation {ann.ann_id!r} has no box")
-        norm = geometry.xyxy_to_cxcywh_norm(ann.bbox_xyxy_abs, image.width, image.height)
-        text = [_fmt(v) for v in norm]
-        back = geometry.cxcywh_norm_to_xyxy(
-            (float(text[0]), float(text[1]), float(text[2]), float(text[3])),
-            image.width,
-            image.height,
-        )
-        if (
-            max(abs(a - b) for a, b in zip(back, ann.bbox_xyxy_abs, strict=True))
-            > PRECISION_TOLERANCE_PX
-        ):
-            dropped["annotations.bbox_xyxy_abs"] += 1
+        text = self._geometry(ann, image, dropped)
         for column, present in (
             ("is_crowd", ann.is_crowd),
             ("occluded", ann.occluded is not None),
@@ -275,12 +293,32 @@ class YoloFormat:
         ):
             if present:
                 dropped[f"annotations.{column}"] += 1
-        if not is_native(ann.source, NAME):
+        if not is_native(ann.source, self.spec.name):
             foreign_source_drops(dropped, "annotations", ann.source, frozenset())
         fields = [str(cls), *text]
         if ann.score is not None:
             fields.append(repr(ann.score))
         return " ".join(fields)
+
+    @staticmethod
+    def _geometry(ann: Annotation, image: Image, dropped: Counter[str]) -> list[str]:
+        """The label fields after the class: the box as normalised ``cx cy w h``."""
+        assert ann.bbox_xyxy_abs is not None  # noqa: S101  # checked by the caller
+        norm = geometry.xyxy_to_cxcywh_norm(ann.bbox_xyxy_abs, image.width, image.height)
+        text = [_fmt(v) for v in norm]
+        back = geometry.cxcywh_norm_to_xyxy(
+            (float(text[0]), float(text[1]), float(text[2]), float(text[3])),
+            image.width,
+            image.height,
+        )
+        if (
+            max(abs(a - b) for a, b in zip(back, ann.bbox_xyxy_abs, strict=True))
+            > PRECISION_TOLERANCE_PX
+        ):
+            dropped["annotations.bbox_xyxy_abs"] += 1
+        if ann.obb_xyxyxyxy_abs is not None:
+            dropped["annotations.obb_xyxyxyxy_abs"] += 1
+        return text
 
 
 def _canonical(box: geometry.Box, image: Image) -> geometry.Box:
@@ -313,9 +351,9 @@ def _quote(name: str) -> str:
     return json.dumps(name, ensure_ascii=False)
 
 
-def _hint(image: Image) -> str:
-    """Preferred file name below ``images/<split>/``."""
-    if is_native(image.source, NAME):
+def _hint(image: Image, fmt: str = NAME) -> str:
+    """Preferred file name below ``images/<split>/`` (``fmt``: the writing format's name)."""
+    if is_native(image.source, fmt):
         name = image.source.get("file_name")
         if isinstance(name, str):
             return name
