@@ -6,10 +6,11 @@ Every term DataCopilot uses is defined once, here. Other pages link to this tabl
 
 | Term | Meaning |
 |---|---|
-| dataset | Images plus labels (boxes with a class, or one class per image) in one of six formats. |
+| dataset | Images plus labels (boxes with a class, or one class per image) in one of seven formats. |
 | `dataset.dcp` | The folder `ingest` writes: tables of images, boxes and classes, plus `manifest.json`. Images stay where they are. |
 | version | A 32-character fingerprint of a dataset's content (`manifest.version`). Same content, same version, in any file order. |
 | `image_id` | The first 16 hex digits of the SHA-256 of the image file. It follows the bytes, not the file name. |
+| oriented box | A box turned to fit its object: four corners (`kind` `obb`) instead of an axis-aligned rectangle. Read and written by the `yolo_obb` format. |
 | split | The side of an image: `train`, `val`, `test` or `unassigned`. |
 | `group_id` | An optional label for images from one source, such as a camera or session. Split and leakage checks keep a group on one side. |
 | leakage | The same picture, or a copy, in both train and test. The test score then looks better than it is. |

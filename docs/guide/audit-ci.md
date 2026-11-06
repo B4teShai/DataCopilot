@@ -14,7 +14,7 @@ passed|failed critical=N warn=N info=N run_id=ID
 | `integrity` | Missing or unreadable images, a header that disagrees with the size, a file cut off after its header. | |
 | `duplicates` | Identical files (CRITICAL when they cross splits). | |
 | `imbalance` | Long-tail ratio, classes missing from a split, unused classes. | |
-| `boxes` | Out of bounds, zero area, tiny, extreme shape, duplicate and conflicting boxes. | |
+| `boxes` | Out of bounds, zero area, tiny, extreme shape, duplicate and conflicting boxes. Oriented boxes are measured by their corners and rotated overlap, and one far from a rectangle is a warning. | |
 | `near_duplicates` | Clusters of look-alike images (CRITICAL across splits). | `--embedder` |
 | `leakage` | Near copies across splits, and a `group_id` shared between splits. | `--embedder` |
 | `label_noise` | Boxes whose class no neighbouring photo shares (INFO, weak). See [Label noise](label-noise.md). | `--embedder` |

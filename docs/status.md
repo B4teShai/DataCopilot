@@ -6,7 +6,8 @@ run yet.
 
 | Area | Status | What it covers |
 |---|---|---|
-| Convert formats | Built | COCO, YOLO, VOC, CVAT, Label Studio and ImageFolder; losses counted. See [Formats](guide/formats.md). |
+| Convert formats | Built | COCO, YOLO, YOLO-OBB, VOC, CVAT, Label Studio and ImageFolder; losses counted. See [Formats](guide/formats.md). |
+| Oriented boxes | Built | YOLO-OBB in and out, corner order kept; box checks by corners and rotated IoU. Not read from CVAT or Label Studio yet; label-noise crops are not rotated. See [ADR-0011](adr/0011-oriented-boxes.md). |
 | Dataset folder and version | Built | `ingest` writes `dataset.dcp`; same content gives the same version. |
 | CPU audit | Built | Integrity, exact duplicates, class imbalance, box sanity; reports in JSON, HTML and SARIF. |
 | Image-model audit | Built | Near-duplicates, leakage and outliers with `--embedder`. See [Embeddings](guide/embeddings.md). |

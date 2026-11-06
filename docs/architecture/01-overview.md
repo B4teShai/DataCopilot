@@ -18,9 +18,9 @@ process, on the CPU, without a server. See [Status](../status.md) for what runs 
 
 ## Scope
 
-In scope: detection (axis-aligned boxes) and classification datasets; six formats with a round-trip
-contract; the audit checks; group-aware re-splitting; `add_box` proposals with CVAT review; HTML,
-JSON and SARIF reports; a content-hashed, append-only dataset version.
+In scope: detection (axis-aligned or oriented boxes) and classification datasets; seven formats with
+a round-trip contract; the audit checks; group-aware re-splitting; `add_box` proposals with CVAT
+review; HTML, JSON and SARIF reports; a content-hashed, append-only dataset version.
 
 Out of scope:
 
@@ -39,7 +39,7 @@ Out of scope:
 | Outside party | How it talks to DataCopilot |
 |---|---|
 | CV engineer | Runs `datacopilot ...` or `import datacopilot`. |
-| Dataset files | COCO, YOLO, VOC, CVAT, Label Studio and ImageFolder files, read and written. |
+| Dataset files | COCO, YOLO, YOLO-OBB, VOC, CVAT, Label Studio and ImageFolder files, read and written. |
 | CI runner | Reads the exit code and `report.sarif`. |
 | CVAT | Receives proposals as a review folder; its decisions come back as a file. |
 | Hugging Face Hub | Source of model weights, downloaded over HTTPS. Nothing is redistributed. |

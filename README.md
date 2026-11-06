@@ -9,8 +9,8 @@ Point it at a dataset folder and it reports broken or tiny boxes, missing files,
 no examples, and the same picture in both train and test (which makes your test score look better
 than it is).
 
-It also converts between COCO, YOLO, Pascal VOC, CVAT, Label Studio and ImageFolder, and tells you
-what a conversion could not carry. It can fail your CI build when a dataset is bad.
+It also converts between COCO, YOLO, YOLO-OBB (oriented boxes), Pascal VOC, CVAT, Label Studio and
+ImageFolder, and tells you what a conversion could not carry. It can fail your CI build when a dataset is bad.
 
 It can propose a fix for one kind of mistake: boxes your labels missed. A person reviews every
 proposal before anything changes. All other mistakes it reports, and you fix them.
