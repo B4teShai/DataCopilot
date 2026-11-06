@@ -13,6 +13,25 @@ once a release is tagged.
   create new versions (`ingest`, `propose`, `apply_proposals`, `split`). Paths are confined to
   `DATACOPILOT_MCP_ROOTS`; results are bounded summaries.
 
+### Added (oriented boxes)
+
+- Oriented bounding boxes ([ADR-0011](docs/adr/0011-oriented-boxes.md)). `Annotation.kind` gains `obb` and the
+  public model gains `obb_xyxyxyxy_abs`: four corners in pixels, in source order, validated as a convex
+  quadrilateral; `bbox_xyxy_abs` holds the enclosing box. A detection dataset holds axis-aligned or oriented boxes,
+  never both. The public API snapshot changed for these two fields.
+- Format `yolo_obb` (Ultralytics `yolo obb` labels, `class x1 y1 x2 y2 x3 y3 x4 y4 [conf]`), read and write; the
+  label text round-trips byte for byte. Other writers keep the enclosing box and count
+  `annotations.obb_xyxyxyxy_abs` (`--strict` refuses). The `yolo` reader points nine-field lines at `yolo_obb`.
+- Table-schema generation 2: the annotations table gains `obb_xyxyxyxy_abs`. A dataset is written in the oldest
+  generation that holds it, and the hash omits the column while it is null, so every dataset without oriented
+  boxes keeps its files and its version; `doctor` reports the newest supported generation (2). Older packages
+  refuse a generation-2 dataset with "Upgrade datacopilot".
+- `boxes` check: oriented boxes are measured by their corners (`out_of_bounds`, `zero_area` for a degenerate
+  quadrilateral), by their minimum-area rectangle (`tiny_box`, `extreme_aspect`) and by rotated IoU (`duplicate_box`,
+  `conflicting_class`); new WARN rule `obb_not_rectangular` with `CheckConfig.min_obb_rectangularity` (0.9).
+  Rotated IoU is NumPy only (`core/obb.py`), tested against an exact rational oracle.
+- `propose` refuses a dataset with oriented boxes; `label_noise` crops their enclosing box.
+
 ### Changed (documentation)
 
 - Documentation rewritten for a reader who has never heard of the tool: a glossary at the top of the

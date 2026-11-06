@@ -11,7 +11,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal
@@ -27,15 +27,21 @@ from pydantic import (
 )
 
 from datacopilot.core.errors import GateFailedError, ValidationError
+from datacopilot.core.geometry import Quad, check_quad, quad_enclosing_box
 
 Split = Literal["train", "val", "test", "unassigned"]
-Kind = Literal["bbox", "classification"]
+Kind = Literal["bbox", "obb", "classification"]
 Provenance = Literal["human", "model", "proposal_accepted"]
 Task = Literal["detection", "classification"]
 Severity = Literal["CRITICAL", "WARN", "INFO"]
 SEVERITIES: tuple[Severity, ...] = ("CRITICAL", "WARN", "INFO")
 
 SCHEMA_VERSION = 1
+"""Table-schema generation of a dataset without oriented boxes (the original generation)."""
+OBB_SCHEMA_VERSION = 2
+"""Generation whose annotations table has the ``obb_xyxyxyxy_abs`` column (ADR-0011)."""
+MAX_SCHEMA_VERSION = OBB_SCHEMA_VERSION
+"""Newest generation this package reads; a store with a higher one is refused."""
 MAX_PATH_CHARS = 4096
 """Longest ``Image.file_path`` (the usual operating-system path limit)."""
 MAX_NAME_CHARS = 65_536
@@ -126,11 +132,16 @@ def group_key(label: str) -> str:
 
 
 class Annotation(_Row):
+    """One label. ``kind`` is ``bbox`` (axis-aligned box), ``obb`` (oriented box: four corners in
+    ``obb_xyxyxyxy_abs``, kept in their original order, and ``bbox_xyxy_abs`` holding the box that
+    encloses them, derived when omitted) or ``classification`` (no geometry). ADR-0011."""
+
     ann_id: str = Field(min_length=1, max_length=MAX_ID_CHARS)
     image_id: str = Field(pattern=r"^[0-9a-f]{16}$")
     category_id: int
     kind: Kind
     bbox_xyxy_abs: tuple[float, float, float, float] | None = None
+    obb_xyxyxyxy_abs: Quad | None = None
     score: float | None = None
     is_crowd: bool = False
     occluded: bool | None = None
@@ -139,18 +150,46 @@ class Annotation(_Row):
     provenance: Provenance = "human"
     source: Source = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _enclose(cls, data: object) -> object:
+        """Fill ``bbox_xyxy_abs`` of an oriented box from its corners when it is not given."""
+        if (
+            isinstance(data, dict)
+            and data.get("kind") == "obb"
+            and data.get("bbox_xyxy_abs") is None
+            and isinstance(data.get("obb_xyxyxyxy_abs"), (tuple, list))
+        ):
+            try:
+                corners = tuple(float(v) for v in data["obb_xyxyxyxy_abs"])
+                return {**data, "bbox_xyxy_abs": quad_enclosing_box(corners)}  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return data  # the field validators report the problem
+        return data
+
     @model_validator(mode="after")
     def _check(self) -> Annotation:
         box = self.bbox_xyxy_abs
+        quad = self.obb_xyxyxyxy_abs
         if self.kind == "classification":
-            if box is not None:
+            if box is not None or quad is not None:
                 raise ValueError("classification annotation must not have a box")
         else:
             if box is None:
-                raise ValueError("bbox annotation requires bbox_xyxy_abs")
+                raise ValueError(f"{self.kind} annotation requires bbox_xyxy_abs")
             x1, y1, x2, y2 = box
             if not (0 <= x1 < x2 and 0 <= y1 < y2):
                 raise ValueError("box must satisfy 0 <= x_min < x_max and 0 <= y_min < y_max")
+            if self.kind == "bbox" and quad is not None:
+                raise ValueError("only an obb annotation has obb_xyxyxyxy_abs")
+            if self.kind == "obb":
+                if quad is None:
+                    raise ValueError("obb annotation requires obb_xyxyxyxy_abs")
+                check_quad(quad)
+                if box != quad_enclosing_box(quad):
+                    raise ValueError(
+                        "bbox_xyxy_abs of an obb annotation must be the box enclosing its corners"
+                    )
         if self.score is not None and self.provenance == "human":
             raise ValueError("score must be null for human provenance")
         for value in self.attributes.values():
@@ -387,6 +426,17 @@ class Dataset:
         return self.manifest.categories
 
 
+def schema_version_for(annotations: Iterable[Annotation]) -> int:
+    """The table-schema generation a dataset is written in: the oldest that can hold its rows.
+
+    A dataset without oriented boxes stays in generation 1, so its files and its content version
+    are exactly what they were before oriented boxes existed (ADR-0011).
+    """
+    if any(a.obb_xyxyxyxy_abs is not None for a in annotations):
+        return OBB_SCHEMA_VERSION
+    return SCHEMA_VERSION
+
+
 def _duplicates(values: Sequence[object]) -> list[object]:
     return [v for v, n in Counter(values).items() if n > 1]
 
@@ -413,10 +463,18 @@ def validate_tables(
         problems += [f"duplicate {label} {v!r}" for v in _duplicates(values)]
     by_id = {i.image_id: i for i in images}
     category_ids = {c.id for c in categories}
-    expected: Kind = "bbox" if task == "detection" else "classification"
+    expected: frozenset[str] = (
+        frozenset({"bbox", "obb"}) if task == "detection" else frozenset({"classification"})
+    )
+    box_kinds = {a.kind for a in annotations} & {"bbox", "obb"}
+    if len(box_kinds) > 1:
+        problems.append(
+            "the dataset mixes axis-aligned (bbox) and oriented (obb) boxes; a detection dataset "
+            "holds one kind of box"
+        )
     for ann in annotations:
         ref = f"ann_id {ann.ann_id!r}"
-        if ann.kind != expected:
+        if ann.kind not in expected:
             problems.append(f"{ref} has kind {ann.kind!r} but dataset task is {task!r}")
         image = by_id.get(ann.image_id)
         if image is None:

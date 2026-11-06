@@ -799,6 +799,7 @@ class LabelStudioFormat:
             ("truncated", ann.truncated is not None),
             ("attributes", bool(ann.attributes)),
             ("provenance", ann.provenance == "proposal_accepted"),
+            ("obb_xyxyxyxy_abs", ann.obb_xyxyxyxy_abs is not None),
         ):
             if present:
                 count(dropped, f"annotations.{column}")

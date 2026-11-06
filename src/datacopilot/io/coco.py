@@ -396,6 +396,7 @@ class CocoFormat:
                 ann.provenance == "proposal_accepted"
                 or (ann.provenance == "model" and ann.score is None),
             ),
+            ("obb_xyxyxyxy_abs", ann.obb_xyxyxyxy_abs is not None),
         ):
             if present:
                 dropped[f"annotations.{column}"] += 1

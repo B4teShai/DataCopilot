@@ -1,6 +1,8 @@
 """Box conversions between absolute xyxy, xywh and normalised representations.
 
-All functions are pure and operate on 4-tuples of floats. Absolute coordinates are pixels.
+All functions are pure and operate on 4-tuples of floats (an oriented box: an 8-tuple of corners,
+see :data:`Quad`). Absolute coordinates are pixels. Vectorised oriented-box geometry (areas,
+rotated IoU) is in :mod:`datacopilot.core.obb`.
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 Box = tuple[float, float, float, float]
+Quad = tuple[float, float, float, float, float, float, float, float]
+"""An oriented box: four corners ``x1, y1, x2, y2, x3, y3, x4, y4`` in drawing order (ADR-0011)."""
 
 
 def _check_finite(box: Box) -> None:
@@ -130,3 +134,57 @@ def iou_xyxy(a: NDArray[float64], b: NDArray[float64]) -> NDArray[float64]:
         valid = (area_a[:, None] > 0) & (area_b[None, :] > 0) & (union > 0)
         out = np.where(valid, inter / union, 0.0)
     return np.where(np.isfinite(out), out, 0.0)
+
+
+def quad_enclosing_box(quad: Quad) -> Box:
+    """The axis-aligned box ``(x_min, y_min, x_max, y_max)`` that encloses the four corners.
+
+    Min and max are exact on floats, so the result is reproducible bit for bit.
+
+    Raises:
+        ValueError: not eight finite coordinates.
+    """
+    if len(quad) != 8:
+        raise ValueError("an oriented box has exactly eight coordinates")
+    if not all(math.isfinite(v) for v in quad):
+        raise ValueError("box coordinates must be finite")
+    xs, ys = quad[0::2], quad[1::2]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def quad_signed_area(quad: Quad) -> float:
+    """Shoelace area of the corners in their order: positive for one turning direction, negative
+    for the other (which one is "clockwise" depends on whether y points up or down)."""
+    xs, ys = quad[0::2], quad[1::2]
+    return 0.5 * sum(xs[i] * ys[(i + 1) % 4] - xs[(i + 1) % 4] * ys[i] for i in range(4))
+
+
+def check_quad(quad: Quad) -> None:
+    """Accept only a strictly convex quadrilateral: every corner turns the same way.
+
+    Equal turning signs at all four corners also rule out a self-intersecting ("bow-tie") order,
+    repeated corners and three collinear corners, and imply a positive area. Either drawing
+    direction is accepted; the order is kept as given.
+
+    Raises:
+        ValueError: a non-finite coordinate, or corners that do not form such a quadrilateral.
+    """
+    quad_enclosing_box(quad)  # length and finiteness
+    xs, ys = quad[0::2], quad[1::2]
+    turns = []
+    for i in range(4):
+        ax, ay = xs[(i + 1) % 4] - xs[i], ys[(i + 1) % 4] - ys[i]
+        bx, by = xs[(i + 2) % 4] - xs[(i + 1) % 4], ys[(i + 2) % 4] - ys[(i + 1) % 4]
+        turns.append(ax * by - ay * bx)
+    if not (all(t > 0 for t in turns) or all(t < 0 for t in turns)):
+        raise ValueError(
+            "the corners do not form a convex quadrilateral (crossed, repeated or collinear "
+            "corners)"
+        )
+
+
+def xyxy_to_quad(box: Box) -> Quad:
+    """The four corners of an axis-aligned box, clockwise on screen from the top-left corner."""
+    _check_finite(box)
+    x1, y1, x2, y2 = box
+    return (x1, y1, x2, y1, x2, y2, x1, y2)

@@ -29,6 +29,7 @@ datacopilot/convert.py
 datacopilot/core/__init__.py
 datacopilot/core/errors.py
 datacopilot/core/geometry.py
+datacopilot/core/obb.py
 datacopilot/core/patterns.py
 datacopilot/core/proposals.py
 datacopilot/core/schema.py
@@ -56,6 +57,7 @@ datacopilot/io/report.py
 datacopilot/io/voc.py
 datacopilot/io/xmlsafe.py
 datacopilot/io/yolo.py
+datacopilot/io/yolo_obb.py
 datacopilot/logging.py
 datacopilot/mcp_server.py
 datacopilot/models/__init__.py

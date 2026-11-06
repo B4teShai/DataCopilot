@@ -25,13 +25,13 @@ from datacopilot.audit.paths import resolve_image_path
 from datacopilot.core.errors import FormatError, ValidationError
 from datacopilot.core.patterns import check_pattern
 from datacopilot.core.schema import (
-    SCHEMA_VERSION,
     Annotation,
     Category,
     Dataset,
     DatasetManifest,
     Image,
     Task,
+    schema_version_for,
     validate_tables,
 )
 from datacopilot.core.version import models_version
@@ -236,9 +236,12 @@ def load_dataset(
     )
     manifest = DatasetManifest(
         version=models_version(
-            read.images, read.annotations, read.categories, schema_version=SCHEMA_VERSION
+            read.images,
+            read.annotations,
+            read.categories,
+            schema_version=schema_version_for(read.annotations),
         ),
-        schema_version=SCHEMA_VERSION,
+        schema_version=schema_version_for(read.annotations),
         name=read.name,
         task=read.task,
         categories=tuple(sorted(read.categories, key=lambda c: c.id)),

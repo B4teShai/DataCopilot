@@ -205,6 +205,7 @@ imagefolder read,write Apache-2.0 -
 label_studio read,write Apache-2.0 -
 voc read,write Apache-2.0 -
 yolo read,write Apache-2.0 -
+yolo_obb read,write Apache-2.0 -
 ```
 
 ## 6. The same from Python

@@ -35,8 +35,9 @@ Table `annotations.parquet`. Key: `ann_id`. Foreign keys: `image_id`, `category_
 | Field | Type | Meaning |
 |---|---|---|
 | `ann_id` | str | Unique; from the source id or generated. |
-| `kind` | `bbox`, `classification` | Polygons and masks are reserved. |
-| `bbox_xyxy_abs` | float[4]? | Pixel `x_min, y_min, x_max, y_max`. Null for classification. |
+| `kind` | `bbox`, `obb`, `classification` | `obb` is an oriented box. Polygons and masks are reserved. |
+| `bbox_xyxy_abs` | float[4]? | Pixel `x_min, y_min, x_max, y_max`. For `obb`, the box enclosing the corners. Null for classification. |
+| `obb_xyxyxyxy_abs` | float[8]? | `obb` only: the four corners in pixels, `x1, y1, ..., x4, y4`, in source order. Generation 2 ([ADR-0011](../adr/0011-oriented-boxes.md)). |
 | `score` | float? | Model confidence. Null for human labels. |
 | `is_crowd`, `occluded`, `truncated` | bool | Flags from COCO, VOC and CVAT. |
 | `attributes` | dict | Format attributes, such as CVAT attributes. |
@@ -48,7 +49,7 @@ Table `annotations.parquet`. Key: `ann_id`. Foreign keys: `image_id`, `category_
 File `manifest.json`, with an immutable copy under `versions/<version>/`. Key `version`.
 
 - `version` (32 hex) is the content hash of the three tables. CV-Pilot records it.
-- `schema_version` is the table schema generation, starting at 1.
+- `schema_version` is the table schema generation: 1, or 2 when the dataset has oriented boxes.
 - `name` and `task` (`detection` or `classification`; `task` decides which checks apply).
 - `categories` is a copy for readers without Parquet.
 - `lineage` lists parent versions, oldest first.
@@ -119,7 +120,8 @@ Tested in `tests/unit/test_schema_invariants.py`, `test_embed_cache.py`, `test_s
 2. `Image.width` and `Image.height` are positive.
 3. Every `Annotation.image_id` and `category_id` exists.
 4. A `bbox` has `0 <= x_min < x_max <= width` and `0 <= y_min < y_max <= height`. A `classification`
-   has no box.
+   has no box. An `obb` has four corners forming a strictly convex quadrilateral (either direction),
+   and `bbox_xyxy_abs` equal to the box enclosing them, so every corner is inside the image.
 5. `Annotation.score` is null when `provenance` is `human`.
 6. `Category.name` and `Category.id` are unique.
 7. Only `add_box` proposals exist, so a proposal never targets an existing annotation.
@@ -137,6 +139,7 @@ Tested in `tests/unit/test_schema_invariants.py`, `test_embed_cache.py`, `test_s
 14. An embedding has `dims` finite values and L2 norm 1. A shard that breaks this, whose digest differs
     from the manifest, or whose manifest fails its HMAC is ignored and counted, never used.
 15. `AuditRun.run_id` equals the `request_id` of the log records of that run.
+16. A detection dataset holds `bbox` rows or `obb` rows, never both.
 
 ## On-disk layout
 
@@ -169,8 +172,8 @@ dataset.dcp/
 
 **Content hash** (`core/version.py`):
 
-1. For each of the three tables, take every row as a mapping (drop `file_path` for images) and
-   serialise it as canonical JSON: sorted keys, no whitespace, UTF-8, shortest round-trip floats, no
+1. For each of the three tables, take every row as a mapping (drop `file_path` for images, and
+   `obb_xyxyxyxy_abs` for annotations where it is null) and serialise it as canonical JSON: sorted keys, no whitespace, UTF-8, shortest round-trip floats, no
    `NaN` or infinity.
 2. `table_hash = sha256("".join(sorted(sha256(row_json) for each row)))`.
 3. `version = sha256("dcp:<schema_version>\n<images_hash>\n<annotations_hash>\n<categories_hash>")[:32]`.
@@ -179,11 +182,16 @@ What changes the version: any field value in the three tables except `file_path`
 category rename, `schema_version`. What does not: row order, file locations, `created_at`, `name`,
 embeddings, audits, proposals, lineage.
 
-**Schema version.** It starts at 1. Adding a nullable column does not bump it; removing or retyping a
-column, or changing the hash procedure, does. A store with a higher `schema_version` than the installed
-package is refused (exit 1). There is no migration yet because 1 is the only generation.
+**Schema version.** It names the generation of the table schemas. Generation 1 is the original;
+generation 2 adds the annotation column `obb_xyxyxyxy_abs`. A dataset is written in the oldest
+generation that holds its rows, so a dataset without oriented boxes is generation 1, with the same
+files and version as before generation 2 existed. The reader takes the table schema from the
+manifest. A new column, a removed or retyped one, or a change to the hash procedure makes a new
+generation. A store with a higher `schema_version` than the installed package supports is refused
+(exit 1). There is no migration: each generation stays readable.
 
 **Promise.** For a given input, `manifest.version` is stable within a `schema_version`.
+`tests/golden/test_legacy_store.py` reads a generation-1 dataset written before generation 2.
 
 ## Format mapping and loss matrix
 
@@ -196,13 +204,16 @@ Rules shared by every reader and writer:
 - Absent files are never silent. A missing image skips the image and its annotations (`skipped`:
   `images.file_missing`, `annotations.of_missing_image`). A declared size that differs from the file
   header is counted and the header wins.
-- Detection formats (COCO, YOLO, VOC, CVAT XML) hold detection only. ImageFolder holds classification
+- Detection formats (COCO, YOLO, YOLO-OBB, VOC, CVAT XML) hold detection only. ImageFolder holds classification
   only. Label Studio holds either. Converting between the two groups is a `FormatError`.
 - Two images with identical bytes share one `image_id` and are rejected at ingest, naming both files.
 - COCO `bbox` and VOC `bndbox` are taken as given. YOLO coordinates are normalised and written with 7
   decimals. Boxes outside the image are an error, except YOLO overshoot of up to 0.001 pixel, which is
   snapped.
 - Only COCO holds `group_id`; other formats count it as dropped.
+- Only YOLO-OBB holds oriented boxes. Every other writer writes the enclosing box and counts
+  `annotations.obb_xyxyxyxy_abs`. YOLO-OBB writes an axis-aligned box as its four corners, losing
+  nothing (it reads back as `obb`). YOLO-OBB corners use the YOLO 7-decimal grid and 0.001-pixel snap.
 - YOLO, VOC and ImageFolder re-number category ids; a changed id is counted in `categories.id`.
 - `ingest --strict` fails if a reader dropped or skipped anything, before writing anything.
 
@@ -212,13 +223,14 @@ Dropped-value counts on the synthetic fixtures (`tests/fixtures/synth.py`), asse
 `tests/golden/test_roundtrip_matrix.py`. Rows are the source format, columns the target. Same-format
 conversions drop nothing, and ingest, export, ingest is a fixed point.
 
-| Source \ target | COCO | YOLO | VOC | CVAT XML | Label Studio |
-|---|---|---|---|---|---|
-| COCO | 0 | 31 | 31 | 31 | 29 |
-| YOLO | 0 | 0 | 0 | 0 | 3 |
-| VOC | 24 | 24 | 0 | 24 | 27 |
-| CVAT XML | 16 | 16 | 12 | 0 | 19 |
-| Label Studio | 20 | 20 | 20 | 20 | 0 |
+| Source \ target | COCO | YOLO | YOLO-OBB | VOC | CVAT XML | Label Studio |
+|---|---|---|---|---|---|---|
+| COCO | 0 | 31 | 31 | 31 | 31 | 29 |
+| YOLO | 0 | 0 | 0 | 0 | 0 | 3 |
+| YOLO-OBB | 4 | 4 | 0 | 6 | 5 | 7 |
+| VOC | 24 | 24 | 24 | 0 | 24 | 27 |
+| CVAT XML | 16 | 16 | 16 | 12 | 0 | 19 |
+| Label Studio | 20 | 20 | 20 | 20 | 20 | 0 |
 
 The counts come from these columns:
 
@@ -230,6 +242,9 @@ The counts come from these columns:
   `categories.attributes`, and the source `id`.
 - **Label Studio:** the source keys `from_name`, `id`, `to_name` and `annotation`.
 - **YOLO:** nothing, except `categories.id` into Label Studio.
+- **YOLO-OBB** (`build_yolo_obb`, four oriented boxes, one a prediction): `annotations.obb_xyxyxyxy_abs`
+  for each box; VOC also drops the prediction's `score` and `provenance`, CVAT XML its `score`, and
+  Label Studio renumbers `categories.id`.
 - Label Studio as a target adds `categories.id` 3 for VOC and CVAT XML sources.
 
 ImageFolder to ImageFolder drops nothing. ImageFolder to or from COCO, YOLO, VOC and CVAT XML is

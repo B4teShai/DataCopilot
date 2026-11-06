@@ -17,7 +17,7 @@ from fixtures.synth import png_bytes
 
 from datacopilot.core.errors import ModelError, ValidationError
 from datacopilot.core.proposals import ProposalSet
-from datacopilot.core.schema import Category, Dataset, Image
+from datacopilot.core.schema import Annotation, Category, Dataset, Image
 from datacopilot.embed.protocol import ImageDecodeError
 from datacopilot.proposals import run as run_module
 from datacopilot.proposals.run import propose
@@ -211,6 +211,20 @@ def test_a_classification_dataset_cannot_be_proposed_for(tmp_path: Path) -> None
     )
     with pytest.raises(ValidationError, match="detection"):
         run(classification, tmp_path)
+
+
+def test_a_dataset_with_oriented_boxes_cannot_be_proposed_for(tmp_path: Path) -> None:
+    ds = two_images(tmp_path)
+    image = ds.images[0]
+    turned = Annotation(
+        ann_id="o",
+        image_id=image.image_id,
+        category_id=ds.categories[0].id,
+        kind="obb",
+        obb_xyxyxyxy_abs=(4.0, 2.0, 10.0, 4.0, 8.0, 10.0, 2.0, 8.0),
+    )
+    with pytest.raises(ValidationError, match="oriented boxes"):
+        run(Dataset(ds.manifest, ds.images, (turned,), ds.root), tmp_path)
 
 
 # ----------------------------------------------------------------------------- hostile model output

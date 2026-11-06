@@ -1,16 +1,41 @@
 # Formats
 
-`datacopilot formats` lists the six formats. Each can read and write. A detection format holds
+`datacopilot formats` lists the seven formats. Each can read and write. A detection format holds
 detection datasets only, ImageFolder holds classification only, and Label Studio holds either.
 
 | Format | Layout read | Layout written | Notes |
 |---|---|---|---|
 | `coco` | `annotations.json`, `annotations/*.json` (split from `train`, `val` or `test` in the file name) or one file | `annotations.json` or `annotations/instances_<split>.json`, plus `images/` | Boxes are `xywh`. Keeps `iscrowd`, `score`, `group_id` and every other key in `source`. |
 | `yolo` | `data.yaml`, `images/<split>/`, `labels/<split>/` | the same | Boxes are normalised, written with 7 decimals. |
+| `yolo_obb` | as `yolo`; lines `class x1 y1 x2 y2 x3 y3 x4 y4 [conf]` | the same | Oriented boxes (Ultralytics `yolo obb`). Corners keep their order. |
 | `voc` | `Annotations/*.xml`, `JPEGImages/`, `ImageSets/Main/<split>.txt`, optional `labelmap.txt` | the same | Keeps `difficult`, `truncated`, `occluded` and other elements. |
 | `cvat_xml` | `annotations.xml`, `annotations/*.xml` (split from `<subset>` or the file name) or one file | `annotations.xml` or `annotations/<split>.xml`, plus `images/` | CVAT for images 1.1. |
 | `label_studio` | `annotations.json`, `annotations/*.json` or one file (the "JSON" export) | `annotations.json` or `annotations/<split>.json`, plus `images/` | Detection and classification. |
 | `imagefolder` | `<class>/<image>` or `<split>/<class>/<image>` | the same | Classification; class ids follow the sorted class names. |
+
+## YOLO-OBB
+
+The label format of Ultralytics `yolo obb`: one line per object, the class and the four corners
+normalised to 0..1, and an optional confidence (which makes the row a model prediction). The
+layout and `data.yaml` are those of `yolo`.
+
+- Each line becomes an oriented box (`kind` `obb`): the four corners in pixels, in the order of the
+  file, plus the axis-aligned box that encloses them. Ingest, export, ingest gives the same label
+  text and the same version.
+- Corners are rounded to 7 decimals like YOLO boxes. A corner up to 0.001 pixel outside the image is
+  snapped onto the edge; further out is an error naming the file and line.
+- The corners must form a convex quadrilateral. A crossed ("bow-tie") order, repeated corners or
+  three corners on a line are an error naming the file and line; fix the label and ingest again.
+- A five-field line is refused with a pointer to `--format yolo`, and the `yolo` reader points a
+  nine-field line at `--format yolo_obb`.
+- A dataset holds axis-aligned or oriented boxes, never both. Writing an axis-aligned dataset as
+  `yolo_obb` writes each box as its four corners, loses nothing, and reads back as oriented boxes.
+- Every other format has no place for the corners: the export writes the enclosing box and counts
+  `annotations.obb_xyxyxyxy_abs` for every oriented box, so `--strict` refuses it.
+- `propose` refuses a dataset with oriented boxes (the proposers return axis-aligned boxes).
+
+The audit measures an oriented box by its corners: see [Audit in CI](audit-ci.md#checks). Why it
+works this way: [ADR-0011](../adr/0011-oriented-boxes.md).
 
 ## CVAT for images 1.1
 
@@ -18,7 +43,7 @@ Read: images, boxes, labels, attributes, `occluded`, the box source (`manual` is
 model) and the task subset as the split.
 
 Counted, never dropped silently: polygons, polylines, points, ellipses, masks, skeletons, cuboids,
-tags, rotated boxes and every `<track>`. Export metadata such as ids, dates and owner is neither
+tags, rotated boxes (not yet read as oriented boxes) and every `<track>`. Export metadata such as ids, dates and owner is neither
 kept nor counted.
 
 ## Label Studio JSON

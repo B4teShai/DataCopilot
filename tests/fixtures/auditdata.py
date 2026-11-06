@@ -13,12 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from datacopilot.core.schema import (
-    SCHEMA_VERSION,
     Annotation,
     Category,
     Dataset,
     DatasetManifest,
     Image,
+    schema_version_for,
     validate_tables,
 )
 from datacopilot.core.version import models_version
@@ -103,8 +103,8 @@ def dataset(
     if validate:
         validate_tables(images, anns, cats, task="detection")
     manifest = DatasetManifest(
-        version=models_version(images, anns, cats, schema_version=SCHEMA_VERSION),
-        schema_version=SCHEMA_VERSION,
+        version=models_version(images, anns, cats, schema_version=schema_version_for(anns)),
+        schema_version=schema_version_for(anns),
         name="demo",
         task="detection",
         categories=tuple(sorted(cats, key=lambda c: c.id)),

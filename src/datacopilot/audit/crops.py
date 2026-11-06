@@ -1,8 +1,10 @@
 """Box-crop embeddings for ``label_noise``: one vector per box instead of one per photo.
 
-**Which boxes.** Every ``bbox`` annotation whose shorter side is at least ``min_side`` pixels is
-cropped; per image at most ``per_image`` boxes are, the largest first (ties by ``ann_id``), and the
-rest are counted (``too_small``, ``over_image_cap``). The crop is the box grown by ``padding`` of
+**Which boxes.** Every box annotation whose shorter side is at least ``min_side`` pixels is
+cropped (an oriented box by its enclosing axis-aligned box, ``bbox_xyxy_abs``: the crop is not
+rotated and holds more background than the object, ADR-0011); per image at most ``per_image``
+boxes are, the largest first (ties by ``ann_id``), and the rest are counted (``too_small``,
+``over_image_cap``). The crop is the box grown by ``padding`` of
 its width and height on each side (some context helps a model recognise the object), clamped to
 the image and rounded outwards to whole pixels. A crop whose long side exceeds ``MAX_CROP_SIDE`` is
 downscaled to it (bicubic) before it is encoded, so one crop is a small, bounded PNG whatever the

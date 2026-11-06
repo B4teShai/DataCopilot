@@ -3,7 +3,9 @@
 Procedure (docs/architecture/03-data-model.md, "Versioning and compatibility"):
 
 1. Every row becomes canonical JSON (sorted keys, no whitespace, UTF-8, shortest round-trip
-   floats, no NaN or infinity); ``images`` rows drop ``file_path``.
+   floats, no NaN or infinity); ``images`` rows drop ``file_path``; ``annotations`` rows drop
+   ``obb_xyxyxyxy_abs`` when it is null, so a dataset without oriented boxes hashes exactly as it
+   did before that column existed (ADR-0011).
 2. ``table_hash = sha256("".join(sorted(sha256(row_json) for each row)))``.
 3. ``version = sha256("dcp:<schema_version>\\n<images>\\n<annotations>\\n<categories>")[:32]``.
 """
@@ -18,6 +20,8 @@ from datacopilot.core.errors import ValidationError
 from datacopilot.core.schema import Annotation, Category, DatasetManifest, Image
 
 _LOCATION_COLUMNS = frozenset({"file_path"})
+_OMIT_WHEN_NULL = frozenset({"obb_xyxyxyxy_abs"})
+"""Annotation columns added after generation 1: absent from the hashed row while null."""
 
 
 def _reject(value: object) -> object:
@@ -48,11 +52,24 @@ def _sha256(text: str) -> str:
 
 
 def table_hash(
-    rows: Iterable[Mapping[str, object]], *, exclude: frozenset[str] = frozenset()
+    rows: Iterable[Mapping[str, object]],
+    *,
+    exclude: frozenset[str] = frozenset(),
+    omit_when_null: frozenset[str] = frozenset(),
 ) -> str:
-    """Hash a table independently of row order; ``exclude`` columns are ignored."""
+    """Hash a table independently of row order; ``exclude`` columns are ignored and
+    ``omit_when_null`` columns are ignored in the rows where they are null."""
     hashes = sorted(
-        _sha256(canonical_json({k: v for k, v in row.items() if k not in exclude})) for row in rows
+        _sha256(
+            canonical_json(
+                {
+                    k: v
+                    for k, v in row.items()
+                    if k not in exclude and not (v is None and k in omit_when_null)
+                }
+            )
+        )
+        for row in rows
     )
     return _sha256("".join(hashes))
 
@@ -67,7 +84,7 @@ def dataset_version(
     """32-hex content hash of the three tables; ``file_path`` is excluded."""
     parts = (
         table_hash(images, exclude=_LOCATION_COLUMNS),
-        table_hash(annotations),
+        table_hash(annotations, omit_when_null=_OMIT_WHEN_NULL),
         table_hash(categories),
     )
     return _sha256(f"dcp:{schema_version}\n" + "\n".join(parts))[:32]

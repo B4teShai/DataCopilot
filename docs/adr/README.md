@@ -12,5 +12,6 @@
 | [0008](0008-propose-review-apply.md) | Propose, review, apply |
 | [0009](0009-label-noise-check.md) | The label_noise check over existing embeddings |
 | [0010](0010-split-and-box-crops.md) | Group-aware split, and box crops for label_noise |
+| [0011](0011-oriented-boxes.md) | Oriented bounding boxes |
 
 New decisions start from the [template](0000-template.md).

@@ -11,13 +11,13 @@ import pytest
 import structlog
 
 from datacopilot.core.schema import (
-    SCHEMA_VERSION,
     Annotation,
     Category,
     Dataset,
     DatasetManifest,
     Image,
     Task,
+    schema_version_for,
     validate_tables,
 )
 from datacopilot.core.version import models_version
@@ -106,8 +106,10 @@ def dataset_from(
 ) -> Dataset:
     validate_tables(images, annotations, categories, task=task)
     manifest = DatasetManifest(
-        version=models_version(images, annotations, categories, schema_version=SCHEMA_VERSION),
-        schema_version=SCHEMA_VERSION,
+        version=models_version(
+            images, annotations, categories, schema_version=schema_version_for(annotations)
+        ),
+        schema_version=schema_version_for(annotations),
         name=name,
         task=task,
         categories=tuple(sorted(categories, key=lambda c: c.id)),

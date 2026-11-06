@@ -636,6 +636,7 @@ class CvatFormat:
             ("truncated", ann.truncated is not None),
             ("score", ann.score is not None),
             ("provenance", ann.provenance == "proposal_accepted"),
+            ("obb_xyxyxyxy_abs", ann.obb_xyxyxyxy_abs is not None),
         ):
             if present:
                 dropped[f"annotations.{column}"] += 1
