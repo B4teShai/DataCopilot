@@ -15,5 +15,6 @@ run yet.
 | Propose missing boxes | Experimental | Grounding DINO proposes `add_box` only; precision is low. See [Propose, review, apply](guide/proposals.md). |
 | Review and apply | Built | CVAT round trip, then a new version with lineage. |
 | Python API and `doctor` | Built | `load`, `audit`, `export`, `split`, `propose`, `apply`; `doctor` checks the install. |
+| MCP server | Built | `datacopilot mcp` (extra `mcp`): dataset info, stored and fresh audit summaries; dataset-creating tools only when enabled. See [MCP server](guide/mcp.md). |
 | More proposal kinds | Planned | Change a class, delete a box, refine a box; consensus between models. |
 | More models and tools | Planned | SAM 3 and Qwen3-VL proposers, FiftyOne review, a Cleanlab label-noise backend. |

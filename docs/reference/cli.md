@@ -22,6 +22,7 @@ ran and failed (unreadable or invalid input, a gate that matched, a lossy `--str
 | [`export`](#datacopilot-export) | Write a dataset.dcp in another format and print the output directory. |
 | [`formats`](#datacopilot-formats) | List registered formats as name, capabilities, license and extra (tab separated). |
 | [`ingest`](#datacopilot-ingest) | Convert a dataset into a versioned dataset.dcp directory and print its version. |
+| [`mcp`](#datacopilot-mcp) | Serve the dataset tools to a coding agent over MCP on standard input/output. |
 | [`propose`](#datacopilot-propose) | Find boxes a dataset is probably missing and store them as a proposal set. |
 | [`review export`](#datacopilot-review-export) | Write the proposals as a separate layer of a CVAT dataset, next to the dataset's own boxes. |
 | [`review import`](#datacopilot-review-import) | Read the decisions of a reviewed CVAT export into a new, reviewed proposal set. |
@@ -197,6 +198,20 @@ datacopilot ingest [OPTIONS] PATH
 | `--name` | `TEXT` |  | Dataset name (default: input name). |
 | `--strict` |  | off | Fail (nothing is written) if the reader skipped or dropped anything. |
 | `--keep-task-data` |  | off | label_studio only: also keep the task data fields other than `image` (they are dropped and counted by default because they can hold personal data or URLs). |
+
+## datacopilot mcp
+
+Serve the dataset tools to a coding agent over MCP on standard input/output.
+
+Needs the extra datacopilot[mcp]. Read-only unless DATACOPILOT_MCP_ALLOW_WRITE=1, which adds tools
+that create new dataset versions (never change an existing one). Every path must lie under
+DATACOPILOT_MCP_ROOTS (os.pathsep-separated; default: the working directory).
+
+Exit codes: 0 the client disconnected; 2 the extra is not installed.
+
+```text
+datacopilot mcp [OPTIONS]
+```
 
 ## datacopilot propose
 

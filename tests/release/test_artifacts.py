@@ -158,7 +158,7 @@ def test_core_requirements_are_exactly_the_documented_set_and_not_heavy(wheel: P
     assert unconditional == CORE
     assert not [n for n in unconditional if HEAVY.match(n)]
     extras = [r for r in meta.get_all("Requires-Dist") if "extra ==" in r]
-    assert extras and all(re.search(r"""extra == ['"](embed|vlm)['"]""", r) for r in extras)
+    assert extras and all(re.search(r"""extra == ['"](embed|vlm|mcp)['"]""", r) for r in extras)
     assert {"embed", "vlm"} <= set(meta.get_all("Provides-Extra"))
 
 

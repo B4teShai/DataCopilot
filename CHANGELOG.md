@@ -6,6 +6,13 @@ once a release is tagged.
 
 ## Unreleased
 
+### Added
+
+- `datacopilot mcp`: an MCP server over stdio (extra `mcp`) with read-only tools (`list_formats`,
+  `dataset_info`, `audit_summary`, `run_audit`) and, only with `DATACOPILOT_MCP_ALLOW_WRITE=1`, tools that
+  create new versions (`ingest`, `propose`, `apply_proposals`, `split`). Paths are confined to
+  `DATACOPILOT_MCP_ROOTS`; results are bounded summaries.
+
 ### Changed (documentation)
 
 - Documentation rewritten for a reader who has never heard of the tool: a glossary at the top of the

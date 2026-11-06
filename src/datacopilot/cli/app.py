@@ -1030,6 +1030,30 @@ def split(
 
 
 @app.command()
+def mcp() -> None:
+    """Serve the dataset tools to a coding agent over MCP on standard input/output.
+
+    Needs the extra datacopilot[mcp]. Read-only unless DATACOPILOT_MCP_ALLOW_WRITE=1, which adds
+    tools that create new dataset versions (never change an existing one). Every path must lie
+    under DATACOPILOT_MCP_ROOTS (os.pathsep-separated; default: the working directory).
+
+    Exit codes: 0 the client disconnected; 2 the extra is not installed.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("mcp") is None:
+        typer.echo(
+            'error: the MCP server needs the extra "datacopilot[mcp]" (uv sync --extra mcp)',
+            err=True,
+        )
+        raise typer.Exit(2)
+    from datacopilot.mcp_server import main as serve
+
+    clear_request_context()  # each tool call binds its own request id
+    serve()
+
+
+@app.command()
 def formats() -> None:
     """List registered formats as name, capabilities, license and extra (tab separated)."""
     from datacopilot.io import registry

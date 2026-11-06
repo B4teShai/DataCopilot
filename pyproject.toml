@@ -74,6 +74,11 @@ vlm = [
   "torch>=2.14",
 ]
 
+# MCP server (`datacopilot mcp`): the official MIT-licensed SDK and its web stack; never core
+mcp = [
+  "mcp>=2.3,<3",
+]
+
 [project.entry-points."datacopilot.formats"]
 coco = "datacopilot.io.coco:plugin"
 yolo = "datacopilot.io.yolo:plugin"
@@ -132,6 +137,7 @@ dev = [
     "hypothesis>=6.100",
     "pillow>=12.3",
     "pyyaml>=6",
+    "mcp>=2.3,<3",  # tests/unit/test_mcp_server.py
 ]
 # documentation site (CI job `docs`); never part of the package or its extras
 docs = [
