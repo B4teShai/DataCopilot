@@ -50,6 +50,7 @@ nav:
       - Label noise: guide/label-noise.md
       - Propose, review, apply: guide/proposals.md
       - Python API: guide/python-api.md
+      - MCP server: guide/mcp.md
       - Trust model: guide/trust-model.md
   - Reference:
       - CLI: reference/cli.md
