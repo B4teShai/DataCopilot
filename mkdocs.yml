@@ -75,6 +75,7 @@ nav:
       - adr/0008-propose-review-apply.md
       - adr/0009-label-noise-check.md
       - adr/0010-split-and-box-crops.md
+      - adr/0011-oriented-boxes.md
   - Engineering:
       - engineering/README.md
       - Standards: engineering/standards.md
