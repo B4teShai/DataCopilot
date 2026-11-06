@@ -181,8 +181,8 @@ class YoloFormat:
         """Refuse a line whose field count is not this format's."""
         if len(tokens) in (9, 10):
             raise FormatError(
-                f"{where}: an oriented-box line (class and four corners); read it with the "
-                "yolo_obb format"
+                f"{where}: four corner points: an oriented box (read it with the yolo_obb "
+                "format) or a segmentation polygon (not supported)"
             )
         if len(tokens) > 6:
             raise FormatError(f"{where}: polygon/segmentation labels are not supported")
