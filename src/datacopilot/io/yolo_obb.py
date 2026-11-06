@@ -1,4 +1,4 @@
-"""YOLO-OBB reader and writer: the Ultralytics oriented-box label format (ADR-0011).
+"""YOLO-OBB reader and writer: the YOLO oriented-box label format (ADR-0011).
 
 Layout as ``yolo`` (``data.yaml``, ``images/[split/]``, ``labels/[split/]<name>.txt``); each label
 line is ``class x1 y1 x2 y2 x3 y3 x4 y4 [conf]``, the four corners normalised to 0..1.

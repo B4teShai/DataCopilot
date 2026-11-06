@@ -131,7 +131,7 @@ OBB_IMAGES: list[tuple[str, int, int, str, list[str]]] = [
 
 
 def build_yolo_obb(root: Path) -> Path:
-    """Ultralytics YOLO-OBB layout: data.yaml, images/<split>/x.png, labels/<split>/x.txt with
+    """YOLO-OBB layout: data.yaml, images/<split>/x.png, labels/<split>/x.txt with
     ``class x1 y1 x2 y2 x3 y3 x4 y4 [conf]``."""
     for n, (name, w, h, split, lines) in enumerate(OBB_IMAGES):
         write_png(root / "images" / split / name, w, h, 40 + n)

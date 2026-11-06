@@ -20,7 +20,7 @@ Oriented boxes (``kind == "obb"``, ADR-0011): ``out_of_bounds`` means a corner o
 (the enclosing box is tested) and ``zero_area`` a degenerate quadrilateral (crossed, collinear or
 repeated corners); ``tiny_box`` and ``extreme_aspect`` use the sides of the box's minimum-area
 rectangle and its own area, not the enclosing box; ``obb_not_rectangular`` (WARN) is a box whose
-area is below ``min_obb_rectangularity`` of that rectangle (training code such as Ultralytics
+area is below ``min_obb_rectangularity`` of that rectangle (YOLO-OBB training code
 replaces the box by the rectangle); duplicates and conflicts use the rotated IoU
 (``core.obb.iou_obb``). Payloads of oriented boxes carry the corners under ``obb``.
 """

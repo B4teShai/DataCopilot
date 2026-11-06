@@ -68,7 +68,7 @@ def min_area_rects(quads: F64) -> tuple[F64, F64, F64]:
     For a convex polygon that rectangle has one side on a polygon edge, so the four edge
     directions are tried and the smallest area wins. Returns ``(long_side, short_side, area)``,
     each ``(n,)``. For a true rectangle these are its own sides and area; the ratio of a box's
-    area to this area says how far it is from a rectangle (training code such as Ultralytics
+    area to this area says how far it is from a rectangle (YOLO-OBB training code
     replaces every quadrilateral by this rectangle).
     """
     pts = _points(as_quads(quads))
